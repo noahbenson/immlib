@@ -1,0 +1,42 @@
+[project]
+name = "immlib"
+version = "1.0"
+description = """A library of utilites for immutable scientific data."""
+authors = [
+    {name="Noah C. Benson", email="nben@uw.edu"}
+]
+license = {"text"="MIT"}
+readme = "README.md"
+requires-python = ">=3.7"
+dynamic = ["dependencies"]
+
+keywords = ["persistent", "immutable", "functional", "scientific", "workflow"]
+
+classifiers = [
+    'Intended Audience :: Science/Research',
+    'Intended Audience :: Developers',
+    'License :: OSI Approved :: MIT License',
+    'Programming Language :: Python :: 3',
+    'Programming Language :: Python :: 3.7',
+    'Programming Language :: Python :: 3.8',
+    'Programming Language :: Python :: 3.9',
+    'Programming Language :: Python :: 3.10',
+    'Programming Language :: Python :: 3.11',
+    'Topic :: Software Development',
+    'Topic :: Software Development :: Libraries',
+    'Topic :: Software Development :: Libraries :: Python Modules',
+    'Topic :: Scientific/Engineering',
+    'Topic :: Scientific/Engineering :: Information Analysis',
+    'Operating System :: Microsoft :: Windows',
+    'Operating System :: POSIX',
+    'Operating System :: Unix',
+    'Operating System :: MacOS'
+]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[project.urls]
+homepage = "https://github.com/noahbenson/immlib"
+documentation = "https://github.com/noahbenson/immlib"
+repository = "https://github.com/noahbenson/immlib"
