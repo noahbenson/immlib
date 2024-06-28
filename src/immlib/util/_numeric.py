@@ -140,6 +140,8 @@ def _is_numtype(obj, numtype, dtypes):
         return any(map(partial(np.issubdtype, obj.numpy().dtype), dtypes))
     else:
         return False
+from numbers import Number
+_number_dtypes = (np.number, np.bool_)
 @docwrap
 def is_numberdata(obj):
     """Returns `True` if an object is a Python number, otherwise `False`.
@@ -258,7 +260,7 @@ def is_complexdata(obj):
     boolean
         `True` if `obj` is an instance of `Complex`, otherwise `False`.
     """
-    return _is_numtype(Complex, _complex_dtypes, obj)
+    return _is_numtype(obj, Complex, _complex_dtypes)
 
 
 # Numerical Collection Suport ##################################################
@@ -443,6 +445,14 @@ _sparse_types = {
     'dia': sps.dia_array,
     'dok': sps.dok_array,
     'lil': sps.lil_array}
+_sparse_base_types = {
+    'bsr': sps.bsr_matrix,
+    'coo': sps.coo_matrix,
+    'csc': sps.csc_matrix,
+    'csr': sps.csr_matrix,
+    'dia': sps.dia_matrix,
+    'dok': sps.dok_matrix,
+    'lil': sps.lil_matrix}
 @docwrap
 def is_array(obj,
              dtype=None, shape=None, ndim=None, numel=None, frozen=None,
@@ -559,7 +569,8 @@ def is_array(obj,
         mtype = _sparse_types.get(sparse, None)
         if mtype is None:
             raise ValueErroor(f"invalid sparse matrix type: {sparse}")
-        if not isinstance(obj, mtype): return False
+        btype = _sparse_base_types.get(sparse, None)
+        if not isinstance(obj, btype): return False
     else:
         raise ValueErroor(f"invalid sparse parameter: {sparse}")
     # Check that the object is read-only
@@ -668,7 +679,8 @@ def to_array(obj,
     ValueError
         If invalid parameter values are given or if the parameters conflict.
     """
-    if ureg is Ellipsis: from immlib import units as ureg
+    if ureg is Ellipsis:
+        from immlib import units as ureg
     # If obj is a quantity, we handle things differently.
     if isinstance(obj, pint.Quantity):
         q = obj
@@ -678,7 +690,8 @@ def to_array(obj,
             ureg = unitregistry(q)
     else:
         q = None
-        if ureg is None: from immlib import units as ureg
+        if ureg is None:
+            from immlib import units as ureg
     # Translate obj depending on whether it's a pytorch array / scipy sparse
     # matrix.  We need to think about whether the output array is being
     # requested in sparse format. If so, we handle the conversion differently.
@@ -699,7 +712,7 @@ def to_array(obj,
         if mtype is None:
             raise ValueError(f"unrecognized scipy sparse matrix name: {sparse}")
         if obj_is_sparse:
-            # We're creating a scipy sparse output from a sparse output.
+            # We're creating a scipy sparse output from a sparse input.
             if obj_is_tensor:
                 # We're creating a scipy sparse output from a sparse tensor.
                 arr = obj.coalesce()
@@ -709,7 +722,7 @@ def to_array(obj,
                 vv = np.array(uu, dtype=dtype, order=order, copy=copy)
                 if uu is not vv: newarr = True
                 arr = mtype((vv, tuple(ii)), shape=arr.shape)
-            else:
+            elif copy:
                 # We're creating a scipy sparse output from another scipy sparse
                 # matrix.
                 (rr,cc,uu) = sps.find(obj)
@@ -719,6 +732,8 @@ def to_array(obj,
                 else:
                     arr = mtype((vv, (rr,cc)), shape=obj.shape)
                     if uu is not vv: newarr = True
+            else:
+                arr = obj
         else:
             # We're creating a scipy sparse matrix from a dense matrix.
             if obj_is_tensor: arr = obj.detach().numpy()

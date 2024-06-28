@@ -95,7 +95,7 @@ def docwrap(f=None, indent=None, proc=docproc):
             indent=indent,
             proc=proc)
     if isinstance(f, str):
-        return lambda fn: _docwrap(fn, f, indent=indent, proc=proc)
+        return lambda fn: _docwrap_helper(fn, f, indent=indent, proc=proc)
     else:
         return _docwrap_helper(
             f, f.__module__ + '.' + f.__name__,

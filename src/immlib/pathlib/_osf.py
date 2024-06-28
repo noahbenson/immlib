@@ -271,6 +271,7 @@ class OSFClient(Client):
         self.root_path = root
         self.mkdir_mode = mkdir_mode
         self.pagesize = pagesize
+        self.file_cache_mode = file_cache_mode
         # Get the contents of the OSF repository (lazily).
         contents = osf_contents(
             project, 
@@ -344,6 +345,12 @@ class OSFClient(Client):
         if not isinstance(cloud_path, OSFPath):
             raise TypeError("cannot query path that is not an OSFPath")
         return self._extract_path(self.root_contents, cloud_path)
+    def _get_public_url(self, cloudpath):
+        raise TypeError(
+            f"{type(self)} does not support _generate_public_url")
+    def _generate_presigned_url(self, cloudpath, expire_seconds=60*60):
+        raise TypeError(
+            f"{type(self)} does not support _generate_presigned_url")
 
 
 # OSFPath ######################################################################
