@@ -81,7 +81,7 @@ jobs:
       # Run the actual tests.
       - name: Run Tests
         run: |
-          pip install -e .
+          pip install .
           cd ~
           if [ "$PYTHON" = "3.11" ] && [ "$OS" = "ubuntu-latest" ]
           then pip install coverage
