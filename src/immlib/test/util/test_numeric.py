@@ -651,15 +651,18 @@ class TestUtilNumeric(TestCase):
     def test_is_dense(self):
         from immlib import is_dense
         import torch, numpy as np
-        from scipy.sparse import csr_matrix
+        from scipy.sparse import csr_array
         # is_dense returns True for any dense array and False for anything
         # other than a dense array.
-        sp_a = csr_matrix(([0.5, 1.0], ([0,1], [3,2])), shape=(5,5))
-        sp_t = torch.sparse_coo_tensor(torch.tensor([[0,1],[3,2]]),
-                                       torch.tensor([0.5, 1]),
-                                       (5,5))
+        sp_a = csr_array(([0.5, 1.0], ([0,1], [3,2])), shape=(5,5))
+        sp_t = torch.sparse_coo_tensor(
+            torch.tensor([[0,1],[3,2]]),
+            torch.tensor([0.5, 1]),
+            (5,5))
         self.assertTrue(is_dense(sp_a.todense()))
-        self.assertTrue(is_dense(sp_t.to_dense()))
+        x = sp_t.to_dense()
+        q = is_dense(sp_t.to_dense())
+        self.assertTrue(q)
         self.assertFalse(is_dense(sp_a))
         self.assertFalse(is_dense(sp_t))
     def test_to_dense(self):
