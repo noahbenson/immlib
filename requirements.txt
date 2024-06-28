@@ -1,4 +1,4 @@
-pcollections >= 0.2.6
+pcollections >= 0.2.7
 numpy >= 1.23.0
 scipy >= 1.7.0
 pint >= 0.18.0
