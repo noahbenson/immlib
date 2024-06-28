@@ -3,8 +3,7 @@ name = "immlib"
 version = "1.0.0.dev1"
 description = """A library of utilites for immutable scientific data."""
 authors = [
-    {name="Noah C. Benson", email="nben@uw.edu"}
-]
+    {name="Noah C. Benson", email="nben@uw.edu"}]
 license = {"text"="MIT"}
 readme = "README.md"
 requires-python = ">=3.7"
@@ -40,3 +39,7 @@ dependencies = {file = ["requirements.txt"]}
 homepage = "https://github.com/noahbenson/immlib"
 documentation = "https://github.com/noahbenson/immlib"
 repository = "https://github.com/noahbenson/immlib"
+
+[build-system]
+requires = ["setuptools >= 61.0"]
+build-backend = "setuptools.build_meta"
