@@ -1,0 +1,47 @@
+################################################################################
+# deploy.yml
+# GitHub Actions Workflow for deploying immlib to PyPI.
+# by Noah C. Benson
+
+name: Deploy to PyPI
+
+# We only run this manually.
+on:
+  workflow_dispatch:
+
+# This just deploys the source distribution after running tests on ubuntu.
+jobs:
+  deploy-source:
+    name: Source
+    runs-on: ubuntu-latest
+    env:
+      TWINE_USERNAME: __token__
+      TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+      TWINE_DEST: pypi
+    steps:
+      # Check out the repository (goes to $GITHUB_WORKSPACE)
+      - name: Checkout
+        uses: actions/checkout@v4
+      # Setup the Python Environment.
+      - name: Setup Python Environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3
+          architecture: x64
+      # We need to install twine also for uploading to PyPI.
+      - name: Install Twine
+        run: |
+          pip install --upgrade twine
+          pip install --upgrade build
+      # Make sure the tests pass before we upload anything.
+      - name: Run Tests
+        run: |
+          pip install -e .
+          cd ~
+          python -m unittest immlib.test
+      # Go ahead and build and deploy.
+      - name: Build and Upload Source Distribution
+        run: |
+          [ -d ./dist ] && rm ./dist/*
+          python -m build
+          twine upload -r $TWINE_DEST dist/immlib-*.tar.gz
