@@ -719,14 +719,20 @@ def to_array(obj,
                 if obj is not arr: newarr = True
                 ii = arr.indices().numpy().detach()
                 uu = arr.values().numpy().detach()
-                vv = np.array(uu, dtype=dtype, order=order, copy=copy)
+                if copy:
+                    vv = np.array(uu, dtype=dtype, order=order)
+                else:
+                    vv = np.asarray(uu, dtype=dtype, order=order)
                 if uu is not vv: newarr = True
                 arr = mtype((vv, tuple(ii)), shape=arr.shape)
             elif copy:
                 # We're creating a scipy sparse output from another scipy sparse
                 # matrix.
                 (rr,cc,uu) = sps.find(obj)
-                vv = np.array(uu, dtype=dtype, order=order, copy=copy)
+                if copy:
+                    vv = np.array(uu, dtype=dtype, order=order)
+                else:
+                    vv = np.asarray(uu, dtype=dtype, order=order)
                 if mtype is type(obj) and uu is vv:
                     arr = obj
                 else:
@@ -771,7 +777,10 @@ def to_array(obj,
                 arr = obj
             # Whether we call array() or asarray() depends on the copy
             # parameter.
-            tmp = np.array(arr, dtype=dtype, order=order, copy=copy)
+            if copy:
+                tmp = np.array(arr, dtype=dtype, order=order)
+            else:
+                tmp = np.asarray(arr, dtype=dtype, order=order)
             newarr = tmp is not arr
             arr = tmp
         # We mark sparse as False so that below we know that the output is
