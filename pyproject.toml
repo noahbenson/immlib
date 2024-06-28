@@ -1,6 +1,6 @@
 [project]
 name = "immlib"
-version = "1.0"
+version = "1.0.0.dev1"
 description = """A library of utilites for immutable scientific data."""
 authors = [
     {name="Noah C. Benson", email="nben@uw.edu"}
