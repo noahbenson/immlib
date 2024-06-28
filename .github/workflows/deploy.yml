@@ -36,7 +36,7 @@ jobs:
       # Make sure the tests pass before we upload anything.
       - name: Run Tests
         run: |
-          pip install -e .
+          pip install -e .[test]
           cd ~
           python -m unittest immlib.test
       # Go ahead and build and deploy.

@@ -2,15 +2,11 @@
 name = "immlib"
 version = "1.0.0.dev1"
 description = """A library of utilites for immutable scientific data."""
-authors = [
-    {name="Noah C. Benson", email="nben@uw.edu"}]
+authors = [{name="Noah C. Benson", email="nben@uw.edu"}]
 license = {"text"="MIT"}
 readme = "README.md"
 requires-python = ">=3.7"
-dynamic = ["dependencies"]
-
 keywords = ["persistent", "immutable", "functional", "scientific", "workflow"]
-
 classifiers = [
     'Intended Audience :: Science/Research',
     'Intended Audience :: Developers',
@@ -29,17 +25,21 @@ classifiers = [
     'Operating System :: Microsoft :: Windows',
     'Operating System :: POSIX',
     'Operating System :: Unix',
-    'Operating System :: MacOS'
-]
+    'Operating System :: MacOS']
+dependencies = [
+     'pcollections >= 0.2.7',
+     'numpy >= 1.23.0',
+     'scipy >= 1.7.0',
+     'pint >= 0.18.0',
+     'docrep >= 0.3.2',
+     'joblib >= 1.3.0',
+     'cloudpathlib[s3,gs,azure] >= 0.16.0']
 
-[tool.setuptools.dynamic]
-dependencies = {file = ["requirements.txt"]}
+[project.optional-dependencies]
+dev = ["torch"]
+test = ["torch"]
 
 [project.urls]
 homepage = "https://github.com/noahbenson/immlib"
 documentation = "https://github.com/noahbenson/immlib"
 repository = "https://github.com/noahbenson/immlib"
-
-[build-system]
-requires = ["setuptools >= 61.0"]
-build-backend = "setuptools.build_meta"
