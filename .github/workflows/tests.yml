@@ -98,10 +98,10 @@ jobs:
       # Run the actual tests.
       - name: Run Tests
         run: |
-          pip install .[test]
+          pip install -e .[test]
           if [ "$PYTHON" = "3.11" ] && [ "$OS" = "ubuntu-latest" ]
           then pip install coverage
-               coverage run -m immlib.test
+               coverage run --source=src -m immlib.test
           else python -m immlib.test
           fi
         shell: bash -el {0}
