@@ -73,11 +73,11 @@ jobs:
       - name: Setip Miniconda
         uses: conda-incubator/setup-miniconda@v3
       - name: Install Numpy, Scipy, and PyTorch
-        shell: bash
+        shell: bash -el {0}
         run: |
           conda install -cpytorch -cconda-forge numpy scipy pytorch
       - name: Upgrade Setuptools
-        shell: bash
+        shell: bash -el {0}
         run: |
           python -m pip install --upgrade setuptools
       # Log the Python Version
@@ -93,7 +93,7 @@ jobs:
                coverage run -m immlib.test
           fi
           python -m immlib.test
-        shell: bash
+        shell: bash -el {0}
       - name: Process Code Coverage
         uses: codecov/codecov-action@v1
         with:
