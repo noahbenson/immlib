@@ -12,15 +12,15 @@ on:
     paths-ignore:
       - '**/README.md'
       - '**/.gitignore'
-      - '/.github/workflows/deploy.yml'
-      - '/.github/workflows/codecov.yml'
+      - '.github/workflows/deploy.yml'
+      - '.github/workflows/codecov.yml'
   pull_request:
     branches: [ main, dev ]
     paths-ignore:
       - '**/README.md'
       - '**/.gitignore'
-      - '/.github/workflows/deploy.yml'
-      - '/.github/workflows/codecov.yml'
+      - '.github/workflows/deploy.yml'
+      - '.github/workflows/codecov.yml'
   # We sometimes want to run this manually.
   workflow_dispatch:
   # We also sometimes want to run this from another workflow.
