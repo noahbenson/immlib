@@ -94,6 +94,7 @@ jobs:
           # reports along with the tests; otherwise we just do normal tests.
           conda install -cconda-forge coverage
           coverage run -m immlib.test
+          coverage xml -o .coverage/report.xml
           coverage report
         shell: bash -el {0}
         id: runtests
@@ -102,4 +103,5 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
-          directory: .coverage
+          file: '.coverage/report.xml'
+          fail_ci_if_error: true
