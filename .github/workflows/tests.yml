@@ -75,7 +75,7 @@ jobs:
       - name: Install Numpy, Scipy, and PyTorch
         shell: bash
         run: |
-          conda install -cpytorch -cconda-forge numpy scipy torch
+          conda install -cpytorch -cconda-forge numpy scipy pytorch
       - name: Upgrade Setuptools
         shell: bash
         run: |
