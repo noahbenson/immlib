@@ -56,7 +56,6 @@ jobs:
       OS: ${{ matrix.os }}
       ARCH: ${{ matrix.arch }}
       PYTHON: ${{ matrix.version }}
-      COVERAGE_FILE: ~/.coverage
     # The steps in the job.
     steps:
       # Check out the repository (goes to $GITHUB_WORKSPACE)
@@ -117,4 +116,5 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
+          directory: .coverage
         if: "${{ steps.runtests.outputs.codecov_run == 'true' }}"
