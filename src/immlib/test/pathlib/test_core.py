@@ -91,7 +91,7 @@ class TestPathlibCore(TestCase):
         for p in paths:
             self.cleanup_cache(p)
     def test_pathfns(self):
-        """Tests the `osfpath`, `is_osfpath` and `like_osfpath` functions."""
+        """Tests the various path-related functions for each path type."""
         from tempfile import TemporaryDirectory
         # We make a single temporary directory for this whole test.
         with TemporaryDirectory() as tempdir:
