@@ -53,23 +53,25 @@ jobs:
               'pytorch >= 2.2' \
               twine
             python -m pip install --upgrade build
+            python -m pip install -e .[test]
       # Log the Python Version
-      - name: Display Python version
+      - name: Display Version Information
         shell: bash -el {0}
         run: |
           PYVER=$(python --version)
           TORCHVER=$(python -c 'import torch; print(torch.__version__)')
           NUMPYVER=$(python -c 'import numpy; print(numpy.__version__)')
           SCIPYVER=$(python -c 'import scipy; print(scipy.__version__)')
+          IMMLIBVER=$(python -c 'import immlib; print(immlib.__version__)')
           echo "Versions:"
           echo "  - Python:  ${PYVER}"
           echo "  - PyTorch: ${TORCHVER}"
           echo "  - NumPy:   ${NUMPYVER}"
           echo "  - SciPy:   ${SCIPYVER}"
+          echo "  - ImmLib:  ${IMMLIBVER}"
       # Make sure the tests pass before we upload anything.
       - name: Run Tests
         run: |
-          pip install -e .[test]
           python -m immlib.test
         shell: bash -el {0}
       # Go ahead and build and deploy.
