@@ -22,23 +22,47 @@ jobs:
       # Check out the repository (goes to $GITHUB_WORKSPACE)
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: '2'
       # Setup the Python Environment.
       - name: Setup Python Environment
         uses: actions/setup-python@v5
         with:
-          python-version: 3
-          architecture: x64
-      # We need to install twine also for uploading to PyPI.
-      - name: Install Twine
+          python-version: ${{ matrix.version }}
+          architecture: ${{ matrix.arch }}
+      - name: Setip Miniconda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          python-version: ${{ matrix.version }}
+      - name: Install Numpy, Scipy, and PyTorch
+        shell: bash -el {0}
         run: |
-          pip install --upgrade twine
-          pip install --upgrade build
+          conda install \
+              -cpytorch \
+              -cconda-forge \
+              'numpy >= 1.24' \
+              'scipy >= 1.7' \
+              'pytorch >= 2.2' \
+              twine build
+      # Log the Python Version
+      - name: Display Python version
+        shell: bash -el {0}
+        run: |
+          PYVER=$(python --version)
+          TORCHVER=$(python -c 'import torch; print(torch.__version__)')
+          NUMPYVER=$(python -c 'import numpy; print(numpy.__version__)')
+          SCIPYVER=$(python -c 'import scipy; print(scipy.__version__)')
+          echo "Versions:"
+          echo "  - Python:  ${PYVER}"
+          echo "  - PyTorch: ${TORCHVER}"
+          echo "  - NumPy:   ${NUMPYVER}"
+          echo "  - SciPy:   ${SCIPYVER}"
       # Make sure the tests pass before we upload anything.
       - name: Run Tests
         run: |
           pip install -e .[test]
-          cd ~
-          python -m unittest immlib.test
+          python -m immlib.test
+        shell: bash -el {0}
       # Go ahead and build and deploy.
       - name: Build and Upload Source Distribution
         run: |
