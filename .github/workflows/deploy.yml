@@ -45,10 +45,10 @@ jobs:
       - name: Install Numpy, Scipy, and PyTorch
         shell: bash -el {0}
         run: |
-          echo ""
+          echo " "
           echo -n "# CONDA ##############################"
           echo "##########################################"
-          echo ""
+          echo " "
           conda install \
               -cpytorch \
               -cconda-forge \
@@ -57,16 +57,16 @@ jobs:
               'pytorch >= 2.2' \
               twine
 
-          echo ""
-          echo -n "# BUILD ##############################"
+          echo " "
+          echo -n "# BUILD/TWIND ########################"
           echo "##########################################"
-          echo ""
-          python -m pip install --upgrade --user build
+          echo " "
+          python -m pip install --upgrade --user build twine
 
-          echo ""
+          echo " "
           echo -n "# IMMLIB #############################"
           echo "##########################################"
-          echo ""
+          echo " "
           python -m pip install -e .[test]
       # Log the Python Version
       - name: Display Version Information
