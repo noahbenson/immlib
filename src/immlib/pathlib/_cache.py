@@ -16,7 +16,12 @@ from   ..doc      import docwrap
 
 # CloudCachePath ###############################################################
 
-class CloudCachePath(type(Path())):
+_pymajor = int(sys.version.split('.')[0])
+_pyminor = int(sys.version.split('.')[1])
+_pyv3_12 = (_pymajor > 3 or (_pymajor == 3 and _pyminor > 11))
+_pathbase = Path if _pyv3_12 else type(Path())
+
+class CloudCachePath(_pathbase):
     """A filesystem path wrapper for the CloudPath type.
 
     A `CloudCachePath` object is a simple wrapper around a `CloudPath` object.
@@ -38,10 +43,11 @@ class CloudCachePath(type(Path())):
         p.cloud_path = cloud_path
         return p
     def __init__(self, cloud_path):
-        pre = cloud_path.cloud_prefix
-        lcd = cloud_path.client._local_cache_dir
-        fspath = Path(lcd).absolute() / str(cloud_path)[len(pre):]
-        super().__init__(self, fspath)
+        if _pyv3_12:
+            pre = cloud_path.cloud_prefix
+            lcd = cloud_path.client._local_cache_dir
+            fspath = Path(lcd).absolute() / str(cloud_path)[len(pre):]
+            super().__init__(self, fspath)
     def __truediv__(self, other):
         return CloudCachePath(self.cloud_path / other)
     def iterdir(self):
