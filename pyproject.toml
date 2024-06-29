@@ -36,7 +36,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["torch >= 2.3.0", "pyyaml"]
-test = ["torch >= 2.3.0", "pyyaml"]
+test = ["torch >= 2.3.0", "pyyaml", "numpy < 2"]
 
 [project.urls]
 homepage = "https://github.com/noahbenson/immlib"
