@@ -54,8 +54,7 @@ jobs:
               -cconda-forge \
               'numpy >= 1.24' \
               'scipy >= 1.7' \
-              'pytorch >= 2.2' \
-              twine
+              'pytorch >= 2.2'
 
           echo " "
           echo -n "# BUILD/TWIND ########################"
@@ -93,4 +92,4 @@ jobs:
         run: |
           [ -d ./dist ] && rm ./dist/*
           python -m build
-          twine upload -r $TWINE_DEST dist/immlib-*.tar.gz
+          python -m twine upload -r $TWINE_DEST dist/immlib-*.tar.gz
