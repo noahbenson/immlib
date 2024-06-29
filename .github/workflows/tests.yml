@@ -72,6 +72,8 @@ jobs:
           architecture: ${{ matrix.arch }}
       - name: Setip Miniconda
         uses: conda-incubator/setup-miniconda@v3
+        with:
+          python-version: ${{ matrix.version }}
       - name: Install Numpy, Scipy, and PyTorch
         shell: bash -el {0}
         run: |

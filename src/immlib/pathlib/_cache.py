@@ -37,6 +37,11 @@ class CloudCachePath(type(Path())):
         p = super().__new__(cls, fspath)
         p.cloud_path = cloud_path
         return p
+    def __init__(self, cloud_path):
+        pre = cloud_path.cloud_prefix
+        lcd = cloud_path.client._local_cache_dir
+        fspath = Path(lcd).absolute() / str(cloud_path)[len(pre):]
+        super().__init__(self, fspath)
     def __truediv__(self, other):
         return CloudCachePath(self.cloud_path / other)
     def iterdir(self):
