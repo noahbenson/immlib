@@ -35,8 +35,8 @@ dependencies = [
      'cloudpathlib[s3,gs,azure] >= 0.16.0']
 
 [project.optional-dependencies]
-dev = ["torch", "pyyaml"]
-test = ["torch", "pyyaml"]
+dev = ["torch >= 2.2.0", "pyyaml"]
+test = ["torch >= 2.2.0", "pyyaml"]
 
 [project.urls]
 homepage = "https://github.com/noahbenson/immlib"
