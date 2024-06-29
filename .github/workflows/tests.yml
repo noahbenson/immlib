@@ -56,6 +56,7 @@ jobs:
       OS: ${{ matrix.os }}
       ARCH: ${{ matrix.arch }}
       PYTHON: ${{ matrix.version }}
+      COVERAGE_FILE: ~/.coverage
     # The steps in the job.
     steps:
       # Check out the repository (goes to $GITHUB_WORKSPACE)
@@ -99,16 +100,21 @@ jobs:
       - name: Run Tests
         run: |
           pip install -e .[test]
+          # If we're on ubuntu and running python 3.11, we do the code coverage
+          # reports along with the tests; otherwise we just do normal tests.
           if [ "$PYTHON" = "3.11" ] && [ "$OS" = "ubuntu-latest" ]
           then conda install -cconda-forge coverage
                coverage run -m immlib.test
                coverage report
-               echo "IN $PWD"
+               echo 'codecov_run=true' >> $GITHUB_OUTPUT
           else python -m immlib.test
+               echo 'codecov_run=false' >> $GITHUB_OUTPUT
           fi
         shell: bash -el {0}
+        id: runtests
       - name: Process Code Coverage
         uses: codecov/codecov-action@v4.0.1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
+        if: "${{ step.runtests.outputs.codecov_run == 'true' }}"
