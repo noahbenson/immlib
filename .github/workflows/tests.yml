@@ -117,4 +117,4 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
-        if: "${{ step.runtests.outputs.codecov_run == 'true' }}"
+        if: "${{ steps.runtests.outputs.codecov_run == 'true' }}"
