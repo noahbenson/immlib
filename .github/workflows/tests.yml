@@ -101,7 +101,7 @@ jobs:
           pip install -e .[test]
           if [ "$PYTHON" = "3.11" ] && [ "$OS" = "ubuntu-latest" ]
           then pip install coverage
-               coverage run --source=src -m immlib.test
+               coverage run -m immlib.test
           else python -m immlib.test
           fi
         shell: bash -el {0}
