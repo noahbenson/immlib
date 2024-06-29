@@ -100,8 +100,10 @@ jobs:
         run: |
           pip install -e .[test]
           if [ "$PYTHON" = "3.11" ] && [ "$OS" = "ubuntu-latest" ]
-          then pip install coverage
+          then conda install -cconda-forge coverage
                coverage run -m immlib.test
+               coverage report
+               echo "IN $PWD"
           else python -m immlib.test
           fi
         shell: bash -el {0}
