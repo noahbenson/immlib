@@ -52,7 +52,7 @@ jobs:
               'scipy >= 1.7' \
               'pytorch >= 2.2' \
               twine
-            pip install build
+            python -m pip install --upgrade build
       # Log the Python Version
       - name: Display Python version
         shell: bash -el {0}
