@@ -99,12 +99,11 @@ jobs:
       - name: Run Tests
         run: |
           pip install .[test]
-          cd ~
           if [ "$PYTHON" = "3.11" ] && [ "$OS" = "ubuntu-latest" ]
           then pip install coverage
                coverage run -m immlib.test
+          else python -m immlib.test
           fi
-          python -m immlib.test
         shell: bash -el {0}
       - name: Process Code Coverage
         uses: codecov/codecov-action@v4.0.1
