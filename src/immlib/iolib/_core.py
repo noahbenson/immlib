@@ -40,7 +40,7 @@ class Format:
         for suff in suffixes:
             if is_str(suff):
                 suff = (suff,)
-            elif all(is_str, suff):
+            elif all(map(is_str, suff)):
                 suff = tuple(suff)
             else:
                 raise ValueError(f"invalid path suffix: {suff}")
@@ -53,14 +53,14 @@ class Format:
         elif is_str(gzip_suffix):
             gzip_suffix = ((gzip_suffix,),)
         elif is_aseq(gzip_suffix):
-            if all(is_str(s) for s in gzip_suffix):
+            if all(map(is_str, gzip_suffix)):
                 gzip_suffix = tuple((s,) for s in gzip_suffix)
             else:
                 g = []
                 for suff in gzip_suffix:
                     if is_str(suff):
                         g.append((suff,))
-                    elif is_aseq(suff) and all(is_str(s) for s in suff):
+                    elif is_aseq(suff) and all(map(is_str, suff)):
                         g.append(tuple(suff))
                     else:
                         raise ValueError(f"invalid gzip suffix: {suff}")
@@ -115,7 +115,7 @@ class Formatter:
             suffixes = path(arg).suffixes
         elif is_path(arg):
             suffixes = arg.suffixes
-        elif is_aseq(arg) and all(is_str(s) for s in arg):
+        elif is_aseq(arg) and all(map(is_str, arg)):
             suffixes = arg
         else:
             raise ValueError(
