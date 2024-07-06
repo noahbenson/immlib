@@ -15,3 +15,8 @@ a prototype library [`pimms`](https://github.com/noahbenson/pimms).
 
 ---
 
+## Version 1.0 TODO List
+
+* Finish / write tests for `immlib.types`
+* Improve code-coverage
+* Auto-promotion decorator system for pytorch/numpy arguments
