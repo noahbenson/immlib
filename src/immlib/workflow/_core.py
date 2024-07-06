@@ -549,14 +549,6 @@ class calc:
                                      self.cache_memory, new_cache)
         object.__setattr__(new_calc, 'function', new_fn)
         return new_calc
-    def is_filter(self):
-        """Determines if the given `calc` object is a valid filter.
-
-        A `calc` is a valid filter if it has exactly one input and one output
-        both of which are the same.
-        """
-        return (len(self.inputs) == 1
-                and next(iter(self.inputs)) == self.outputs[0])
 @docwrap
 def is_calc(arg):
     """Determines if an object is a `calc` instance.
@@ -673,7 +665,7 @@ class plan(pdict):
             s = set((u1,v2) for (u1,v1) in clos for (u2,v2) in clos if v2 == u1)
             if clos.issuperset(s): break
             clos |= s
-        res = defaultdict(lambda:set([]))
+        res = defaultdict(lambda:set())
         for (u,v) in clos:
             res[u].add(v)
         return res
@@ -689,30 +681,21 @@ class plan(pdict):
     def __init__(self, *args, **kwargs):
         # We ignore the arguments because they are handled by pdict's __new__
         # method.  We need to start by building up the graph of dependencies.
-        deps = defaultdict(lambda:set([]))
-        inputs = set([])
-        outputs = set([])
+        deps = defaultdict(lambda:set())
+        inputs = set()
+        outputs = set()
         filts = {}
-        reqs = set([])
+        reqs = set()
         defaults = {}
         # calc_src: value name |-> source calc
         calc_src = {}
         # We also start building up the layers here (this is mostly done below;
         # see comments a few paragraphs down for more info).
-        normal_calcs = set([])
-        noinput_calcs = set([])
-        noinput_calc_outputs = set([])
+        normal_calcs = set()
+        noinput_calcs = set()
+        noinput_calc_outputs = set()
         for (k,v) in self.items():
-            if k.startswith('filter_'):
-                nm = k[7:]
-                if not is_calc(v):
-                    v = calc(nm)(v)
-                if not v.is_filter():
-                    raise ValueError(f"{k} calc is not a valid filter")
-                filts[nm] = v
-                inputs.add(nm)
-                continue
-            elif k.startswith('default_'):
+            if k.startswith('default_'):
                 nm = k[8:]
                 defaults[nm] = v
                 continue
@@ -722,21 +705,32 @@ class plan(pdict):
             # the calc plan (not a filter or default value).
             if not v.lazy:
                 reqs.add(k)
+            # Some of these values may be filtered values:
+            filtvals = v.inputs & set(v.outputs)
+            inputs.update(filtvals)
+            # If there are filtered values, note them.
+            for kk in filtvals:
+                if kk in filts:
+                    raise ValueError(
+                        f"two calcs filter value {kk}: {k} and {filts[kk]}")
+                filts[kk] = k
             # Note the edge-data for each input/output.
             if v.outputs:
                 for kk in v.outputs:
                     if kk in calc_src:
-                        raise ValueError(f"two calcs output value {kk}:"
-                                         f" {k} and {calc_src[kk]}")
+                        raise ValueError(
+                            f"two calcs output value {kk}:"
+                            f" {k} and {calc_src[kk]}")
                     else:
                         calc_src[kk] = k
-                outputs.update(v.outputs)
-            if v.inputs:
-                inputs.update(v.inputs)
+                outputs.update(set(v.outputs) - set(filtvals))
+            vinp = v.inputs - filtvals
+            if vinp:
+                inputs.update(vinp)
                 # All of the calc's outputs depend on its inputs.
                 if v.outputs:
                     for output in v.outputs:
-                        deps[output].update(v.inputs)
+                        deps[output].update(vinp)
                 # We note that this is a normal calc.
                 normal_calcs.add(k)
             else:
@@ -756,35 +750,40 @@ class plan(pdict):
         # that require input from only the layers above this layer while the
         # new_output_names are the values that are available after this layer of
         # calculations has been run. The first layer, layers[0], is special in
-        # that it is always (pset([]), noinput_calcs, inputs |
+        # that it is always (pset(), noinput_calcs, inputs |
         # noinput_calc_outputs) where noinput_calcs are the calculations that
         # don't require any input parameters, and noinput_calc_outputs are the
         # outputs of those calcs.
-        params_sofar = params | noinput_calc_outputs
+        params_sofar = (params - filts.keys()) | noinput_calc_outputs
         params = pset(params)
         noinput_calcs = pset(noinput_calcs)
         calc_defaults = {}
-        layers = [plan.Layer(pset([]),
-                             noinput_calcs,
-                             pset(params_sofar))]
+        layers = [plan.Layer(pset(), noinput_calcs, pset(params_sofar))]
         allcalcs = noinput_calcs | normal_calcs
+        # Before we start going through layers, note that there might actually
+        # be some default values in the noinput_calcs because some of those
+        # noinput calcs might have had inputs with default values that were also
+        # outputs, thus were ignored. These are layer-0 defaults.
+        for k in noinput_calcs:
+            calc_defaults.update(self[k].defaults)
         while len(normal_calcs) > 0:
-            (calcs, vals) = (set([]), set([]))
+            (calcs, vals) = (set(), set())
             # See which calcs can run now that we have this layer of values.
             for k in normal_calcs:
                 calc = self[k]
-                if params_sofar.issuperset(calc.inputs):
+                inp = set(calc.inputs) - filts.keys()
+                if params_sofar.issuperset(inp):
                     calcs.add(k)
-                    if calc.outputs:
-                        vals.update(calc.outputs)
-            if len(vals) == 0:
-                raise ValueError("calculation graph contains unreachable nodes")
+                    vals.update(calc.outputs)
+            if len(calcs) == 0:
+                print(params_sofar, params, normal_calcs)
+                raise ValueError(
+                    f"calculation graph contains unreachable nodes: "
+                    f"{normal_calcs}")
             if not params_sofar.isdisjoint(vals):
                 isect = tuple(params_sofar.intersection(vals))
                 raise ValueError(f"dependency loop detected: {isect}")
-            layer = plan.Layer(pset(params_sofar),
-                               pset(calcs),
-                               pset(vals))
+            layer = plan.Layer(pset(params_sofar), pset(calcs), pset(vals))
             layers.append(layer)
             # We have some postprocessing to do on the calcs that were added to
             # this layer.
@@ -808,27 +807,31 @@ class plan(pdict):
         tc_params = {k: tuple(v & params) for (k,v) in tc.items()}
         tc_rparams = plan._tc_params_to_rparams(tc_params)
         # Make the same tc_params and tc_rparams for the calcs.
-        calctc_params = defaultdict(lambda:set([]))
+        calctc_params = defaultdict(lambda:set())
         for k in allcalcs:
             c = self[k]
-            cdeps = set([])
+            cdeps = set()
             if c.inputs:
                 for inp in c.inputs:
                     cdeps.update(tc_params.get(inp, ()))
             calctc_params[k] = pset(cdeps)
         calctc_rparams = plan._tc_params_to_rparams(calctc_params)
+        # We want a version of filts that includes the actual calculations...
+        filters = {k: self[v] for (k,v) in filts.items()}
         # Finally, collect all the input and output documentations.
         input_docs = {k: [] for k in params} # Just the params, not all inputs
         output_docs = {k: [] for k in outputs}
         # For the params, start with their filters.
         for (k,filt) in filts.items():
             if k not in params:
-                msg = f"filter for {k}, which is not in params: {params}"
-                raise ValueError(msg)
-            try: doc = filt.__doc__
-            except Exception: doc = None
+                raise ValueError(
+                    f"found filter for {k}, which is not in params: {params}")
+            try:
+                doc = self[filt].__doc__
+            except Exception:
+                doc = None
             if doc:
-                input_docs[k].append("filter: " + filt.name + "\n" + doc)
+                input_docs[k].append("filter: " + filt + "\n" + doc)
         # Now go through the layers and append the documentation to each.
         for layer in layers:
             for k in layer.calcs:
@@ -851,14 +854,14 @@ class plan(pdict):
         object.__setattr__(self, 'inputs', pset(params))
         object.__setattr__(self, 'outputs', pset(outputs))
         object.__setattr__(self, 'defaults', merge(calc_defaults, defaults))
-        object.__setattr__(self, 'calc_defaults', pdict(calc_defaults))
+        object.__setattr__(self, 'calc_defaults', pdict(calc_defaults)) #?
         object.__setattr__(self, 'dependencies', pdict(tc_params))
         object.__setattr__(self, 'dependants', pdict(tc_rparams))
         object.__setattr__(self, 'calc_dependencies', pdict(calctc_params))
         object.__setattr__(self, 'dependant_calcs', pdict(calctc_rparams))
         object.__setattr__(self, 'calc_sources', pdict(calc_src))
         object.__setattr__(self, 'calcs', tuple(allcalcs))
-        object.__setattr__(self, 'filters', pdict(filts))
+        object.__setattr__(self, 'filters', pdict(filters))
         object.__setattr__(self, 'requirements', pset(reqs))
         object.__setattr__(self, 'layers', tuple(layers))
         object.__setattr__(self, 'input_docs', input_docs)
@@ -951,7 +954,8 @@ class plandict(ldict):
         return calc.eager_mapcall(d)
     @staticmethod
     def _run_filt(filt, params, k):
-        res = filt.eager_mapcall({k: params[k]})
+        filt_params = {kk: params[kk] for kk in filt.inputs}
+        res = filt.eager_mapcall(filt_params)
         return res[k]
     @staticmethod
     def _get_val(calcdicts, calcnm, output):
@@ -1045,8 +1049,8 @@ class plandict(ldict):
             extras = params - inp
             raise ValueError(f"extra inputs: {tuple(extras)}")
         # Figure out all the dependant calcs and outputs of these params.
-        depcalcs = set([])
-        depouts = set([])
+        depcalcs = set()
+        depouts = set()
         for k in params.keys():
             depcalcs.update(plan.dependant_calcs[k])
             depouts.update(plan.dependants[k])

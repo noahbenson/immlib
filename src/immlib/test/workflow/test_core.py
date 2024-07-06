@@ -217,3 +217,46 @@ class TestWorkflowCore(TestCase):
         # Since we marked the filter as non-lazy, it should raise errors when
         # the plan is fulfilled.
         with self.assertRaises(RuntimeError): nwm(x=10)
+    def test_multifilter(self):
+        """Tests the ability of plans to contain multi-input filters."""
+        import numpy as np
+        from immlib.workflow import calc, plan
+        @calc('a', 'b', 'c', lazy=False)
+        def filter_bccoords(a=None, b=None, c=None):
+            n_given = 3 - (int(a is None) + int(b is None) + int(c is None))
+            if n_given < 2:
+                raise ValueError("at least two of a, b, and c must be provided")
+            elif n_given == 2:
+                if a is None:
+                    a = 1 - (b + c)
+                elif b is None:
+                    b = 1 - (a + c)
+                elif c is None:
+                    c = 1 - (a + b)
+            return (a, b, c)
+        @calc('a_coords', 'b_coords', 'c_coords', lazy=False)
+        def filter_tricoords(a_coords, b_coords, c_coords):
+            a_coords = np.array(a_coords)
+            b_coords = np.array(b_coords)
+            c_coords = np.array(c_coords)
+            a_coords.flags.writeable = False
+            b_coords.flags.writeable = False
+            c_coords.flags.writeable = False
+            return (a_coords, b_coords, c_coords)
+        @calc('coords')
+        def calc_coords(a_coords, b_coords, c_coords, a, b, c):
+            return (a*a_coords + b*b_coords + c*c_coords,)
+        p = plan(
+            bcfilter=filter_bccoords,
+            trifilter=filter_tricoords,
+            coords=calc_coords)
+        # The main thing is that this plan should not have any trouble filling
+        # in the three values.
+        tri = {'a_coords': (0,0), 'b_coords':(0,1), 'c_coords': (1,0)}
+        u = p(a=0.25, b=0.25, **tri)
+        self.assertEqual(u['c'], 0.5)
+        u = p(a=0.25, c=0.25, **tri)
+        self.assertEqual(u['b'], 0.5)
+        u = p(c=0.25, b=0.25, **tri)
+        self.assertEqual(u['a'], 0.5)
+        

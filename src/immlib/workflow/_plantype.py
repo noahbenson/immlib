@@ -64,7 +64,7 @@ class plantype(type):
         def __new__(cls, *args, **kwargs):
             # Start by creating the object itself and setting up its slots.
             obj = object.__new__(cls)
-            object.__setattr__(obj, '__plandict__', dict())
+            object.__setattr__(obj, '__plandict__', None)
             # Once the __init__ function is done running, the plandict will be
             # cleaned up (this is guaranteed by the plantype meta-class).
             return obj
@@ -77,7 +77,8 @@ class plantype(type):
         def __init__(self, *args, **kwargs):
             for (k,v) in merge(*args, **kwargs).items():
                 setattr(self, k, v)
-        def _init_wrapper(self, *args, **kwargs):
+        @staticmethod
+        def _init_wrapper(cls, self, *args, **kwargs):
             """Manages the initialization (`__init__`) for `planobject` types.
 
             The `planobject` type, and any types that inherit from it, is
@@ -100,18 +101,27 @@ class plantype(type):
             if is_pdict(pd):
                 raise RuntimeError("_init_wrapper method called on an already-"
                                    "initialized planobject")
+            elif pd is not None:
+                # We're already in the middle of initializing; one of the
+                # __init__ methods probably just called a parent class's
+                # __init__ method. We can just run it and return.
+                return cls.__planobject_init__(self, *args, **kwargs)
+            # Otherwise, pd is None, meaning that we're the first initializer.
+            # Note that we are now in the process of initializing...
+            pd = {}
+            object.__setattr__(self, '__plandict__', pd)
             # This method is the real initializer for the class (what the
             # class's actual code wrote as the __init__ method).
-            r = self.__planobject_init__(*args, **kwargs)
+            cls.__planobject_init__(self, *args, **kwargs)
             # Postprocess the argument.
-            plan = type(self).plan
-            params = dict(plan.defaults, **pd)
-            if params.keys() != plan.inputs:
+            theplan = type(self).plan
+            params = dict(theplan.defaults, **pd)
+            if params.keys() != theplan.inputs:
                 raise ValueError(
                     f"bad parameters for plantype {type(self)};"
-                    f" expected {tuple(plan.inputs)} but found"
+                    f" expected {tuple(theplan.inputs)} but found"
                     f" {tuple(params.keys())}")
-            pd = plan(params)
+            pd = theplan(params)
             object.__setattr__(self, '__plandict__', pd)
         # For the pickle module:
         def __getstate__(self):
@@ -141,7 +151,11 @@ class plantype(type):
         # (2) We want to save the init function and update it to our version.
         init = attrs.get('__init__', plantype.planobject_base.__init__)
         attrs['__planobject_init__'] = init
-        attrs['__init__'] = plantype.planobject_base._init_wrapper
+        def _initfn(self, *args, **kwargs):
+            return plantype.planobject_base._init_wrapper(
+                _initfn.cls, self, *args,
+                **kwargs)
+        attrs['__init__'] = _initfn
         # (3) Go through the bases: see if there are planobject bases already,
         #     and if not, add planobject in. As we go, collect calculations.
         calcs = {k:v for (k,v) in attrs.items() if is_calc(v)}
@@ -161,7 +175,9 @@ class plantype(type):
         else:
             attrs['plan'] = plan(initplan, **calcs)
         # (5) Return the type with all the updated attributes.
-        return sup.__new__(cls, name, bases, attrs)
+        cls = sup.__new__(cls, name, bases, attrs)
+        _initfn.cls = cls
+        return cls
 
 
 # #planobject ##################################################################
