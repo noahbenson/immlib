@@ -9,7 +9,11 @@ name: Codecov
 # We run on either pushes or pulls into main or dev branches
 on:
   push:
-    branches: [ main, dev ]
+    branches:
+      - main
+      - dev
+      - "main/**"
+      - "dev/**"
     paths-ignore:
       - '**/README.md'
       - '**/.gitignore'
