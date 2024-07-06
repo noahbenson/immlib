@@ -20,6 +20,7 @@ from .util     import *
 from .pathlib  import *
 from .iolib    import *
 from .workflow import *
+from .types    import *
 # We want the version object from the ._version namespace.
 from ._version import version
 # Import the Global UnitRegistry object to the global immlib scope. This is the
@@ -55,6 +56,8 @@ submodules = (
     'immlib.workflow._core',
     'immlib.workflow._plantype',
     'immlib.workflow',
+    'immlib.types._core',
+    'immlib.types',
     'immlib._version')
 """tuple: a list of all immlib subpackage names in load-order.
 
