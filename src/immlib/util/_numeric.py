@@ -811,17 +811,24 @@ def to_array(obj,
         quant = (q if unit is Ellipsis else unit) is not None
     if quant is True:
         if unit is None:
-            raise ValueError("to_array: cannot make a quantity (quant=True)"
-                             " without a unit (unit=None)")
+            raise ValueError(
+                "to_array: cannot make a quantity (quant=True) without a unit"
+                " (unit=None)")
         if q is None:
-            if unit is Ellipsis: unit = None
+            if unit is Ellipsis:
+                raise ValueError(
+                    "to_array(x): cannot make x into a quantity (quant=True)"
+                    " with the same unit as x (unit=...) when the x is not a"
+                    " quantity")
             return ureg.Quantity(arr, unit)
         else:
             from ._quantity import unitregistry
-            if unit is Ellipsis: unit = q.u
             if ureg is not unitregistry(q) or obj is not arr:
                 q = ureg.Quantity(arr, q.u)
-            return q.to(unit)
+            if unit is not Ellipsis and ureg.Unit(unit) != q.u:
+                return q.to(unit)
+            else:
+                return q
     elif quant is False:
         # Don't return a quantity, whatever the input argument.
         if unit is Ellipsis:
