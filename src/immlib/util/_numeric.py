@@ -5,7 +5,8 @@
 
 # Dependencies #################################################################
 
-from functools import partial
+import inspect
+from functools import (partial, wraps, update_wrapper)
 
 import pint
 import numpy as np
@@ -1691,3 +1692,141 @@ def to_number(obj):
         if u.size == 1 and is_numberdata(u):
             return u.item()
     raise TypeError(f"given object is not scalar-like: {obj}")
+
+
+# Numeric Decorators ###########################################################
+
+class numapi:
+    """An interface for defining functions that expect all arguments to be
+    either numpy arrays or pytorch tensors.
+
+    A function decorated with `@numapi` is a placeholder for two subfunctions:
+    one that is called when any of the arguments are pytorch tensors (all of
+    whose arguments, when possible, are pytorch tensors), and a version called
+    otherwise, all of whose arguments are numpy arrays. The body of the
+    decorated function is usually `pass`, but if desired, it can return either
+    the pytorch or the numpy modules to indicate that a particular version of
+    the function should be called (if necessary, tensors are converted into
+    numpy arrays for this).
+
+    Once a function has been decorated with `@numapi`, that function should be
+    used to decorate two other functions. If, for example, the function `f` is
+    decorated with `@numapi`, then `@f.array` should be used to decorate the
+    version of the function that accepts numpy arrays and `@f.tensor` should be
+    used to decorate the version of the function that accepts pytorch tensors.
+
+    Examples
+    --------
+    >>> @numapi
+    ... def l2_distance(pt1, pt2):
+    ...     "Calculates the L2 distance between two points."
+    ...     pass
+    >>> @l2_distance.array
+    ... def _(pt1, pt2):
+    ...     return np.sqrt(np.sum((pt1 - pt2)**2, axis=0))
+    >>> @l2_distance.tensor
+    ... def _(pt1, pt2):
+    ...     return torch.sqrt(torch.sum((pt1 - pt2)**2, axis=0))
+    >>> l2_distance(torch.tensor([0,0]), [0,1])
+    tensor(1.)
+    >>> l2_distance([0,0], torch.tensor([0,1]))
+    tensor(1.)
+    >>> l2_distance([0,0], [0,1])
+    1.0
+    """
+    # Static Methods -----------------------------------------------------------
+    @staticmethod
+    def _as_array(arg):
+        argmod = type(arg).__module__
+        if argmod == 'numpy' or argmod.startswith('numpy.'):
+            return arg
+        else:
+            return to_array(arg)
+    @staticmethod
+    def _as_tensor(arg, device=None):
+        if is_tensor(arg):
+            return to_tensor(arg, device=device)
+        argmod = type(arg).__module__
+        if argmod == 'torch' or argmod.startswith('torch.'):
+            return arg
+        # Otherwise, try converting it to a tensor.
+        try:
+            return to_tensor(arg, device=device)
+        except (TypeError, RuntimeError):
+            pass
+        # If all else fails, convert it to a numpy array.
+        return numapi._as_array(arg)
+    @staticmethod
+    def _find_device(args, kwargs):
+        dev = kwargs.get('device', None)
+        if dev is not None:
+            return torch.device(dev)
+        tns = next(filter(is_tensor, args), None)
+        if tns is None:
+            tns = next(filter(is_tensor, kwargs.values()), None)
+            if tns is None:
+                return None
+        return tns.device
+    # Constructor --------------------------------------------------------------
+    __slots__ = (
+        'base_func', 'wrap_func', 'array_func', 'tensor_func', 'signature')
+    def __new__(cls, fn):
+        self = object.__new__(cls)
+        def wrap_fn(*args, **kwargs):
+            return self(*args, **kwargs)
+        wrap_fn.numapi = self
+        wrap_fn.array = self.array
+        wrap_fn.tensor = self.tensor
+        self.base_func = fn
+        self.array_func = None
+        self.tensor_func = None
+        self.wrap_func = wrap_fn
+        self.signature = inspect.signature(fn)
+        return wraps(fn)(wrap_fn)
+    # Methods ------------------------------------------------------------------
+    def array(self, f):
+        self.array_func = wraps(self.base_func)(f)
+    def tensor(self, f):
+        self.tensor_func = wraps(self.base_func)(f)
+    def _bind(self, args, kwargs):
+        b = self.signature.bind(*args, **kwargs)
+        b.apply_defaults()
+        return (b.args, b.kwargs)
+    def _call_torch(self, args, kwargs):
+        if not self.tensor_func:
+            raise RuntimeError(
+                f"tensor function for {self.__name__} was not defined")
+        dev = numapi._find_device(args, kwargs)
+        (args, kwargs) = self._bind(args, kwargs)
+        args = map(numapi._as_tensor, args)
+        if kwargs:
+            kwargs = {k: numapi._as_tensor(v) for (k,v) in kwargs.items()}
+        return self.tensor_func(*args, **kwargs)
+    def _call_numpy(self, args, kwargs):
+        if not self.array_func:
+            raise RuntimeError(
+                f"array function for {self.__name__} was not defined")
+        (args, kwargs) = self._bind(args, kwargs)
+        args = map(numapi._as_array, args)
+        if kwargs:
+            kwargs = {k: numapi._as_array(v) for (k,v) in kwargs.items()}
+        return self.array_func(*args, **kwargs)
+    def __call__(self, *args, **kwargs):
+        # First, call the original function
+        rval = self.base_func(*args, **kwargs)
+        if rval is None:
+            pass
+        elif rval is np:
+            self._call_numpy(args, kwargs)
+        elif rval is torch:
+            return self._call_torch(args, kwargs)
+        else:
+            raise ValueError(
+                f"invalid value returned from numapi base_func: {rval}")
+        if torch_found:
+            any_arg = any(map(is_tensor, args))
+            any_inp = any_arg or any(map(is_tensor, kwargs.values()))
+            if any_inp:
+                return self._call_torch(args, kwargs)
+        # Otherwise we use the array form.
+        return self._call_numpy(args, kwargs)

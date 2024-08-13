@@ -119,7 +119,8 @@ from ._numeric import (
     is_complex,
     is_number,
     like_number,
-    to_number)
+    to_number,
+    numapi)
 
 from ._quantity import (
     is_ureg,
@@ -221,6 +222,7 @@ __all__ = (
     "is_intdata",
     "is_realdata",
     "is_complexdata",
+    "numapi",
     "default_ureg",
     "like_unit",
     "alike_units",
@@ -248,4 +250,4 @@ __all__ = (
 
 # Mark all the imported functions as belonging to this module instead of the
 # hidden submodules:
-reclaim(__name__, __all__, del_reclaim=False)
+reclaim(__name__, __all__, del_reclaim=False, skip_externs=False)
