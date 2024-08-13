@@ -19,6 +19,9 @@ The utility types included in pimms are:
 import math
 import operator as op
 from functools import partial
+from warnings import warn
+from collections import namedtuple
+from threading import Lock
 
 import numpy as np
 import scipy as sp
@@ -31,6 +34,9 @@ from ..util import (
     is_integer,
     is_tuple,
     is_amap,
+    is_array,
+    is_realdata,
+    is_tensor,
     is_array,
     merge,
     to_array,
@@ -527,6 +533,19 @@ class larray(NDArrayOperatorsMixin):
 
 # ArrayIndex ###################################################################
 
+ArrayIndexFlatData = namedtuple(
+    'ArrayIndexFlatData',
+    ['ident', 'index'])
+ArrayIndexFlatData.__doc__ = \
+    """Flattened identity and index data used by ArrayIndex to search for IDs.
+
+    Attributes
+    ----------
+    ident : read-only numpy array
+        The sorted and flattened identities represented in the original array.
+    index : read-only numpy array
+        The argsort of the flattened original array object.
+    """
 class ArrayIndex:
     """A type that indexes the elements of an array for easy searching.
 
@@ -556,7 +575,7 @@ class ArrayIndex:
         ii = np.argsort(array.flat)
         flatids = to_frozenarray(array.flat[ii], copy=False)
         flatins = to_frozenarray(ii, copy=False)
-        return (flatids, flatins)
+        return ArrayIndexFlatData(flatids, flatins)
     # Construction -------------------------------------------------------------
     __slots__ = ('array', '_flatdata')
     def __new__(cls, array, freeze=True):
@@ -565,7 +584,7 @@ class ArrayIndex:
         else:
             array = to_array(array, frozen=freeze)
         self = object.__new__(cls)
-        object.__setattr__(self, '_flatdata', None)
+        object.__setattr__(self, '_flatdata', Lock())
         object.__setattr__(self, 'array', array)
         return self
     # Public Methods -----------------------------------------------------------
@@ -609,7 +628,7 @@ class ArrayIndex:
             k = next(iter(kw.keys()))
             raise TypeError(f"'{k}' is an invalid keyword argument for find()")
         ids = to_array(ids)
-        (flatids, flatins) = self._get_flatdata()
+        (flatids, flatins) = self.flatdata()
         # flatids is the ids in sorded order; flatins is the argsort of the
         # original argsort--how to put the sorted ids back in canonical
         # order; flatarg is the argsort itself.
@@ -634,12 +653,27 @@ class ArrayIndex:
                 for (u,d) in zip(ins, default):
                     u[notfound] = default
         return ins
-    # Private Methods ----------------------------------------------------------
-    def _get_flatdata(self):
+    def flatdata(self):
+        """Returns a named tuple containing the flattened data used by the
+        `ArrayIndex` type to lookup identities.
+
+        `index.flatdata()` returns a named 2-tuple with keys `ident` and
+        `index`. The `ident` element is a read-only numpy array containing the
+        sorted and flattened identities represented in the original array. The
+        `index` element is a read-only numpy array containing the argsort of the
+        flattened original array object.
+        """
         flatdata = self._flatdata
-        if flatdata is None:
-            flatdata = self._make_flatdata(self.array)
-            object.__setattr__(self, '_flatdata', flatdata)
+        if isinstance(flatdata, Lock):
+            with flatdata:
+                # Make sure that once we've acquired the lock we still need to
+                # calculate the flatdata (i.e., we didn't check then acquire
+                # after another thread ran).
+                lock = flatdata
+                flatdata = self._flatdata
+                if flatdata is lock:
+                    flatdata = self._make_flatdata(self.array)
+                    object.__setattr__(self, '_flatdata', flatdata)
         return flatdata
     # Disabled Methods ---------------------------------------------------------
     def __setattr__(self, k, v):
@@ -650,304 +684,3 @@ class ArrayIndex:
         raise TypeError(f"{type(self)} is immutable")
     def __delitem__(self, k):
         raise TypeError(f"{type(self)} is immutable")
-
-
-# LazyFrame ####################################################################
-
-class LazyFrame(MetaObject):
-    """A DataFrame-like table type for qualities arranged along arbitrary axes.
-
-    A `LazyFrame` is similar to a pandas `DataFrame` object but is organized
-    around lazily loading properties (columns) and around placing propertties on
-    arbitrary axes, such as time or depth, that can then be queried against.
-
-    A `LazyFrame` represents each column of the data as a "property" and
-    represents each row as an "identity". The member value `frame.ident` is an
-    array of the unique identities in the `LazyFrame` object `frame`. The
-    `ident` array does not need to be a vector of identities, but whatever shape
-    it has, the properties in the frames must have the same shape, and all the
-    values in `ident` must be hashable and unique.
-
-
-    Parameters
-    ----------
-    *arg : tuple
-        The arguments that are to be represented as a `LazyFrame`. This argument
-        list would typically be a mapping object (such as a `dict` or a
-        `pcollections.ldict`) or a sequence of such mapping objects that are to
-        be merged together to make the `LazyFrame`. In these mappings,
-        the keys must be the property names, and the values must be the valid
-        properties, whose format is described here:
-
-        All properties passed in these arguments must match, along their initial
-        axis or axes, the `shape` parameter. Additional axes may be present in
-        the properties, and if they are present, they may be indexed for
-        interpolation by providing them as a tuple `(array, axes)` instead of
-        as an array alone. The `axes` member of the tuple must be a dict-like
-        mapping with one entry per additional axis in `array` (i.e.,
-        `len(shape) + len(axes) == array.ndim`). Each key in `coords` is
-        interpreted as the name of the additional axis, and the value must be
-        an array-like of real numeric values indicating the coordinates of each
-        entry along the axis. The ordering of the coordinates in the dictionary
-        must match the ordering of the additional axes. All axes are assumed to
-        be independent for the purposes of interpolation.
-
-        For example, to construct a lazy-frame with 5 identities (0 through 4)
-        and one property named "intensity" that was measured at 10 timepoints
-        each a half of a second apart, one might use the constructor:
-        `LazyFrame({'intensity': (intensity, {'time': arange(0, 5.0, 0.5)})})`
-        where `intensity` is a numpy array with shape `(5,10)`.
-
-        If a property has additional axes but does not wish to expose them to
-        interpolation, then a value of `None` may be associated with the
-        coordinate in question. Such coordinates are always returned as
-        dimensions in the result instead of being interpolated.
-
-        If a property has a default value for when no explicit position along
-        its interpolation axis is requested, then it can be specified in the
-        axes matrix using the entry `axis_name: (coords, default)`. The value
-        `default` provides the default value taken when no explicit value is
-        requested for this interpolation item. Note that axes with specified
-        defaults can still be obtained as entire dimensions by requesting a
-        specific value for the axis of `...` (`Ellipsis`).
-    ident : array or None, optional
-        An array of unique hashable identities whose shape defines the required
-        shape for all properties. If `ident` is `None` (the default), then the
-        shape tuple provided by the `shape` option is used to create an identity
-        matrix equivalent to `reshape(arange(prod(shape)), shape)`. If the
-        `shape` option is also not provided, then a ready (non-lazy) entry of
-        the arguments is used to deduce the shape; if no such non-lazy entry is
-        found, then an error is raised unless the argument `readycount` is set
-        to `True`, in which case lazy entries are examined. If no entries are
-        included, then the shape is assumed to be `(0,)`.
-    shape : tuple of ints or None, optional
-        The shape of the identity array of the `LazyFrame`. If `None` is given
-        (the default), then the shape is deduced from the `ident` matrix of
-        from the properties themselves (see the `ident` option). If the shape
-        and the `ident` options are both provided explicitly, then they must
-        match.
-    metadata : dict-like or None, optional
-        An optional dictionary of metadata to attach to the frame.
-    readycount : boolean, optional
-        If neither `ident` nor `shape` are explicitly provided and none of the
-        properties provided to the `LazyFrame` constructor are ready (i.e., not
-        lazy) then this option determines whether an error is raised. If
-        `readycount` is `True`, then no error is raised and instead the lazy
-        properties are checked for sizes. If `readycount` is `False` (the
-        default), then a `RuntimeError` is raised.
-    """
-    # Static Methods -----------------------------------------------------------
-    @classmethod
-    def _get_propshape(cls, ld, key):
-        "Returns the shape implied by a property entry in the lazy-dict."
-        arr = ld[key]
-        if is_tuple(arr) and len(arr) == 2:
-            (arr, coords) = val
-            return np.shape(arr)[:np.ndim(arr) - len(coords)]
-        else:
-            return np.shape(val)
-    @classmethod
-    def _make_ident(cls, shape, uint=True):
-        "Returns a default identity array for the given shape option."
-        numel = np.prod(shape)
-        maxel = numel - 1
-        if uint:
-            if maxel <= np.iinfo(np.uint8).max:
-                dtype = np.uint8
-            elif maxel <= np.iinfo(np.uint16).max:
-                dtype = np.uint16
-            elif maxel <= np.iinfo(np.uint32).max:
-                dtype = np.uint32
-            else:
-                dtype = np.uint
-        else:
-            if maxel <= np.iinfo(np.int8).max:
-                dtype = np.int8
-            elif maxel <= np.iinfo(np.int16).max:
-                dtype = np.int16
-            elif maxel <= np.iinfo(np.int32).max:
-                dtype = np.int32
-            else:
-                dtype = int
-        ident = np.arange(numel, dtype=dtype)
-        ident.setflags(write=False)
-        return ident
-    @classmethod
-    def _fix_axis(cls, propkey, axiskey, axis):
-        if isinstance(axis, tuple) and len(axis) == 2:
-            (x0, default) = axis
-            x = to_frozenarray(x0)
-            if x is not x0:
-                axis = (x, default)
-        else:
-            default = Ellipsis
-            x0 = None
-            x = to_frozenarray(axis)
-            axis = (x, default)
-        if len(x.shape) != 1:
-            raise ValueError(
-                f"axis {axiskey} given for property {propkey} in LazyFrame has"
-                f" invalid shape {x.shape}")
-        return axis
-    @classmethod
-    def _fix_prop(cls, shape, prop, key):
-        "Checks that a property matches the frame's shape or raises an error."
-        if isinstance(prop, lazy):
-            prop = prop()
-        if is_tuple(prop) and len(prop) == 2:
-            (array, coords) = prop
-            if not is_amap(coords):
-                raise ValueError(
-                    f"(array, coords) tuple given for property {key} uses type"
-                    f" {type(coords)} for coords, but coords must be a mapping")
-            array = to_frozenarray(array)
-            coords = tdict(coords)
-            csh = []
-            for (axiskey,axis) in coords.items():
-                ax = cls._fix_axis(key, axiskey, axis)
-                if ax is not axis:
-                    coords[axiskey] = ax
-                csh.append(ax[0].shape[0])
-            coords = coords.persistent()
-            csh = tuple(csh)
-            if shape != (array.shape + csh):
-                raise ValueError(
-                    f"LazyFrame key {key} has array shape {array.shape}, but"
-                    f" ident shape is {shape} and coords have shape {csh}")
-            if array is prop[0] and coords is prop[1]:
-                return prop
-        else:
-            array = to_frozenarray(prop)
-            coords = pdict.empty
-            if shape != array.shape:
-                raise ValueError(
-                    f"LazyFrame key {key} has array shape {array.shape}, but"
-                    f" ident shape is {shape} and coords were given")
-        return (array, coords)
-    # Constructor --------------------------------------------------------------
-    def __init__(self, *args,
-                 ident=None,
-                 shape=None,
-                 metadata=None,
-                 readycount=False):
-        # Initialize the MetaObject data.
-        MetaObject.__init__(self, metadata)
-        # Make a lazy dictionary from the provided arguments.
-        self.datadict = ldict(merge(*args))
-        self.ident = ident
-        self.shape = shape
-        self.readycount = readycount
-    # If we are updated via a copy operation, we want to make sure that we parse
-    # the new values we are given; since we keep a lot of our initial checks in
-    # the init function, we just allocate a new object instead of going the
-    # plandict route.
-    def copy(self, **kwargs):
-        if len(kwargs) == 0:
-            return self
-        readycount = kwargs.pop('readycount', False)
-        if len(kwargs) == 1:
-            k = next(kwargs.keys())
-            if k == 'metadata':
-                return MetaObject.copy(self, **kwargs)
-        dd = kwargs.pop('datadict', self.datadict)
-        ident = kwargs.pop('ident', self.ident)
-        md = kwargs.pop('metadata', self.metadata)
-        cls = type(self)
-        return cls(dd, ident=ident, metadata=md, readycount=readycount)
-    # Calculations -------------------------------------------------------------
-    @calc('ident', 'shape', 'datadict', 'readycount', lazy=False)
-    def filter_params(datadict, ident=None, shape=None, readycount=False):
-        readycount = bool(readycount)
-        # If we have been provided with an identity array, process it.
-        if ident is None:
-            if shape is None:
-                if len(datadict) == 0:
-                    shape = (0,)
-                else:
-                    # We try to deduce the row count
-                    key = next(
-                        filter(datadict.is_ready, datadict.keys()),
-                        datadict)
-                    if key is datadict:
-                        # We weren't given a ready key we can use; if readycount
-                        # is false, we stop here.
-                        if not readycount: 
-                            raise RuntimeError(
-                                "LazyFrame cannot deduce shape: no shape,"
-                                " ident, or ready properties given and"
-                                " readycount is False")
-                        # Otherwise, we can try the unready keys.
-                        for key in datadict.keys():
-                            # We try to extract a shape; on failure we keep
-                            # going, because it is possible that not all lazy
-                            # entries are intended to be used.
-                            try:
-                                shape = LazyFrame._get_propshape(props, key)
-                                break
-                            except Exception:
-                                pass
-                        # If shape is still None here, all keys failed!
-                        if shape is None:
-                            raise RuntimeError(
-                                f"LazyFrame cannot deduce shape: no shape or"
-                                f" ident given, and all {len(datadict)} lazy"
-                                f" properties raised errors when loaded")
-            # At this point, we have either been provided with or deduced a
-            # shape for the ident matrix. We can go ahead and make a default
-            # matrix.
-            ident = LazyFrame._make_ident(shape)
-        else:
-            ident = to_frozenarray(ident)
-            # If we were given a shape option, it must match.
-            if shape is None:
-                shape = ident.shape
-            else:
-                if not isinstance(shape, tuple):
-                    shape = (shape,)
-                if shape != ident.shape:
-                    raise ValueError(
-                        f"shape of ident [{ident.shape}] does not match the"
-                        f" given shape option [{shape}]")
-        # For all ready keys, we want to check that they are appropriate shapes
-        # and have appropriate coordinates now.
-        datadict = datadict.to_pdict()
-        res = tdict(datadict)
-        for (k,v) in datadict.items():
-            if isinstance(v, lazy):
-                vv = lazy(LazyFrame._fix_prop, shape, v, k)
-            else:
-                vv = LazyFrame._fix_prop(shape, v, k)
-            if v is not vv:
-                res[k] = vv
-        datadict = ldict(res)
-        return (ident, shape, datadict, readycount)
-    @calc('ident_index')
-    def calc_ident_index(ident):
-        return ArrayIndex(ident, freeze=True)
-    # Methods ------------------------------------------------------------------
-    @docwrap(indent=8)
-    def find(self, ident, ravel=False):
-        """Returns the index/indices of the given id/ids in the lazy frame.
-
-        Parameters
-        ----------
-        ident : array-like
-            The identity or identities (if an array is provided) whose indices
-            in the original array are to be looked up.
-        ravel : boolean, optional
-            Whether to return a raveled integer index (`True`) or an unraveled
-            tuple index (`False`). The default is `False`.
-
-        Returns
-        -------
-        index : array-like
-            The index or indices corresponding to the `ident` argument.
-
-        Raises
-        ------
-        RuntimeError
-            If the given identity value(s) cannot be found in the original
-            array.
-        """
-        return self.ident_index.find(ident, ravel=ravel)
-    

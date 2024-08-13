@@ -11,6 +11,11 @@ types into other types, and functions for querying numpy arrays and pytorch
 tensors.
 """
 
+# The _init module provides useful utilities for use during import, but these
+# utilities happen to rightfully belong in this namespace.
+from .._init import (
+    reclaim)
+
 from ._core import (
     is_str,
     strnorm,
@@ -238,17 +243,9 @@ __all__ = (
     "dissoc",
     "lambdadict",
     "is_url",
-    "url_download")
+    "url_download",
+    "reclaim")
 
 # Mark all the imported functions as belonging to this module instead of the
 # hidden submodules:
-from sys import modules
-thismod = modules[__name__]
-for k in dir():
-    if k[0] == '_':
-        continue
-    obj = getattr(thismod, k)
-    if getattr(obj, '__module__', __name__) == __name__:
-        continue
-    obj.__module__ = __name__
-del obj, thismod, modules, k
+reclaim(__name__, __all__, del_reclaim=False)

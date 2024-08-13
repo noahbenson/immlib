@@ -344,14 +344,12 @@ class TestUtilNumeric(TestCase):
         self.assertTrue(np.array_equal(to_array(mtx, frozen=True), mtx))
         self.assertIsNot(to_array(mtx, frozen=True), mtx)
         # The quant argument can be used to enforce the return of quantities or
-        # non-quantities.
-        self.assertIsInstance(to_array(arr, quant=True), units.Quantity)
+        # non-quantities, but you can't force a quantity without a unit:
+        with self.assertRaises(ValueError):
+            arr = to_array(arr, quant=True)
         # The unit parameter can be used to specify what unit to use.
         self.assertTrue(np.array_equal(q_arr.m,
                                        to_array(arr, quant=True, unit='mm').m))
-        # If no unit is provided, then dimensionless units are assumed (1
-        # dimensionless is equivalent to 1 count, 1 turn, and a few others).
-        self.assertEqual(to_array(arr, quant=True).u, units.dimensionless)
         # We can also use unit to extract a specific unit from a quantity.
         self.assertEqual(1000, to_array(1 * units.meter, unit='mm').m)
         # However, a non-quantity is always assumed to already have the units

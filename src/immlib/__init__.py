@@ -10,37 +10,55 @@ utility functions and through the use of decorators, which are generally applied
 to classes and their members to declare how an immutable data-structure's
 members are related.  Taken together, these utilities form a DSL-like system for
 declaring workflows and immutable data-structures with full inheritance support.
+
+Attributes
+----------
+units : pint.UnitRegistry
+    The registry for units tracked by `immlib`. The `immlib.units` object is a
+    global `pint`-module unit registry that can be used as a single global place
+    for tracking units. Immlib functions that interact with units generally take
+    an argument `ureg` that can be used to modify this registry.  Additionally,
+    the default registry (this object, `immlib.units`) can be temporarily
+    changed in a local block using `with immlib.default_ureg(ureg): ...`.
+version : immlib.Version
+    A representation of the `immlib` version. The version string may be obtained
+    via `version.string`; major, minor, and micro numbers (when present) may be
+    obtained via `version.major`, `version.minor`, and `version.micro` (when not
+    provided the are set to `None`), and a stage tag (a string), if given, can
+    be obtained via `version.stage`.
+submodules : tuple of str
+    A list of all immlib subpackage names in load-order. The
+    `immlib.submodules`attribute is a tuple of strings, each of which is the
+    name of one of the sub-submodules in `immlib`. The modules are listed in
+    load-order and all `immlib` submodules are included.
 '''
 
 
 # Imports ######################################################################
 
+# We always import _init first.
+from . import _init
+# Then the core library.
 from .doc      import *
 from .util     import *
 from .pathlib  import *
 from .iolib    import *
 from .workflow import *
 from .types    import *
-# We want the version object from the ._version namespace.
-from ._version import version
 # Import the Global UnitRegistry object to the global immlib scope. This is the
 # value that gets updated when one runs `immlib.default_ureg()`, and this is the
 # UnitRegistry that is used as the default registry for all `immlib` functions.
 from .util._quantity import _initial_global_ureg as units
-"""UnitRegistry: the registry for units tracked by immlib.
-
-`immlib.units` is a global `pint`-module unit registry that can be used as a
-single global place for tracking units. Immlib functions that interact with
-units generally take an argument `ureg` that can be used to modify this
-registry.  Additionally, the default registry (this object, `immlib.units`) can
-be temporarily changed in a local block using `with immlib.default_ureg(ureg):
-...`.
-"""
+# We want the version object from the ._version namespace; this is always last.
+from ._version import (version, Version)
+# After importing everything, we can delete _init.
+del _init
 
 
 # Modules/Reloading ############################################################
 
 submodules = (
+    'immlib._init',
     'immlib.doc._core',
     'immlib.doc',
     'immlib.util._core',
@@ -59,12 +77,6 @@ submodules = (
     'immlib.types._core',
     'immlib.types',
     'immlib._version')
-"""tuple: a list of all immlib subpackage names in load-order.
-
-`immlib.submodules` is a tuple of strings, each of which is the name of one of
-the sub-submodules in `immlib`. The modules are listed in load-order and all
-`immlib` submodules are included.
-"""
 def reload_immlib():
     """Reload and return the entire `immlib` package.
 
@@ -88,4 +100,4 @@ __all__ = tuple(
      if k[0] != '_'
      if k != 'reload_immlib'
      if k != 'submodules'
-     if ('immlib.' + k) not in submodules])
+     if k != 'version'])
