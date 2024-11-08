@@ -8,3 +8,4 @@
 from .test_core     import TestUtilCore
 from .test_numeric  import TestUtilNumeric
 from .test_quantity import TestUtilQuantity
+from .test_url      import TestUtilURL

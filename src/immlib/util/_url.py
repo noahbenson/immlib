@@ -15,16 +15,17 @@ from pathlib import Path
 def is_url(url):
     '''Returns `True` if given a valid URL string and `False` otherwise.
     
-    `is_url(url)` returns `True` if and only if the given URL is a valid
-    URL string that includes the URL scheme and the netloc. Whether the URL
-    can be requested or not does not make a difference; `is_url` operates on
-    the given URL string alone.
+    `is_url(url)` returns `True` if and only if the given URL is a valid URL
+    string that includes the URL scheme and the netloc unless the scheme is
+    `'file'`, in which case the netloc is optional. Whether the URL can be
+    requested or not does not make a difference; `is_url` operates on the given
+    URL string alone.
     
     See also: `can_download_url`
     '''
     try:
         p = urllib.parse.urlparse(url)
-        return p.scheme and p.netloc
+        return bool(p.scheme and (p.netloc or p.scheme == 'file'))
     except Exception:
         return False
 def can_download_url(url):
