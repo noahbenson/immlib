@@ -1201,77 +1201,73 @@ def to_mcoll(obj):
     else:
         raise TypeError(f"argument is not a collection")
 @docwrap
-def to_frozenarray(arr, copy=None, subok=False):
-    """Returns a copy of the given NumPy array that is read-only.
+def freezearray(arr):
+    """Freezes a NumPy array or SciPy sparse array in-place.
 
-    If the argument `arr` is already a NumPy `ndarray` with its `'WRITEABLE'`
-    flag set to `False`, then `arr` is returned; otherwise, a copy is made, its
-    write-flag is set to `False`, and it is returned.
+    `freezearray(x)` sets the `'WRITEABLE'` bit on the numpy array `x` or on
+    `x.data` if `x` is a SciPy sparse array. If `x` is neither a NumPy array nor
+    a SciPy sparse array, then a `TypeError` is raised. No value is returned.
 
-    If `arr` is not a NumPy array, it is first converted into one.
-
-    Parameters
-    ----------
-    arr : array-like
-        The NumPy array to freeze or an object to convert into a frozen NumPy
-        array.
-    copy : boolean or None, optional
-        If `True` or `False`, then forces the array to be copied or not copied;
-        if `None`, then a copy is made if the object is writeable and no copy
-        is made otherwise.
-    subok : boolean, optional
-        If True, then sub-classes will be passed-through, otherwise the returned
-        array will be forced to be a base-class array (defaults to False).
-
-    Returns
-    -------
-    numpy.ndarray
-        A read-only copy of `arr` (or `arr` itself if it is already read-only).
-
-    Raises
-    ------
-    TypeError
-        If `arr` is not a NumPy array.
+    `freezearray(q)` is equivalent to `freezearray(q.m)` if `q` is a `Quantity`
+    object.
     """
-    if sps.issparse(arr):
-        if not (arr.data.flags['WRITEABLE'] or copy):
-            return arr
-        arr = arr.copy()
-        arr.data.flags['WRITEABLE'] = False
-    elif not isinstance(arr, np.ndarray):
-        arr = np.array(arr, copy=(copy is None or copy), subok=subok)
-        copy = False
-    rw = arr.flags['WRITEABLE']
-    if copy is None:
-        copy = rw
-    if copy:
-        arr = np.copy(arr, subok=subok)
-    if rw:
+    if isinstance(arr, pint.Quantity):
+        arr = arr.m
+    if isinstance(arr, np.ndarray):
         arr.setflags(write=False)
-    return arr
+    elif sps.issparse(arr):
+        arr.data.setflags(write=False)
+    else:
+        raise TypeError(
+            f"freezearray requires a numpy array or scipy sparse array,"
+            f" but type {type(arr)} was given")
 @docwrap
-def frozenarray(obj, *args, **kwargs):
-    """Equivalent to `numpy.array` but returns read-only arrays.
+def frozenarray(obj, dtype=None, *, copy=False, **kwargs):
+    """Roughly equivalent to `numpy.array` but returns read-only arrays.
 
-    `frozenarray(obj)` is equivalent to `numpy.array(obj)` with the exception
-    that the returned object is always a frozen array (i.e., an array with the
-    `'WRITEABLE'` flag set to `False`). If `copy=False` is requested, but the
-    passed array is writeable, then an error is raised; if you wish to convert
-    an array to a read-only array without copying, you must use the
-    `to_frozenarray` function.
+    `frozenarray(obj)` is equivalent to `numpy.array(obj)` with a small number
+    of exceptions:
+      * Primarily, the returned object is always a frozen array (i.e., an array
+        with the `'WRITEABLE'` flag set to `False`).
+      * The default value of `copy` is `False`, meaning that a copy of the array
+        will only be made if required by the other parameters or if the array is
+        not already read-only. If you wish to make an array read-only rather
+        than obtaining a read-only copy of it, use the `freezearray()` function.
+      * SciPy sparse arrays are also handled by setting the write flag on the
+        `obj.data` member.
+      * If `obj` is a `pint.Quantity` object, then an equivalent quantity with
+        the magnitude made writeable is returned.
+
+    If a PyTorch tensor is passed to `frozenarray`, it will be converted into a
+    frozen NumPy array.
 
     See Also
     --------
     `numpy.array`
         Create an array that is not frozen by default.
-    `to_frozenarray`
+    `freezearray`
         Convert an argument to a frozen array (allows `copy=False`).
     """
-    arr = np.array(obj, *args, **kwargs)
-    if arr is obj and arr.flags['WRITEABLE']:
-        arr = arr.copy()
-    arr.setflags(write=False)
-    return arr
+    if isinstance(obj, pint.Quantity):
+        arr = frozenarray(obj.m, dtype=dtype, copy=copy, **kwargs)
+        return obj if not copy and arr is obj.m else type(obj)(arr, obj.u)
+    elif sps.issparse(obj):
+        arr = frozenarray(obj.data, dtype=dtype, copy=copy, **kwargs)
+        if not copy and obj.data is arr:
+            return obj
+        obj = obj.copy()
+        obj.data = arr
+        return obj
+    elif isinstance(obj, np.ndarray):
+        if obj.flags['WRITEABLE']:
+            copy = True
+        arr = np.array(obj, dtype=dtype, copy=copy, **kwargs)
+        arr.setflags(write=False)
+        return arr
+    else:
+        arr = np.array(obj, dtype=dtype, **kwargs)
+        arr.setflags(write=False)
+        return arr
 @docwrap
 def unbroadcast_index(broadcasted_index, original_shape, broadcasted_shape):
     """Converts a broadcasted index into an equivalent index for the original

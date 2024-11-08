@@ -186,23 +186,25 @@ class TestUtilCore(TestCase):
         self.assertFalse(can_iter(lambda x:x))
 
     # Freeze/Thaw Utilities ####################################################
-    def test_to_frozenarray(self):
-        from immlib.util import to_frozenarray
+    def test_frozenarray(self):
+        from immlib.util import frozenarray, freezearray
         import numpy as np
         # frozenarray converts a read-write numpy array into a frozen one.
         x = np.linspace(0, 1, 25)
-        y = to_frozenarray(x)
+        y = frozenarray(x)
         self.assertTrue(np.array_equal(x, y))
         self.assertIsNot(x, y)
         self.assertTrue(x.flags['WRITEABLE'])
         self.assertFalse(y.flags['WRITEABLE'])
         # If a frozenarray of an already frozen array is requested, the array is
         # returned as-is.
-        self.assertIs(y, to_frozenarray(y))
+        self.assertIs(y, frozenarray(y))
         # However, one can override this with the copy argument.
-        self.assertIsNot(y, to_frozenarray(y, copy=True))
+        self.assertIsNot(y, frozenarray(y, copy=True))
         # Typically a copy is made of the original array if it is not already
-        # frozen, but one can request that it not be copied.
-        z = to_frozenarray(x, copy=False)
-        self.assertIs(z, x)
+        # frozen, but one can use freezearray to prevent copying.
+        z = frozenarray(x)
+        self.assertIsNot(z, x)
+        self.assertTrue(x.flags['WRITEABLE'])
+        freezearray(x)
         self.assertFalse(x.flags['WRITEABLE'])

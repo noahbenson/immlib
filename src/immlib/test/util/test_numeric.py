@@ -17,6 +17,107 @@ class TestUtilNumeric(TestCase):
     """Tests the immlib.util._numeric module."""
 
     # Numeric Types ############################################################
+    def test_is_numberdata(self):
+        from immlib import is_numberdata
+        import torch, numpy as np
+        # is_numberdata returns True for numbers and False for non-numbers.
+        self.assertTrue(is_numberdata(0))
+        self.assertTrue(is_numberdata(5))
+        self.assertTrue(is_numberdata(10.0))
+        self.assertTrue(is_numberdata(-2.0 + 9.0j))
+        self.assertTrue(is_numberdata(True))
+        self.assertFalse(is_numberdata('abc'))
+        self.assertFalse(is_numberdata('10'))
+        self.assertFalse(is_numberdata(None))
+        # Arrays and tensors are checked for their dtype to be such that their
+        # elements are numbers.
+        self.assertTrue(is_numberdata(np.array(5)))
+        self.assertTrue(is_numberdata(np.array(10.0 + 2.0j)))
+        self.assertTrue(is_numberdata(torch.tensor(5)))
+        self.assertTrue(is_numberdata(torch.tensor(10.0 + 2.0j)))
+        self.assertTrue(is_numberdata(torch.tensor([1,2,3])))
+        self.assertTrue(is_numberdata(np.array([[-12.0]])))
+        self.assertFalse(is_numberdata(np.array(['abc'])))
+    def test_is_booldata(self):
+        from immlib import is_booldata
+        import torch, numpy as np
+        # is_booldata returns True for booleans and False for non-booleans.
+        self.assertFalse(is_booldata(0))
+        self.assertFalse(is_booldata(5))
+        self.assertFalse(is_booldata(10.0))
+        self.assertFalse(is_booldata(-2.0 + 9.0j))
+        self.assertTrue(is_booldata(True))
+        self.assertFalse(is_booldata('abc'))
+        self.assertFalse(is_booldata('10'))
+        self.assertFalse(is_booldata(None))
+        # Arrays and tensors are checked for their dtype to be such that their
+        # elements are numbers.
+        self.assertTrue(is_booldata(np.array(True)))
+        self.assertFalse(is_booldata(np.array(10.0 + 2.0j)))
+        self.assertFalse(is_booldata(torch.tensor(5)))
+        self.assertFalse(is_booldata(torch.tensor(10.0 + 2.0j)))
+        self.assertTrue(is_booldata(torch.tensor([True,False,False])))
+        self.assertFalse(is_booldata(np.array([[12.0]])))
+    def test_is_intdata(self):
+        from immlib import is_intdata
+        import torch, numpy as np
+        # is_intdata returns True for integers and False for non-integers.
+        self.assertTrue(is_intdata(0))
+        self.assertTrue(is_intdata(5))
+        self.assertFalse(is_intdata(10.0))
+        self.assertFalse(is_intdata(-2.0 + 9.0j))
+        self.assertTrue(is_intdata(True))
+        self.assertFalse(is_intdata('abc'))
+        self.assertFalse(is_intdata('10'))
+        self.assertFalse(is_intdata(None))
+        # Arrays and tensors are checked for their dtype to be such that their
+        # elements are numbers.
+        self.assertTrue(is_intdata(np.array(5)))
+        self.assertFalse(is_intdata(np.array(10.0 + 2.0j)))
+        self.assertTrue(is_intdata(torch.tensor(5)))
+        self.assertFalse(is_intdata(torch.tensor(10.0 + 2.0j)))
+        self.assertTrue(is_intdata(torch.tensor([1,2,3])))
+        self.assertFalse(is_intdata(np.array([[12.0]])))
+    def test_is_realdata(self):
+        from immlib import is_realdata
+        import torch, numpy as np
+        # is_real returns True for reals and False for non-reals.
+        self.assertTrue(is_realdata(0))
+        self.assertTrue(is_realdata(5))
+        self.assertTrue(is_realdata(10.0))
+        self.assertTrue(is_realdata(True))
+        self.assertFalse(is_realdata(-2.0 + 9.0j))
+        self.assertFalse(is_realdata('abc'))
+        self.assertFalse(is_realdata('10'))
+        self.assertFalse(is_realdata(None))
+        # Arrays and tensors are checked for their dtype to be such that their
+        # elements are numbers.
+        self.assertTrue(is_realdata(np.array(5)))
+        self.assertFalse(is_realdata(np.array(10.0 + 2.0j)))
+        self.assertTrue(is_realdata(torch.tensor(5)))
+        self.assertFalse(is_realdata(torch.tensor(10.0 + 2.0j)))
+        self.assertTrue(is_realdata(torch.tensor([1,2,3])))
+        self.assertTrue(is_realdata(np.array([[12.0]])))
+    def test_is_complexdata(self):
+        from immlib import is_complexdata
+        import torch, numpy as np
+        # is_complexdata returns True for complexs and False for non-complexs.
+        self.assertTrue(is_complexdata(0))
+        self.assertTrue(is_complexdata(5))
+        self.assertTrue(is_complexdata(10.0))
+        self.assertTrue(is_complexdata(True))
+        self.assertTrue(is_complexdata(-2.0 + 9.0j))
+        self.assertFalse(is_complexdata('abc'))
+        self.assertFalse(is_complexdata('10'))
+        self.assertFalse(is_complexdata(None))
+        # Arrays and tensors are checked for their dtype to be such that their
+        # elements are numbers.
+        self.assertTrue(is_complexdata(np.array(5)))
+        self.assertTrue(is_complexdata(np.array(10.0 + 2.0j)))
+        self.assertTrue(is_complexdata(torch.tensor(5)))
+        self.assertTrue(is_complexdata(torch.tensor(10.0 + 2.0j)))
+        self.assertTrue(is_complexdata(torch.tensor([1,2,3])))
+        self.assertTrue(is_complexdata(np.array([[12.0]])))
     def test_is_number(self):
         from immlib import is_number
         import torch, numpy as np
@@ -747,105 +848,3 @@ class TestUtilNumeric(TestCase):
         with self.assertRaises(TypeError): to_number('10')
         with self.assertRaises(TypeError): to_number({'a':10})
         with self.assertRaises(TypeError): to_number([1,2,3])
-
-    def test_is_numberdata(self):
-        from immlib import is_numberdata
-        import torch, numpy as np
-        # is_numberdata returns True for numbers and False for non-numbers.
-        self.assertTrue(is_numberdata(0))
-        self.assertTrue(is_numberdata(5))
-        self.assertTrue(is_numberdata(10.0))
-        self.assertTrue(is_numberdata(-2.0 + 9.0j))
-        self.assertTrue(is_numberdata(True))
-        self.assertFalse(is_numberdata('abc'))
-        self.assertFalse(is_numberdata('10'))
-        self.assertFalse(is_numberdata(None))
-        # Arrays and tensors are checked for their dtype to be such that their
-        # elements are numbers.
-        self.assertTrue(is_numberdata(np.array(5)))
-        self.assertTrue(is_numberdata(np.array(10.0 + 2.0j)))
-        self.assertTrue(is_numberdata(torch.tensor(5)))
-        self.assertTrue(is_numberdata(torch.tensor(10.0 + 2.0j)))
-        self.assertTrue(is_numberdata(torch.tensor([1,2,3])))
-        self.assertTrue(is_numberdata(np.array([[-12.0]])))
-        self.assertFalse(is_numberdata(np.array(['abc'])))
-    def test_is_booldata(self):
-        from immlib import is_booldata
-        import torch, numpy as np
-        # is_booldata returns True for booleans and False for non-booleans.
-        self.assertFalse(is_booldata(0))
-        self.assertFalse(is_booldata(5))
-        self.assertFalse(is_booldata(10.0))
-        self.assertFalse(is_booldata(-2.0 + 9.0j))
-        self.assertTrue(is_booldata(True))
-        self.assertFalse(is_booldata('abc'))
-        self.assertFalse(is_booldata('10'))
-        self.assertFalse(is_booldata(None))
-        # Arrays and tensors are checked for their dtype to be such that their
-        # elements are numbers.
-        self.assertTrue(is_booldata(np.array(True)))
-        self.assertFalse(is_booldata(np.array(10.0 + 2.0j)))
-        self.assertFalse(is_booldata(torch.tensor(5)))
-        self.assertFalse(is_booldata(torch.tensor(10.0 + 2.0j)))
-        self.assertTrue(is_booldata(torch.tensor([True,False,False])))
-        self.assertFalse(is_booldata(np.array([[12.0]])))
-    def test_is_intdata(self):
-        from immlib import is_intdata
-        import torch, numpy as np
-        # is_intdata returns True for integers and False for non-integers.
-        self.assertTrue(is_intdata(0))
-        self.assertTrue(is_intdata(5))
-        self.assertFalse(is_intdata(10.0))
-        self.assertFalse(is_intdata(-2.0 + 9.0j))
-        self.assertTrue(is_intdata(True))
-        self.assertFalse(is_intdata('abc'))
-        self.assertFalse(is_intdata('10'))
-        self.assertFalse(is_intdata(None))
-        # Arrays and tensors are checked for their dtype to be such that their
-        # elements are numbers.
-        self.assertTrue(is_intdata(np.array(5)))
-        self.assertFalse(is_intdata(np.array(10.0 + 2.0j)))
-        self.assertTrue(is_intdata(torch.tensor(5)))
-        self.assertFalse(is_intdata(torch.tensor(10.0 + 2.0j)))
-        self.assertTrue(is_intdata(torch.tensor([1,2,3])))
-        self.assertFalse(is_intdata(np.array([[12.0]])))
-    def test_is_realdata(self):
-        from immlib import is_realdata
-        import torch, numpy as np
-        # is_real returns True for reals and False for non-reals.
-        self.assertTrue(is_realdata(0))
-        self.assertTrue(is_realdata(5))
-        self.assertTrue(is_realdata(10.0))
-        self.assertTrue(is_realdata(True))
-        self.assertFalse(is_realdata(-2.0 + 9.0j))
-        self.assertFalse(is_realdata('abc'))
-        self.assertFalse(is_realdata('10'))
-        self.assertFalse(is_realdata(None))
-        # Arrays and tensors are checked for their dtype to be such that their
-        # elements are numbers.
-        self.assertTrue(is_realdata(np.array(5)))
-        self.assertFalse(is_realdata(np.array(10.0 + 2.0j)))
-        self.assertTrue(is_realdata(torch.tensor(5)))
-        self.assertFalse(is_realdata(torch.tensor(10.0 + 2.0j)))
-        self.assertTrue(is_realdata(torch.tensor([1,2,3])))
-        self.assertTrue(is_realdata(np.array([[12.0]])))
-    def test_is_complexdata(self):
-        from immlib import is_complexdata
-        import torch, numpy as np
-        # is_complexdata returns True for complexs and False for non-complexs.
-        self.assertTrue(is_complexdata(0))
-        self.assertTrue(is_complexdata(5))
-        self.assertTrue(is_complexdata(10.0))
-        self.assertTrue(is_complexdata(True))
-        self.assertTrue(is_complexdata(-2.0 + 9.0j))
-        self.assertFalse(is_complexdata('abc'))
-        self.assertFalse(is_complexdata('10'))
-        self.assertFalse(is_complexdata(None))
-        # Arrays and tensors are checked for their dtype to be such that their
-        # elements are numbers.
-        self.assertTrue(is_complexdata(np.array(5)))
-        self.assertTrue(is_complexdata(np.array(10.0 + 2.0j)))
-        self.assertTrue(is_complexdata(torch.tensor(5)))
-        self.assertTrue(is_complexdata(torch.tensor(10.0 + 2.0j)))
-        self.assertTrue(is_complexdata(torch.tensor([1,2,3])))
-        self.assertTrue(is_complexdata(np.array([[12.0]])))

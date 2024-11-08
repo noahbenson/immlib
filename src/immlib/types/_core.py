@@ -31,7 +31,8 @@ from numpy.lib.mixins import NDArrayOperatorsMixin
 
 from ..doc import docwrap
 from ..util import (
-    to_frozenarray,
+    freezearray,
+    frozenarray,
     is_integer,
     is_tuple,
     is_amap,
@@ -215,9 +216,10 @@ class ArrayIndex:
     # Class Methods ------------------------------------------------------------
     @classmethod
     def _make_flatdata(cls, array):
-        ii = np.argsort(array.flat)
-        flatids = to_frozenarray(array.flat[ii], copy=False)
-        flatins = to_frozenarray(ii, copy=False)
+        flatins = np.argsort(array.flat)
+        flatids = array.flat[flatins]
+        freezearray(flatins)
+        freezearray(flatids)
         return ArrayIndexFlatData(flatids, flatins)
     # Construction -------------------------------------------------------------
     __slots__ = ('array', '_flatdata')

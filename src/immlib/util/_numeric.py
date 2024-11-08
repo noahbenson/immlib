@@ -17,7 +17,8 @@ from scipy.sparse import issparse as scipy__is_sparse
 from ..doc import docwrap
 from ._core import (
     is_tuple, is_list, is_aseq, is_aset,
-    is_str, streq, strnorm,
+    is_str, streq, strnorm, 
+    frozenarray, freezearray,
     unitregistry)
 
 
@@ -262,6 +263,147 @@ def is_complexdata(obj):
         `True` if `obj` is an instance of `Complex`, otherwise `False`.
     """
     return _is_numtype(obj, Complex, _complex_dtypes)
+
+
+# Scalar Utilities #############################################################
+
+def _is_scalar(obj, numtype):
+    if isinstance(obj, np.ndarray) or torch.is_tensor(obj):
+        if obj.shape != ():
+            return False
+        obj = obj.item()
+    return isinstance(obj, numtype)
+@docwrap
+def is_number(obj, /, dtype=None):
+    """Determines whether the argument is a scalar number or not.
+
+    `is_number(x)` returns `True` if `x` is a scalar number and `False`
+    otherwise. The following are considered scalar numbers:
+     * Any instances of `numbers.Number`,
+     * Any numpy array `x` whose shape is `()` such that `x.item()` is a scalar.
+
+    See also: `like_number`
+
+    Parameters
+    ----------
+    obj : object
+        The object whose quality as a scalar number is to be tested.
+    dtype : bool, int, float, complex, or None, optional
+        The type of the scalar. If this is `None` (the default)`, then the type
+        of the scalar must be a number but it needn't be any particular number.
+        Otherwise, it must match the given type.
+    
+    Returns
+    -------
+    bool
+        `True` if `obj` is a scalar number value and `False` otherwise.
+    """
+    if dtype is None:
+        return _is_scalar(obj, Number)
+    elif dtype is bool:
+        return _is_scalar(obj, bool)
+    elif dtype is int:
+        return _is_scalar(obj, Integral)
+    elif dtype is float:
+        return _is_scalar(obj, Real)
+    elif dtype is complex:
+        return _is_scalar(obj, Comlex)
+    else:
+        raise ValueError(f"invalid dtype: {dtype}")
+def is_bool(obj):
+    """Determines whether the argument is a scalar boolean or not.
+
+    `is_bool(x)` returns `True` if `x` is a scalar boolean and `False`
+    otherwise.
+
+    See also: `is_scalar`
+    """
+    return _is_scalar(obj, bool)
+def is_integer(obj):
+    """Determines whether the argument is a scalar integer or not.
+
+    `is_integer(x)` returns `True` if `x` is a scalar integer and `False`
+    otherwise. Note that booleans are considered integers.
+
+    See also: `is_scalar`, `is_intdata`
+    """
+    return _is_scalar(obj, Integral)
+def is_real(obj):
+    """Determines whether the argument is a scalar real number or not.
+
+    `is_real(x)` returns `True` if `x` is a scalar real number and `False`
+    otherwise. Note that booleans and integers are considered real numbers.
+
+    See also: `is_scalar`, `is_realdata`
+    """
+    return _is_scalar(obj, Real)
+def is_complex(obj):
+    """Determines whether the argument is a scalar complex number or not.
+
+    `is_complex(x)` returns `True` if `x` is a scalar complex number and `False`
+    otherwise. Note that booleans, integers, and real numbers are all considered
+    valid complex numbers.
+
+    See also: `is_number`, `is_complexdata`
+    """
+    return _is_scalar(obj, Complex)
+def like_number(obj):
+    """Determines whether the argument holds a scalar number value or not.
+
+    `like_number(x)` returns `True` if `x` is already a scalar number, if `x` is
+    a single-element numpy array or tensor, or if `x` is a sequence or set that
+    has only one numerical element; otherwise, it returns `False`.
+
+    If `like_number(x)` returns `True`, then `to_number(x)` will always return a
+    valid Python number (i.e., an object of type `numbers.Number`).
+
+    See also: `is_number`, `to_number`
+    """
+    if isinstance(obj, Number):
+        return True
+    if torch.is_tensor(obj):
+        return torch.numel(obj) == 1
+    if not isinstance(obj, np.ndarray):
+        try:
+            obj = np.asarray(obj)
+        except TypeError:
+            return False
+    return obj.size == 1 and is_numberdata(obj)
+@docwrap
+def to_number(obj):
+    """Converts the argument into a simple Python number.
+
+    `to_number(x)` returns a simple Python number representation of `x` (in
+    other words, `x` will be a subtype of Python's `numbers.Number` type). Any
+    number, any NumPy array with only one element, and any PyTorch tensor with
+    only one element can be converted into a scalar.
+
+    Parameters
+    ----------
+    obj : object
+        The object that is to be converted into a scalar number.
+
+    Returns
+    -------
+    number
+        A scalar number that is an object whose class is a subtype of
+        `numbers.Number`.
+
+    Raises
+    ------
+    TypeError
+        If the argument is not like a scalar number.
+    """
+    if isinstance(obj, Number):
+        return obj
+    elif torch.is_tensor(obj):
+        if torch.numel(obj) == 1:
+            return obj.item()
+    else:
+        u = np.asarray(obj)
+        if u.size == 1 and is_numberdata(u):
+            return u.item()
+    raise TypeError(f"given object is not scalar-like: {obj}")
 
 
 # Numerical Collection Suport ##################################################
@@ -579,9 +721,7 @@ def is_array(obj,
     else:
         raise ValueErroor(f"invalid sparse parameter: {sparse}")
     # Check that the object is read-only
-    if frozen is None:
-        pass
-    elif frozen is True:
+    if frozen is True:
         if scipy__is_sparse(obj):
             if obj.data.flags['WRITEABLE']: return False
         else:
@@ -591,7 +731,7 @@ def is_array(obj,
             if not obj.data.flags['WRITEABLE']: return False
         else:
             if not obj.flags['WRITEABLE']: return False
-    else:
+    elif frozen is not None:
         raise ValueError(f"invalid parameter frozen: {frozen}")
     # Next, check compatibility of the units.
     if unit is None:
@@ -793,24 +933,17 @@ def to_array(obj,
         sparse = False
     # If a read-only array is requested, we either return the object itself (if
     # it is already a read-only array), or we make a copy and make it read-only.
-    if frozen is not None:
-        if frozen is True:
-            if sparse:
-                if arr.data.flags['WRITEABLE']:
-                    if not newarr: arr = arr.copy()
-                    arr.data.setflags(write=False)
-            elif arr.flags['WRITEABLE']:
-                if not newarr: arr = np.array(arr)
-                arr.flags['WRITEABLE'] = False
-        elif frozen is False:
-            if sparse:
-                if not arr.data.flags['WRITEABLE']:
-                    if not newarr: arr = arr.copy()
-                    arr.data.setflags(write=True)
-            elif not arr.flags['WRITEABLE']:
-                arr = np.array(arr)
-        else:
-            raise ValueError(f"bad parameter value for frozen: {frozen}")
+    if frozen is True:
+        arr = frozenarray(arr)
+    elif frozen is False:
+        if sparse:
+            if not arr.data.flags['WRITEABLE']:
+                if not newarr: arr = arr.copy()
+                arr.data.setflags(write=True)
+        elif not arr.flags['WRITEABLE']:
+            arr = np.array(arr)
+    elif frozen is not None:
+        raise ValueError(f"bad parameter value for frozen: {frozen}")
     # Next, we switch on whether we are being asked to return a quantity or not.
     if quant is None:
         quant = (q if unit is Ellipsis else unit) is not None
@@ -1555,147 +1688,6 @@ def to_dense(obj,
     """
     return to_numeric(obj, sparse=False,
                       dtype=dtype, quant=quant, ureg=ureg, unit=unit)
-
-
-# Scalar Utilities #############################################################
-
-def _is_scalar(obj, numtype):
-    if isinstance(obj, np.ndarray) or torch.is_tensor(obj):
-        if obj.shape != ():
-            return False
-        obj = obj.item()
-    return isinstance(obj, numtype)
-@docwrap
-def is_number(obj, /, dtype=None):
-    """Determines whether the argument is a scalar number or not.
-
-    `is_number(x)` returns `True` if `x` is a scalar number and `False`
-    otherwise. The following are considered scalar numbers:
-     * Any instances of `numbers.Number`,
-     * Any numpy array `x` whose shape is `()` such that `x.item()` is a scalar.
-
-    See also: `like_number`
-
-    Parameters
-    ----------
-    obj : object
-        The object whose quality as a scalar number is to be tested.
-    dtype : bool, int, float, complex, or None, optional
-        The type of the scalar. If this is `None` (the default)`, then the type
-        of the scalar must be a number but it needn't be any particular number.
-        Otherwise, it must match the given type.
-    
-    Returns
-    -------
-    bool
-        `True` if `obj` is a scalar number value and `False` otherwise.
-    """
-    if dtype is None:
-        return _is_scalar(obj, Number)
-    elif dtype is bool:
-        return _is_scalar(obj, bool)
-    elif dtype is int:
-        return _is_scalar(obj, Integral)
-    elif dtype is float:
-        return _is_scalar(obj, Real)
-    elif dtype is complex:
-        return _is_scalar(obj, Comlex)
-    else:
-        raise ValueError(f"invalid dtype: {dtype}")
-def is_bool(obj):
-    """Determines whether the argument is a scalar boolean or not.
-
-    `is_bool(x)` returns `True` if `x` is a scalar boolean and `False`
-    otherwise.
-
-    See also: `is_scalar`
-    """
-    return _is_scalar(obj, bool)
-def is_integer(obj):
-    """Determines whether the argument is a scalar integer or not.
-
-    `is_integer(x)` returns `True` if `x` is a scalar integer and `False`
-    otherwise. Note that booleans are considered integers.
-
-    See also: `is_scalar`, `is_intdata`
-    """
-    return _is_scalar(obj, Integral)
-def is_real(obj):
-    """Determines whether the argument is a scalar real number or not.
-
-    `is_real(x)` returns `True` if `x` is a scalar real number and `False`
-    otherwise. Note that booleans and integers are considered real numbers.
-
-    See also: `is_scalar`, `is_realdata`
-    """
-    return _is_scalar(obj, Real)
-def is_complex(obj):
-    """Determines whether the argument is a scalar complex number or not.
-
-    `is_complex(x)` returns `True` if `x` is a scalar complex number and `False`
-    otherwise. Note that booleans, integers, and real numbers are all considered
-    valid complex numbers.
-
-    See also: `is_number`, `is_complexdata`
-    """
-    return _is_scalar(obj, Complex)
-def like_number(obj):
-    """Determines whether the argument holds a scalar number value or not.
-
-    `like_number(x)` returns `True` if `x` is already a scalar number, if `x` is
-    a single-element numpy array or tensor, or if `x` is a sequence or set that
-    has only one numerical element; otherwise, it returns `False`.
-
-    If `like_number(x)` returns `True`, then `to_number(x)` will always return a
-    valid Python number (i.e., an object of type `numbers.Number`).
-
-    See also: `is_number`, `to_number`
-    """
-    if isinstance(obj, Number):
-        return True
-    if torch.is_tensor(obj):
-        return torch.numel(obj) == 1
-    if not isinstance(obj, np.ndarray):
-        try:
-            obj = np.asarray(obj)
-        except TypeError:
-            return False
-    return obj.size == 1 and is_numberdata(obj)
-@docwrap
-def to_number(obj):
-    """Converts the argument into a simple Python number.
-
-    `to_number(x)` returns a simple Python number representation of `x` (in
-    other words, `x` will be a subtype of Python's `numbers.Number` type). Any
-    number, any NumPy array with only one element, and any PyTorch tensor with
-    only one element can be converted into a scalar.
-
-    Parameters
-    ----------
-    obj : object
-        The object that is to be converted into a scalar number.
-
-    Returns
-    -------
-    number
-        A scalar number that is an object whose class is a subtype of
-        `numbers.Number`.
-
-    Raises
-    ------
-    TypeError
-        If the argument is not like a scalar number.
-    """
-    if isinstance(obj, Number):
-        return obj
-    elif torch.is_tensor(obj):
-        if torch.numel(obj) == 1:
-            return obj.item()
-    else:
-        u = np.asarray(obj)
-        if u.size == 1 and is_numberdata(u):
-            return u.item()
-    raise TypeError(f"given object is not scalar-like: {obj}")
 
 
 # Numeric Decorators ###########################################################
