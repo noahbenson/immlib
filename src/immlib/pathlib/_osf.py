@@ -482,8 +482,6 @@ class OSFPath(CloudPath):
             self.client = OSFClient()
             raise TypeError("OSFPaths require OSFClient objects as clients")
         self.client = client
-        if client.project_id == 'xxxxx':
-            raise ValueError('xxxxx')
         # At this point we have a cloud path and client that are both valid.
         super().__init__(cloud_path, client=client)
     @property
