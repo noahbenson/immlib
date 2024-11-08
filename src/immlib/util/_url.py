@@ -72,27 +72,34 @@ def url_download(url, destpath=None,
         destination path. The default is `True`.
     '''
     # Make the URL request and download it.
-    with urllib.request.urlopen(url) as response:
-        # We need to handle things differently depending on whether we have been
-        # given a destination path.
-        if destpath is None:
-            destpath = response.read()
-        else:
-            destpath = Path(destpath)
-            if expanduser:
-                destpath.expanduser()
-            if destpath.is_dir():
-                raise ValueError(f"destpath is a directory but must be a"
-                                 f" filename: {destpath}")
-            p = destpath.resolve()
-            # Make the directory if it doesn't exist and we have been asked to.
-            if mkdirs:
+    try:
+        with urllib.request.urlopen(url) as response:
+            # We need to handle things differently depending on whether we have been
+            # given a destination path.
+            if destpath is None:
+                destpath = response.read()
+            else:
+                destpath = Path(destpath)
+                if expanduser:
+                    destpath.expanduser()
+                if destpath.is_dir():
+                    raise ValueError(f"destpath is a directory but must be a"
+                                     f" filename: {destpath}")
+                p = destpath.resolve()
+                # Make the directory if it doesn't exist and we have been asked to.
+                if mkdirs:
+                    if not p.parent.exists():
+                        p.mkdir(mode=mkdir_mode, parents=True)
+                # Make sure the directory exists regardless.
                 if not p.parent.exists():
-                    p.mkdir(mode=mkdir_mode, parents=True)
-            # Make sure the directory exists regardless.
-            if not p.parent.exists():
-                raise ValueError("destpath parent does not exist: {p.parent}")
-            # Now open the path and save the file.
-            with p.open('wb') as fl:
-                shutil.copyfileobj(response, fl)
+                    raise ValueError("destpath parent does not exist: {p.parent}")
+                # Now open the path and save the file.
+                with p.open('wb') as fl:
+                    shutil.copyfileobj(response, fl)
+    except urllib.error.HTTPError as e:
+        print('\n' + '-'*80)
+        print(e)
+        print(url)
+        print(destpath)
+        raise
     return destpath
