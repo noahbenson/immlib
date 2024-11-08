@@ -102,6 +102,77 @@ class MetaObject(planobject):
         return self.copy(metadata=None)
 
 
+# Immutable ####################################################################
+
+class ImmutableType(type):
+    """A meta-class for types that are immutable.
+
+    When this metaclass is used in a class, objects of the type become immutable
+    immediately after the `__init__` method is run. Such types should not
+    overload the `__new__` classmethod and instead should see to their
+    initialization in `__init__` as usual. Once the `__init__` method has
+    finished, the `__setattr__`, `__delattr__`, `__setitem__`, and `__delitem__`
+    methods will raise `TypeError`s.
+    """
+    class ImmutableBase:
+        "The base class of all immlib immutable classes."
+        __slots__ = ('__init_status',)
+        def __setattr__(self, k, v):
+            if self.__init_status:
+                raise TypeError(f"{type(self)} is immutable")
+            else:
+                return object.__setattr__(self, k, v)
+        def __delattr__(self, k):
+            if self.__init_status:
+                raise TypeError(f"{type(self)} is immutable")
+            else:
+                return object.__delattr__(self, k)
+        def __setitem__(self, k, v):
+            if self.__init_status:
+                raise TypeError(f"{type(self)} is immutable")
+            else:
+                return object.__setattr__(self, k, v)
+        def __delitem__(self, k):
+            if self.__init_status:
+                raise TypeError(f"{type(self)} is immutable")
+            else:
+                return object.__delattr__(self, k)
+        def __init_wrap(self, *args, **kw):
+            # Find the correct __init__ function to run:
+            initfn = next(
+                filter(
+                    None,
+                    (getattr(c, f'_{c.__name__}__init__', None)
+                     for c in type(self).__mro__)),
+                None)
+            if initfn:
+                initfn(self, *args, **kw)
+            # Note that we have now initialized everything.
+            self.__init_status = True
+        def __new__(cls, *args, **kw):
+            self = object.__new__(cls)
+            object.__setattr__(self, '_ImmutableBase__init_status', False)
+            return self
+    def __new__(cls, name, bases, attrs, **kwargs):
+        init_orig = attrs.get('__init__')
+        if init_orig:
+            attrs[f'_{name}__init__'] = init_orig
+        base = ImmutableType.ImmutableBase
+        attrs['__init__'] = base._ImmutableBase__init_wrap
+        if base not in bases:
+            bases = bases + (base,)
+        return type.__new__(cls, name, bases, attrs, **kwargs)
+class Immutable(ImmutableType.ImmutableBase, metaclass=ImmutableType):
+    """A type that becomes immutable immediately after initialization.
+
+    Any class that inherits from `Immutable` should implement an `__init__`
+    method, within which it is allowed to change the attributes of the `self`
+    object normally. After the `__init__` method terminates, the object becomes
+    read-only and can no longer be updated.
+    """
+    __slots__ = ()
+
+    
 # larray #######################################################################
     
 class larray(NDArrayOperatorsMixin):
@@ -628,7 +699,7 @@ class ArrayIndex:
             k = next(iter(kw.keys()))
             raise TypeError(f"'{k}' is an invalid keyword argument for find()")
         ids = to_array(ids)
-        (flatids, flatins) = self.flatdata()
+        (flatids, flatins) = self.flatdata
         # flatids is the ids in sorded order; flatins is the argsort of the
         # original argsort--how to put the sorted ids back in canonical
         # order; flatarg is the argsort itself.
@@ -653,11 +724,12 @@ class ArrayIndex:
                 for (u,d) in zip(ins, default):
                     u[notfound] = default
         return ins
+    @property
     def flatdata(self):
         """Returns a named tuple containing the flattened data used by the
         `ArrayIndex` type to lookup identities.
 
-        `index.flatdata()` returns a named 2-tuple with keys `ident` and
+        `index.flatdata` returns a named 2-tuple with keys `ident` and
         `index`. The `ident` element is a read-only numpy array containing the
         sorted and flattened identities represented in the original array. The
         `index` element is a read-only numpy array containing the argsort of the

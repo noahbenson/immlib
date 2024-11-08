@@ -14,12 +14,16 @@ The utility types included in pimms are:
 from ._core import (
     MetaObject,
     larray,
-    ArrayIndex)
+    ArrayIndex,
+    ImmutableType,
+    Immutable)
 
 __all__ = (
     "MetaObject",
     "larray",
-    "ArrayIndex")
+    "ArrayIndex",
+    "ImmutableType",
+    "Immutable")
 
 # Mark all the imported functions as belonging to this module instead of the
 # hidden submodules:
