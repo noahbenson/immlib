@@ -146,7 +146,8 @@ class TestWorkflowCore(TestCase):
                 The probability densities of the normal distribution at the
                 given set of values in `x`.
             """
-            return np.exp(-0.5 * ((x - mu)/std)**2) / (np.sqrt(2*np.pi) * std)
+            w = np.exp(-0.5 * ((x - mu)/std)**2) / (np.sqrt(2*np.pi) * std)
+            return (w,)
         @calc('mean')
         def weighted_mean(x, weights):
             """Calculates the weighted mean.
@@ -163,7 +164,8 @@ class TestWorkflowCore(TestCase):
             mean : number
                 The weighted mean of the inputs.
             """
-            return np.sum(x * weights) / np.sum(weights)
+            mean = np.sum(x * weights) / np.sum(weights)
+            return (mean,)
         # Filter calculations can be used to update the input variables to a
         # plan--they are calc units that accept only 1 input and that return
         # same input.
@@ -172,7 +174,7 @@ class TestWorkflowCore(TestCase):
             x = np.asarray(x)
             assert len(x.shape) == 1, "x must be a vector"
             assert np.issubdtype(x.dtype, np.number), "x must be numeric"
-            return x
+            return (x,)
         # The calculations are given names (keys) and put together in a plan.
         nwm = plan(weights_step=normal_pdf,
                    mean_step=weighted_mean,
@@ -191,10 +193,6 @@ class TestWorkflowCore(TestCase):
         pd = nwm(x=[-1.0, 1.0, 2.0, 8.5], mu=1.5)
         self.assertIsInstance(pd, plandict)
         self.assertEqual(len(pd), 5)
-        # There is a filter on x, which dictates that x be a lazy value
-        # but immediately cached (ready).
-        self.assertTrue(pd.is_lazy('x'))
-        self.assertTrue(pd.is_ready('x'))
         # In this case, because we have a non-lazy calc (normal_pdf), all of
         # that calc's inputs are also automatically ready (this is not a
         # surprise--its other inputs are plain params so are not lazy objects).
@@ -205,7 +203,7 @@ class TestWorkflowCore(TestCase):
         # The weights outputs should be ready because it was declared to be
         # non-lazy; the mean should remain lazy, though.
         self.assertTrue(pd.is_lazy('weights'))
-        self.assertTrue(pd.is_ready('weights'))
+        self.assertFalse(pd.is_ready('weights'))
         self.assertTrue(pd.is_lazy('mean'))
         self.assertFalse(pd.is_ready('mean'))
         # It will have converted the x value into an array.

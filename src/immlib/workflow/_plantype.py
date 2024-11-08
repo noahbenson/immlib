@@ -244,7 +244,7 @@ class planobject(plantype.planobject_base, metaclass=plantype):
         """Creates a copy of the planobject with optional parameter updates.
         """
         pd = plandict(self.__plandict__, **kwargs)
-        obj = object.__new__(cls)
+        obj = object.__new__(self.__class__)
         object.__setattr__(obj, '__plandict__', pd)
         return obj
 

@@ -100,6 +100,7 @@ __all__ = tuple(
      if k[0] != '_'
      if k != 'reload_immlib'
      if k != 'submodules'
-     if k != 'version'])
+     if k != 'version'
+     if ('immlib.' + k) not in submodules])
 # We want to mark a few of the variables as being from the immlib module.
 Version.__module__ = __name__
