@@ -418,6 +418,7 @@ class OSFPath(CloudPath):
         # We'll also need to know the project and storage to create any new
         # client object. To do that we parse the cloud path URL.
         url = urlparse(str(cloud_path))
+        print(' --->', cloud_path, str(cloud_path), url)
         if url.scheme != 'osf' or not url.netloc:
             raise ValueError(f"invalid OSF url: {repr(cloud_path)}")
         if ':' in url.netloc:
