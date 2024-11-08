@@ -411,14 +411,14 @@ class OSFPath(CloudPath):
         # First validate the path.
         if isinstance(cloud_path, OSFPath):
             if client is None:
-                client = clout_path.client
+                client = cloud_path.client
+                self.client = client
         else:
             # Go ahead and validate the url.
             self.is_valid_cloudpath(cloud_path, raise_on_error=True)
         # We'll also need to know the project and storage to create any new
         # client object. To do that we parse the cloud path URL.
         url = urlparse(str(cloud_path))
-        print(' --->', cloud_path, str(cloud_path), url)
         if url.scheme != 'osf' or not url.netloc:
             raise ValueError(f"invalid OSF url: {repr(cloud_path)}")
         if ':' in url.netloc:
@@ -439,12 +439,13 @@ class OSFPath(CloudPath):
                 mkdir_mode = self.init_default_options['mkdir_mode']
             if pagesize is Ellipsis:
                 pagesize = self.init_default_options['pagesize']
-            client = OSFClient(project,
-                               storage=storage,
-                               local_cache_dir=local_cache_dir,
-                               file_cache_mode=file_cache_mode,
-                               mkdir_mode=mkdir_mode,
-                               pagesize=pagesize)
+            client = OSFClient(
+                project,
+                storage=storage,
+                local_cache_dir=local_cache_dir,
+                file_cache_mode=file_cache_mode,
+                mkdir_mode=mkdir_mode,
+                pagesize=pagesize)
         elif isinstance(client, OSFClient):
             # We can use the given client and just update any options whose
             # values aren't Ellipsis.
@@ -470,15 +471,19 @@ class OSFPath(CloudPath):
             if client.storage_provider != storage: change = True
             # If there's any change requested, we make a new client.
             if change:
-                client = OSFClient(project,
-                                   storage=storage,
-                                   local_cache_dir=local_cache_dir,
-                                   file_cache_mode=file_cache_mode,
-                                   mkdir_mode=mkdir_mode,
-                                   pagesize=pagesize)
+                client = OSFClient(
+                    project,
+                    storage=storage,
+                    local_cache_dir=local_cache_dir,
+                    file_cache_mode=file_cache_mode,
+                    mkdir_mode=mkdir_mode,
+                    pagesize=pagesize)
         else:
             self.client = OSFClient()
             raise TypeError("OSFPaths require OSFClient objects as clients")
+        self.client = client
+        if client.project_id == 'xxxxx':
+            raise ValueError('xxxxx')
         # At this point we have a cloud path and client that are both valid.
         super().__init__(cloud_path, client=client)
     @property
