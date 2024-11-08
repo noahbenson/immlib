@@ -327,7 +327,8 @@ def _numcoll_match(numcoll_shape, numcoll_dtype, ndim, shape, numel, dtype):
         nsuf += 1
     # If there are extras in the middle and we don't allow them, we fail the
     # match.
-    if not sh_mid and nsuf + npre != ndim: return False
+    if not sh_mid and nsuf + npre != ndim:
+        return False
     # See if we match the dtype.
     if dtype is not None:
         if is_numpydtype(numcoll_dtype):
@@ -337,15 +338,18 @@ def _numcoll_match(numcoll_shape, numcoll_dtype, ndim, shape, numel, dtype):
                 # If we have been given a torch dtype, we convert it, but
                 # otherwise we let np.issubdtype do the converstion so that
                 # users can pass in things like np.integer meaningfully.
-                if is_torchdtype(dtype): dtype = to_numpydtype(dtype)
+                if is_torchdtype(dtype):
+                    dtype = to_numpydtype(dtype)
                 if not np.issubdtype(numcoll_dtype, dtype):
                     return False
                 dtype = (numcoll_dtype,)
         elif is_torchdtype(numcoll_dtype):
             if is_aseq(dtype) or is_aset(dtype):
                 dtype = [to_torchdtype(dt) for dt in dtype]
-            else: dtype = [to_torchdtype(dtype)]
-        if numcoll_dtype not in dtype: return False
+            else:
+                dtype = [to_torchdtype(dtype)]
+        if numcoll_dtype not in dtype:
+            return False
     # We match everything!
     return True
 
@@ -1814,15 +1818,26 @@ class numapi:
     def __call__(self, *args, **kwargs):
         # First, call the original function
         rval = self.base_func(*args, **kwargs)
-        if rval is None:
-            pass
-        elif rval is np:
-            self._call_numpy(args, kwargs)
-        elif rval is torch:
-            return self._call_torch(args, kwargs)
-        else:
-            raise ValueError(
-                f"invalid value returned from numapi base_func: {rval}")
+        if rval is not None:
+            if isinstance(rval, tuple):
+                rvallen = len(rval)
+                if rvallen == 3:
+                    (rval, args, kwargs) = rval
+                elif rvallen == 2:
+                    (rval, args) = rval
+                elif rvallen == 1:
+                    rval = rval[0]
+                else:
+                    raise ValueError(
+                        f"invalid value returned from numapi base_func: tuple"
+                        f" must have 1-3 values but got {rvallen}")
+            if rval is np:
+                return self._call_numpy(args, kwargs)
+            elif rval is torch:
+                return self._call_torch(args, kwargs)
+            else:
+                raise ValueError(
+                    f"invalid value returned from numapi base_func: {rval}")
         if torch_found:
             any_arg = any(map(is_tensor, args))
             any_inp = any_arg or any(map(is_tensor, kwargs.values()))
