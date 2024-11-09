@@ -7,6 +7,7 @@
 
 import inspect
 from functools import (partial, wraps, update_wrapper)
+from collections import namedtuple
 
 import pint
 import numpy as np
@@ -131,27 +132,6 @@ except Exception:
         int(_torch_version[0]),
         int(_torch_version[1]),
         _torch_version[2])
-# We load in a bit of data here also about the sparse tensors.
-_sparse_torch_types = pdict(
-    coo=('sparse_coo_tensor', 'sparse_coo', 'to_sparse_coo'),
-    csr=('sparse_csr_tensor', 'sparse_csr', 'to_sparse_csr'),
-    csc=('sparse_csc_tensor', 'sparse_csc', 'to_sparse_csc'),
-    bsr=('sparse_bsr_tensor', 'sparse_bsr', 'to_sparse_bsr'),
-    bsc=('sparse_bsc_tensor', 'sparse_bsc', 'to_sparse_bsc'))
-_sparse_torch_layouts = tdict()
-# This will drop out anything that isn't found in the package (including if the
-# package isn't loaded).
-for (k,(gen,lay,cast)) in _sparse_torch_types.items():
-    try:
-        tup = (
-            getattr(torch, gen),
-            getattr(torch, lay),
-            getattr(torch.Tensor, cast))
-        _sparse_torch_types = _sparse_torch_types.set(k, tup)
-        _sparse_torch_layout[tup[1]] = k
-    except Exception:
-        _sparse_torch_types = _sparse_torch_types.drop(k)
-_sparse_torch_layouts = _sparse_torch_layouts.persistent()
 
 
 # Numerical Types ##############################################################
@@ -608,22 +588,265 @@ def to_numpydtype(dt):
         return torch.as_tensor((), dtype=dt).numpy().dtype
     else:
         return np.dtype(dt)
-_sparse_types = {
-    'bsr': sps.bsr_array,
-    'coo': sps.coo_array,
-    'csc': sps.csc_array,
-    'csr': sps.csr_array,
-    'dia': sps.dia_array,
-    'dok': sps.dok_array,
-    'lil': sps.lil_array}
-_sparse_base_types = {
-    'bsr': sps.bsr_matrix,
-    'coo': sps.coo_matrix,
-    'csc': sps.csc_matrix,
-    'csr': sps.csr_matrix,
-    'dia': sps.dia_matrix,
-    'dok': sps.dok_matrix,
-    'lil': sps.lil_matrix}
+# Sparse Array/Tensor stuff.
+def sparray_isfrozen(obj):
+    return not obj.data.flags['WRITEABLE']
+def sparray_freeze(obj):
+    obj.data.setflags(write=False)
+def sparray_frozen(obj):
+    if not obj.data.flags['WRITEABLE']:
+        return obj
+    obj = obj.copy()
+    obj.data.setflags(write=False)
+    return obj
+def ndarray_isfrozen(obj):
+    return not obj.flags['WRITEABLE']
+def ndarray_freeze(obj):
+    obj.setflags(write=False)
+def ndarray_frozen(obj):
+    if not obj.flags['WRITEABLE']:
+        return obj
+    obj = obj.copy()
+    obj.setflags(write=False)
+    return obj
+SparseLayout = namedtuple(
+    'SparseLayout', 
+    ('name',
+     'scipy_type', 'scipy_matrix_type', 'scipy_tomethod',
+     'torch_constructor', 'torch_layout', 'torch_tomethod'))
+_sparse_torch_layouts = tdict()
+# This will drop out anything that isn't found in the package (including if the
+# package isn't loaded).
+for (k,(gen,lay,cast)) in _sparse_torch_layouts.items():
+    try:
+        tup = (
+            getattr(torch, gen),
+            getattr(torch, lay),
+            getattr(torch.Tensor, cast))
+        _sparse_torch_layouts = _sparse_torch_layouts.set(k, tup)
+        _sparse_torch_layout[tup[1]] = k
+    except Exception:
+        _sparse_torch_layouts = _sparse_torch_layouts.drop(k)
+_sparse_torch_layouts = _sparse_torch_layouts.persistent()
+_sparse_layouts = tdict(
+    bsr=SparseLayout(
+        'bsr',
+        sps.bsr_array, sps.bsr_matrix, 'tobsr',
+        'sparse_bsr_tensor', 'sparse_bsr', 'to_sparse_bsr'),
+    bsc=SparseLayout(
+        'bsc',
+        None, None, None,
+        'sparse_bsc_tensor', 'sparse_bsc', 'to_sparse_bsc'),
+    coo=SparseLayout(
+        'coo',
+        sps.coo_array, sps.coo_matrix, 'tocoo',
+        'sparse_coo_tensor', 'sparse_coo', 'to_sparse_coo'),
+    csr=SparseLayout(
+        'csr',
+        sps.csr_array, sps.csr_matrix, 'tocsr',
+        'sparse_csr_tensor', 'sparse_csr', 'to_sparse_csr'),
+    csc=SparseLayout(
+        'csc',
+        sps.csc_array, sps.csc_matrix, 'tocsc',
+        'sparse_csc_tensor', 'sparse_csc', 'to_sparse_csc'),
+    dia=SparseLayout(
+        'dia',
+        sps.dia_array, sps.dia_matrix, 'todia',
+        None, None, None),
+    dok=SparseLayout(
+        'dok',
+        sps.dok_array, sps.dok_matrix, 'todok',
+        None, None, None),
+    lil=SparseLayout(
+        'lil',
+        sps.lil_array, sps.lil_matrix, 'tolil',
+        None, None, None))
+for (k,v) in tuple(_sparse_layouts.items()):
+    try:
+        con = getattr(torch, v.torch_constructor)
+        lay = getattr(torch, v.torch_layout)
+        cas = getattr(torch.Tensor, v.torch_tomethod)
+        _sparse_layouts[k] = SparseLayout(
+            v.name, v.scipy_type, v.scipy_matrix_type, v.scipy_tomethod,
+            con, lay, cas)
+    except Exception:
+        _sparse_layouts[k] = SparseLayout(
+            v.name, v.scipy_type, v.scipy_matrix_type, v.scipy_tomethod,
+            None, None, None)
+_sparse_layouts = _sparse_layouts.persistent()
+# Indices for going from type or layout to SparseLayout:
+_sparse_index = tdict()
+for (k,st) in _sparse_layouts.items():
+    if st.scipy_type is not None:
+        _sparse_index[st.scipy_type] = st
+    if st.scipy_matrix_type is not None:
+        _sparse_index[st.scipy_matrix_type] = st
+    if st.torch_layout is not None:
+        _sparse_index[st.torch_layout] = st
+_sparse_index = _sparse_index.persistent()
+@docwrap
+def sparse_layout(obj):
+    """Returns a tuple containing data about a sparse array layout.
+
+    `sparse_layout(name)` returns the `SparseLayout` tuple for the sparse array
+    layout with the given name. The name must be one of the following (see
+    `scipy.sparse` for more information about layouts):
+      * `'bsr'`
+      * `'bsc'`
+      * `'coo'`
+      * `'csr'`
+      * `'csc'`
+      * `'dia'`
+      * `'doc'`
+      * `'lil'`
+
+    Alternatively, `sparse_layout(obj)` returns the sparse layout information
+    for the given sparse array or sparse tensor `obj`.
+
+    Whether the argument is a string or another type, the value `None` is
+    returned if the object does not correspond to a sparse layout.
+
+    The `SparseLayout` namedtuple that is returned has the following elements:
+     * `scipy_type`: the scipy type (e.g., `scipy.sparse.csr_array`).
+     * `scipy_matrix_type`: the matrix type (e.g., `scipy.sparse.csr_matrix`).
+     * `scipy_tomethod`: the scipy casting method name (e.g., `'tocsr'`).
+     * `torch_constructor`: The torch constructor function (e.g.,
+       `torch.sparse_csr_tensor`).
+     * `torch_layout`: The torch layout object (e.g., `torch.sparse_csr`).
+     * `torch_tomethod`: The name of the torch `Tensor` method for casting
+       (e.g., `'to_sparse_csr'`).
+    """
+    if isinstance(obj, SparseLayout):
+        return obj
+    elif isinstance(obj, str):
+        return _sparse_layouts.get(obj, None)
+    elif isinstance(obj, pint.Quantity):
+        return sparse_layout(obj.m)
+    elif torch.is_tensor(obj):
+        if obj.is_sparse:
+            return _sparse_index.get(obj.layout, None)
+    elif scipy__is_sparse(obj):
+        return _sparse_index.get(type(obj), None)
+    return None
+def sparse_haslayout(arr, layout):
+    """Returns true if the given sparse array or tensor has the given layout.
+
+    If the first argument `arr` is not a sparse array nor a sparse tensor, then
+    the return value is `False` (i.e., no, the object does not have the given
+    sparse array or sparse tensor layout).
+
+    The second argument `layout` may be any valid argument to the
+    `sparse_haslayout` function.
+    """
+    if isinstance(arr, pint.Quantity):
+        return sparse_haslayout(arr.m, layout)
+    is_sparr = scipy__is_sparse(arr)
+    is_sptns = torch.is_tensor(arr) and arr.is_sparse
+    srclay = sparse_layout(arr) if is_sparr or is_sptns else None
+    dstlay = sparse_layout(layout)
+    if dstlay is None:
+        raise ValueError(f"invalid layout: {layout}")
+    if srclay is None:
+        return False
+    else:
+        return srclay.name == dstlay.name
+@docwrap
+def sparse_find(arr):
+    """Returns the indices and values of nonzero elements of a sparse object.
+    
+    `sparse_find(sp_array)` is equivalent to `scipy.sparse.find(sp_array)` for a
+    sparse array `sp_array`.
+    
+    `sparse_find(sp_tensor)` is equivalent to `spc.indices() + (spc.values(),)`
+    for a sparse PyTorch tensor `sp_tensor` and version of it that has been
+    coalesced, `spc = sp_tensor.coalesce()`. Note that the `spc.values()` tensor
+    is cloned and detached (see also `sparse_data`).
+
+    `sparse_find(q)` for a quantity `q` returns the equivalent of
+    `sparse_find(q.m)` except that the returned value array will have the same
+    magnitude as `q`.
+
+    For any non-sparse input, a `TypeError` is raised.
+    """
+    if isinstance(arr, pint.Quantity):
+        f = sparse_find(arr.m)
+        return f[:-1] + (f[-1]*arr.u,)
+    elif scipy__is_sparse(arr):
+        return sps.find(arr)
+    elif torch.is_tensor(arr) and arr.is_sparse:
+        arr = arr.coalesce()
+        return tuple(arr.indices()) + (arr.values().clone().detach(),)
+    else:
+        raise TypeError(f"sparse_find requires a sparse array or sparse tensor")
+@docwrap
+def sparse_indices(arr):
+    """Returns the indices of the nonzero values in the given sparse object.
+
+    `sparse_indices(arr)` is roughly equivalent to the expression
+    `stack(sparse_find(arr)[:-1])`---i.e., it returns a numpy array or a pytorch
+    tensor of the index matrix of the nonzero values in `arr`.
+    """
+    if isinstance(arr, pint.Quantity):
+        return sparse_indices(arr.m)
+    elif scipy__is_sparse(arr):
+        return np.stack(sps.find(arr)[:-1])
+    elif torch.is_tensor(arr) and arr.is_sparse:
+        arr = arr.coalesce()
+        return arr.values()
+    else:
+        raise TypeError(f"sparse_data requires a sparse array or sparse tensor")
+@docwrap
+def sparse_data(arr):
+    """Returns the data vector for the given sparse array or sparse tensor.
+
+    `sparse_data(arr)` is equivalent to `sparse_find(arr)[-1]`---i.e., it
+    returns a vector of non-zero values in the sparse array or sparse tensor
+    `arr`---with the exception that it returns the actual vector itself and not
+    a copy of the data vector. Changes to the return value of this function will
+    be reflected in `arr`.
+    """
+    if isinstance(arr, pint.Quantity):
+        return sparse_data(arr.m) * arr.u
+    elif scipy__is_sparse(arr):
+        return arr.data
+    elif torch.is_tensor(arr) and arr.is_sparse:
+        arr = arr.coalesce()
+        return arr.values()
+    else:
+        raise TypeError(f"sparse_data requires a sparse array or sparse tensor")
+@docwrap
+def sparse_tolayout(obj, layout):
+    """Copies a sparse object into another sparse object with a given layout.
+
+    `sparse_tolayout(sparr, layout)` copies the given sparse SciPy array or
+    sparse PyTorch tensor `sparray` into an equivalent array or tensor that uses
+    the sparse layout given by the `layout` argument, which must be compatible
+    with the `sparse_layout` function. The backend (PyTorch or SciPy) will not
+    be changed.
+    """
+    lay = sparse_layout(layout)
+    if isinstance(obj, pint.Quantity):
+        arr = sparse_tolayout(obj.m, layout)
+        return obj if arr is obj.m else (arr * obj.u)
+    elif scipy__is_sparse(obj):
+        method = getattr(obj, lay.scipy_tomethod)
+        if method is None:
+            raise ValueError(f"layout is invalid for scipy arrays: {layout}")
+        arr = method()
+        # If obj was frozen, duplicate that.
+        if arr is not obj and sparray_frozen(obj):
+            sparray_freeze(arr)
+        return arr
+    elif torch.is_tensor(obj) and obj.is_sparse:
+        obj = obj.coalesce()
+        method = getattr(obj, lay.torch_tomethod)
+        if method is None:
+            raise ValueError(f"layout is invalid for pytorch tensors: {layout}")
+        return method()
+    else:
+        raise TypeError(
+            "sparse_tolayout requires a sparse scipy array or"
+            " a sparse pytorch tensor")
 @docwrap
 def is_array(obj,
              dtype=None, shape=None, ndim=None, numel=None, frozen=None,
@@ -738,41 +961,57 @@ def is_array(obj,
         if not isinstance(obj, ndarray):
             return False
     elif sparse is None:
-        if not (isinstance(obj, ndarray) or scipy__is_sparse(obj)):
+        # Set sparse to True/False:
+        sparse = scipy__is_sparse(obj)
+        # Also, it still has to be either a numpy array or a scipy sparse array.
+        if not (isinstance(obj, ndarray) or sparse):
             return False
-    elif is_str(sparse):
-        sparse = strnorm(sparse.strip(), case=True, unicode=False)
-        mtype = _sparse_types.get(sparse, None)
-        if mtype is None:
-            raise ValueError(f"invalid sparse array type: {sparse}")
-        elif not isinstance(obj, mtype):
-            btype = _sparse_base_types.get(sparse, None)
-            if btype is None or not isinstance(obj, btype):
-                return False
     else:
-        raise ValueError(f"invalid sparse parameter of type {type(sparse)}")
-    # Check that the object is read-only
+        if is_str(sparse):
+            sparse = strnorm(sparse.strip(), case=True, unicode=False)
+            layout = sparse_layout(sparse)
+            if layout is None:
+                raise ValueError(f"invalid sparse array type: {sparse}")
+        else:
+            layout = sparse_layout(sparse)
+            if layout is None:
+                tt = type(sparse)
+                raise ValueError(f"invalid sparse parameter of type {tt}")
+        ltypes = (layout.scipy_type, layout.scipy_matrix_type)
+        if not isinstance(obj, ltypes):
+            return False
+        sparse = True
+    # At this point, the sparse parameter has been checked against the object
+    # and sparse is now True if the object is a sparse array and False if not.
+    # Next, check that the object is read-only or not.
     if frozen is True:
-        if scipy__is_sparse(obj):
-            if obj.data.flags['WRITEABLE']:
+        if sparse:
+            if not sparray_isfrozen(obj):
                 return False
-        elif obj.flags['WRITEABLE']:
+        elif not ndarray_isfrozen(obj):
             return False
     elif frozen is False:
-        if scipy__is_sparse(obj):
-            if not obj.data.flags['WRITEABLE']: return False
+        if sparse:
+            if sparray_isfrozen(obj):
+                return False
         else:
-            if not obj.flags['WRITEABLE']: return False
-    elif frozen is not None:
-        raise ValueError(f"invalid parameter frozen: {frozen}")
+            if ndarray_isfrozen(obj):
+                return False
+    elif frozen is None:
+        frozen = sparray_isfrozen(obj) if sparse else ndarray_isfrozen(obj)
+    else:
+        raise ValueError(
+            f"frozen option must be boolean or None; got type {type(frozen)}")
     # Next, check compatibility of the units.
     if unit is None:
         # We are required to not be a quantity.
-        if u is not None: return False
+        if u is not None:
+            return False
     elif unit is not Ellipsis:
         from ._quantity import alike_units
-        if not is_tuple(unit): unit = (unit,)
-        if not any(alike_units(u, uu) for uu in unit):
+        if not is_tuple(unit):
+            unit = (unit,)
+        if not any(map(partial(alike_units, u), unit)):
             return False
     # Check the match to the numeric collection last.
     if dtype is None and shape is None and ndim is None and numel is None:
@@ -780,7 +1019,7 @@ def is_array(obj,
     return _numcoll_match(obj.shape, obj.dtype, ndim, shape, numel, dtype)
 def to_array(obj,
              dtype=None, order=None, copy=False, sparse=None, frozen=None,
-             quant=None, ureg=None, unit=Ellipsis):
+             quant=None, ureg=None, unit=Ellipsis, detach=True):
     """Reinterprets `obj` as a NumPy array or quantity with an array magnitude.
 
     `immlib.to_array` is roughly equivalent to the `numpy.asarray` function with
@@ -844,6 +1083,12 @@ def to_array(obj,
         `unit`. The default value of `unit`, `Ellipsis`, indicates that, if
         `obj` is a quantity, its unit should be used, and `unit` should be
         considered dimensionless otherwise.
+    detach : boolean, optional
+        If the argument is a PyTorch tensor that requires gradient tracking,
+        then it must be detached from the gradient tracking system before it can
+        be turned into an array. If `detach` is `True` (the default), then this
+        detachment is performed automatically. Otherwise, an error is raised
+        if a tensor would need to be detached.
 
     Returns
     -------
@@ -875,57 +1120,79 @@ def to_array(obj,
     obj_is_spsparse = scipy__is_sparse(obj)
     obj_is_tensor = not obj_is_spsparse and torch.is_tensor(obj)
     obj_is_sparse = obj_is_spsparse or (obj_is_tensor and obj.is_sparse)
+    # If this is a tensor and it requires grad, we can check whether we can
+    # duplicate it now or not.
+    if obj_is_tensor and obj.requires_grad:
+        if detach:
+            obj = obj.detach()
+        else:
+            raise ValueError(
+                f"to_array: tensor requires grad but detach option is non-true")
     newarr = False # True means we own the memory of arr; False means we don't.
     if sparse is not False and (sparse is not None or obj_is_sparse):
+        # That condition is rough to parse; essentially, in this then-clause:
+        #  * the user isn't requesting a dense output explicitly, and
+        #  * the inputs tell us that we need a sparse output (because either the
+        #    user is requesting a sparse output explicitly or they have
+        #    requested no change in output sparsity and the input is sparse).
         if sparse is None or sparse is True:
-            if obj_is_tensor:
-                sparse = ('csr' if obj.layout == torch.sparse_csr else 'coo')
-            elif obj_is_sparse:
-                sparse = type(obj).__name__[:3]
-            else:
-                sparse = 'coo'
-        sparse = strnorm(sparse.strip(), case=True, unicode=False)
-        mtype = _sparse_types.get(sparse, None)
-        if mtype is None:
-            raise ValueError(f"unrecognized scipy sparse matrix name: {sparse}")
+            layout = sparse_layout(obj if obj_is_sparse else 'coo')
+        elif isinstance(sparse, str):
+            sparse = strnorm(sparse.strip(), case=True, unicode=False)
+            layout = sparse_layout(sparse)
+            if layout is None:
+                raise ValueError(
+                    f"invalid scipy sparse array layout name: {sparse}")
+        else:
+            layout = sparse_layout(sparse)
+            if layout is None:
+                raise ValueError(
+                    f"invalid scipy sparse array layout of type {type(sparse)}")
+        # We now have a layout that we are converting into.
         if obj_is_sparse:
             # We're creating a scipy sparse output from a sparse input.
             if obj_is_tensor:
                 # We're creating a scipy sparse output from a sparse tensor.
                 arr = obj.coalesce()
-                if obj is not arr: newarr = True
-                ii = arr.indices().numpy().detach()
-                uu = arr.values().numpy().detach()
+                if obj is not arr:
+                    newarr = True
+                ii = arr.indices().detach().numpy()
+                uu = arr.values().detach().numpy()
                 if copy:
                     vv = np.array(uu, dtype=dtype, order=order)
                 else:
                     vv = np.asarray(uu, dtype=dtype, order=order)
-                if uu is not vv: newarr = True
-                arr = mtype((vv, tuple(ii)), shape=arr.shape)
-            elif copy:
+                newarr = newarr or (uu is not vv)
+                arr = layout.scipy_type(
+                    (vv, tuple(ii)),
+                    shape=arr.shape,
+                    dtype=dtype)
+            else:
                 # We're creating a scipy sparse output from another scipy sparse
                 # matrix.
                 (rr,cc,uu) = sps.find(obj)
                 if copy:
-                    vv = np.array(uu, dtype=dtype, order=order)
-                else:
+                    # uu is already a copy, so we use asarray.
                     vv = np.asarray(uu, dtype=dtype, order=order)
-                if mtype is type(obj) and uu is vv:
-                    arr = obj
+                    arr = None
                 else:
-                    arr = mtype((vv, (rr,cc)), shape=obj.shape)
-                    if uu is not vv:
-                        newarr = True
-            else:
-                arr = obj
+                    vv = np.asarray(obj.data, dtype=dtype, order=order)
+                    if layout.name == obj.format and vv is obj.data:
+                        arr = obj
+                    else:
+                        arr = None
+                if arr is None:
+                    arr = layout.scipy_type(
+                        (vv, (rr,cc)),
+                        shape=obj.shape,
+                        dtype=dtype)
         else:
             # We're creating a scipy sparse matrix from a dense matrix.
-            if obj_is_tensor: arr = obj.detach().numpy()
-            else: arr = obj
-            # Make sure our dtype matches.
+            arr = obj.numpy() if obj_is_tensor else obj
+            # Make sure our dtype and order match.
             arr = np.asarray(arr, dtype=dtype, order=order)
             # We just call the appropriate constructor.
-            arr = mtype(arr)
+            arr = layout.scipy_type(arr)
             newarr = True
         # We mark sparse as True so that below we know that the output is
         # sparse.
@@ -937,10 +1204,10 @@ def to_array(obj,
             if obj_is_tensor:
                 # We are creating a dense array output from a sparse tensor
                 # input.
-                arr = obj.todense().detach().numpy()
+                arr = obj.to_dense().numpy()
             else:
                 # We are creating a dense array output from a scipy sparse
-                # matrix input.
+                # array input.
                 arr = obj.todense()
             # In both of these cases, a copy has already been made.
             arr = np.asarray(arr, dtype=dtype, order=order)
@@ -950,7 +1217,7 @@ def to_array(obj,
             if obj_is_tensor:
                 # We are creating a dense array output from a dense tensor
                 # input.
-                arr = obj.detach().numpy()
+                arr = obj.numpy()
             else:
                 arr = obj
             # Whether we call array() or asarray() depends on the copy
@@ -967,15 +1234,21 @@ def to_array(obj,
     # If a read-only array is requested, we either return the object itself (if
     # it is already a read-only array), or we make a copy and make it read-only.
     if frozen is True:
-        arr = frozenarray(arr)
+        if sparse:
+            arr = sparray_frozen(arr)
+        else:
+            arr = ndarray_frozen(arr)
     elif frozen is False:
         if sparse:
-            if not arr.data.flags['WRITEABLE']:
-                if not newarr: arr = arr.copy()
+            if sparray_isfrozen(arr):
+                if not newarr:
+                    arr = arr.copy()
                 arr.data.setflags(write=True)
-        elif not arr.flags['WRITEABLE']:
+        elif ndarray_isfrozen(arr):
             arr = np.array(arr)
-    elif frozen is not None:
+    elif frozen is None:
+        frozen = sparray_isfrozen(arr) if sparse else ndarray_isfrozen(arr)
+    else:
         raise ValueError(f"bad parameter value for frozen: {frozen}")
     # Next, we switch on whether we are being asked to return a quantity or not.
     if quant is None:
@@ -1013,7 +1286,8 @@ def to_array(obj,
             raise ValueError("cannot extract unit None from quantity; to get"
                              " the native unit, use unit=Ellipsis")
         else:
-            if obj is not arr: q = ureg.Quantity(arr, q.u)
+            if obj is not arr:
+                q = ureg.Quantity(arr, q.u)
             # We convert to the given unit and return that.
             return q.m_as(unit)
     else:
