@@ -140,16 +140,16 @@ class TestUtilNumeric(TestCase):
         self.assertFalse(is_number(torch.tensor([1,2,3])))
         self.assertFalse(is_number(np.array([[-12.0]])))
         # Specific dtypes can also be tested for.
-        self.assertTrue(is_number(0), dtype=int)
-        self.assertTrue(is_number(5), dtype=int)
-        self.assertTrue(is_number(10.0), dtype=float)
-        self.assertTrue(is_number(-2.0 + 9.0j), dtype=complex)
-        self.assertTrue(is_number(True), dtype=bool)
-        self.assertFalse(is_number(0), dtype=bool)
-        self.assertFalse(is_number(5), dtype=float)
-        self.assertFalse(is_number(10.0), dtype=complex)
-        self.assertFalse(is_number(-2.0 + 9.0j), dtype=int)
-        self.assertFalse(is_number(True), dtype=float)
+        self.assertTrue(is_number(0, dtype=int))
+        self.assertTrue(is_number(5, dtype=int))
+        self.assertTrue(is_number(10.0, dtype=float))
+        self.assertTrue(is_number(-2.0 + 9.0j, dtype=complex))
+        self.assertTrue(is_number(True, dtype=bool))
+        self.assertFalse(is_number(0, dtype=bool))
+        self.assertFalse(is_number(5, dtype=float))
+        self.assertFalse(is_number(10.0, dtype=complex))
+        self.assertFalse(is_number(-2.0 + 9.0j, dtype=int))
+        self.assertFalse(is_number(True, dtype=float))
     def test_is_bool(self):
         from immlib import is_bool
         import torch, numpy as np
@@ -378,6 +378,8 @@ class TestUtilNumeric(TestCase):
         self.assertTrue(is_array(arr, frozen=False))
         self.assertFalse(is_array(mtx, frozen=True))
         self.assertTrue(is_array(mtx, frozen=False))
+        with self.assertRaises(ValueError):
+            is_array(mtx, frozen='fail')
         # If we change the flags of these arrays, they become frozen.
         arr.setflags(write=False)
         mtx.setflags(write=False)
@@ -402,6 +404,15 @@ class TestUtilNumeric(TestCase):
             is_array(sp_mtx, sparse='???')
         with self.assertRaises(ValueError):
             is_array(sp_mtx, sparse=object())
+        # Sparse and frozen can be tested together.
+        self.assertTrue(is_array(arr, sparse=False, frozen=True))
+        self.assertFalse(is_array(arr, sparse=False, frozen=False))
+        self.assertFalse(is_array(arr, sparse=True, frozen=False))
+        self.assertFalse(is_array(arr, sparse=True, frozen=True))
+        self.assertFalse(is_array(sp_mtx, sparse=True, frozen=True))
+        self.assertTrue(is_array(sp_mtx, sparse=True, frozen=False))
+        self.assertFalse(is_array(sp_mtx, sparse=False, frozen=True))
+        self.assertFalse(is_array(sp_mtx, sparse=False, frozen=False))
         # The quant option can be used to control whether the object must or
         # must not be a quantity.
         self.assertTrue(is_array(arr, quant=False))
@@ -424,6 +435,8 @@ class TestUtilNumeric(TestCase):
         self.assertTrue(is_array(q_mtx, unit='s'))
         self.assertFalse(is_array(q_arr, unit='s'))
         self.assertFalse(is_array(q_mtx, unit='mm'))
+        # We can also specify the units registry (Ellipsis means immlib.units).
+        self.assertFalse(is_array(q_arr, unit='s', ureg=Ellipsis))
     def test_to_array(self):
         from immlib import (to_array, quant, is_quant, units)
         from numpy import (array, linspace, dot)

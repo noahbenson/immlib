@@ -13,6 +13,7 @@ import numpy as np
 import scipy as sp
 import scipy.sparse as sps
 from scipy.sparse import issparse as scipy__is_sparse
+from pcollections import *
 
 from ..doc import docwrap
 from ._core import (
@@ -116,6 +117,8 @@ except (ModuleNotFoundError, ImportError) as e:
         """
         from functools import wraps
         return (lambda f: wraps(f)(f_alt))
+    _sparse_torch_types = pdict()
+    _sparse_torch_layouts = pdict()
 # Get the torch version setup.
 _torch_version = torch.__version__.split('.')
 try:
@@ -128,6 +131,27 @@ except Exception:
         int(_torch_version[0]),
         int(_torch_version[1]),
         _torch_version[2])
+# We load in a bit of data here also about the sparse tensors.
+_sparse_torch_types = pdict(
+    coo=('sparse_coo_tensor', 'sparse_coo', 'to_sparse_coo'),
+    csr=('sparse_csr_tensor', 'sparse_csr', 'to_sparse_csr'),
+    csc=('sparse_csc_tensor', 'sparse_csc', 'to_sparse_csc'),
+    bsr=('sparse_bsr_tensor', 'sparse_bsr', 'to_sparse_bsr'),
+    bsc=('sparse_bsc_tensor', 'sparse_bsc', 'to_sparse_bsc'))
+_sparse_torch_layouts = tdict()
+# This will drop out anything that isn't found in the package (including if the
+# package isn't loaded).
+for (k,(gen,lay,cast)) in _sparse_torch_types.items():
+    try:
+        tup = (
+            getattr(torch, gen),
+            getattr(torch, lay),
+            getattr(torch.Tensor, cast))
+        _sparse_torch_types = _sparse_torch_types.set(k, tup)
+        _sparse_torch_layout[tup[1]] = k
+    except Exception:
+        _sparse_torch_types = _sparse_torch_types.drop(k)
+_sparse_torch_layouts = _sparse_torch_layouts.persistent()
 
 
 # Numerical Types ##############################################################
@@ -687,7 +711,8 @@ def is_array(obj,
     boolean
         `True` if `obj` is a valid numpy array, otherwise `False`.
     """
-    if ureg is Ellipsis: from immlib import units as ureg
+    if ureg is Ellipsis:
+        from immlib import units as ureg
     # If this is a quantity, just extract the magnitude.
     if isinstance(obj, pint.Quantity):
         if quant is False:
@@ -700,32 +725,39 @@ def is_array(obj,
     elif quant is True:
         return False
     else:
-        if ureg is None: from immlib import units as ureg
+        if ureg is None:
+            from immlib import units as ureg
         u = None
     # At this point we want to check if this is a valid numpy array or scipy
     # sparse matrix; however how we handle the answer to this question depends
     # on the sparse parameter.
     if sparse is True:
-        if not scipy__is_sparse(obj): return False
+        if not scipy__is_sparse(obj):
+            return False
     elif sparse is False:
-        if not isinstance(obj, ndarray): return False
+        if not isinstance(obj, ndarray):
+            return False
     elif sparse is None:
-        if not (isinstance(obj, ndarray) or scipy__is_sparse(obj)): return False
+        if not (isinstance(obj, ndarray) or scipy__is_sparse(obj)):
+            return False
     elif is_str(sparse):
         sparse = strnorm(sparse.strip(), case=True, unicode=False)
         mtype = _sparse_types.get(sparse, None)
         if mtype is None:
             raise ValueError(f"invalid sparse array type: {sparse}")
-        btype = _sparse_base_types.get(sparse, None)
-        if not isinstance(obj, btype): return False
+        elif not isinstance(obj, mtype):
+            btype = _sparse_base_types.get(sparse, None)
+            if btype is None or not isinstance(obj, btype):
+                return False
     else:
-        raise ValueError(f"invalid sparse parameter of {type(sparse)}")
+        raise ValueError(f"invalid sparse parameter of type {type(sparse)}")
     # Check that the object is read-only
     if frozen is True:
         if scipy__is_sparse(obj):
-            if obj.data.flags['WRITEABLE']: return False
-        else:
-            if obj.flags['WRITEABLE']: return False
+            if obj.data.flags['WRITEABLE']:
+                return False
+        elif obj.flags['WRITEABLE']:
+            return False
     elif frozen is False:
         if scipy__is_sparse(obj):
             if not obj.data.flags['WRITEABLE']: return False
@@ -882,7 +914,8 @@ def to_array(obj,
                     arr = obj
                 else:
                     arr = mtype((vv, (rr,cc)), shape=obj.shape)
-                    if uu is not vv: newarr = True
+                    if uu is not vv:
+                        newarr = True
             else:
                 arr = obj
         else:
