@@ -1125,6 +1125,7 @@ def to_pcoll(obj):
         return pdict(obj)
     else:
         raise TypeError(f"argument is not a recognized collection")
+from pcollections.abc import (TransientSequence, TransientSet, TransientMapping)
 def to_tcoll(obj, copy=True):
     """Returns a transient copy of `obj`.
 
@@ -1154,9 +1155,9 @@ def to_tcoll(obj, copy=True):
     """
     if not copy and is_tcoll(obj):
         return obj
-    if isinstance(obj, (PersistentList, PersistentSet, PersistentMapping)):
+    if isinstance(obj, (PersistentSequence, PersistentSet, PersistentMapping)):
         return obj.transient()
-    elif isinstance(obj, (TransientList, TransientSet, TransientMapping)):
+    elif isinstance(obj, (TransientSequence, TransientSet, TransientMapping)):
         # This makes a duplicate but prevents tldicts from becoming tdicts and
         # tllists from becoming tlists.
         return obj.persistent().transient()
@@ -1168,7 +1169,7 @@ def to_tcoll(obj, copy=True):
         return tdict(obj)
     else:
         raise TypeError(f"argument is not a recognized collection")
-def to_mcoll(obj):
+def to_mcoll(obj, copy=True):
     """Returns a mutable copy of `obj`.
 
     `to_mcoll(obj)` returns a mutable copy of the given collection `obj`. If
@@ -1268,38 +1269,12 @@ def frozenarray(obj, dtype=None, *, copy=False, **kwargs):
         arr = np.array(obj, dtype=dtype, **kwargs)
         arr.setflags(write=False)
         return arr
-@docwrap
-def unbroadcast_index(broadcasted_index, original_shape, broadcasted_shape):
-    """Converts a broadcasted index into an equivalent index for the original
-    (unbroadcasted) array.
-
-    For any two arrays `u` and `v` that are broadcastable---that is, the
-    expression `uv_shape = np.broadcast_shapes(u.shape, v.shape)` returns a
-    valid tuple without raising an error---we can define `bc_u =
-    np.broadcast_to(u, uv_shape)` and `bc_v = np.broadcast_to(v, uv_shape)`. If
-    `idx` is then a valid index into `bc_u` and `bc_v` (i.e., `bc_u[idx]` and
-    `bc_v[idx]` succeed) that refers to a single cell, then we can define `idx_u
-    = unbroadcast_index(idx, u.shape, uv_shape)` and `idx_v =
-    unbroadcast_index(idx, v.shape, uv_shape)`. In this case, `bc_u[idx] ==
-    u[idx_u]` and `bc_v[idx] == v[idx_v]`.
-    """
-    if not isinstance(original_shape, tuple):
-        original_shape = (original_shape,)
-    if not isinstance(broadcasted_shape, tuple):
-        broadcasted_shape = (broadcasted_shape,)
-    n0 = len(original_shape)
-    if n0 < len(broadcasted_shape):
-        sl = slice(-n0, None)
-        broadcasted_shape = broadcasted_shape[sl]
-        broadcasted_index = broadcasted_index[sl]
-    axis_equal_q = map(op.eq, original_shape, broadcasted_shape)
-    return tuple(map(op.mul, broadcasted_index, axis_equal_q))
 
 
 # Mapping/Sequence Utilities ###################################################
 
 @docwrap
-def get(d, arg, **kw):
+def get(d, k, **kw):
     """Returns a value from either a mapping or a sequence.
 
     The `get` function is essentially a function version of the `get` method

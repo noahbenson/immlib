@@ -41,8 +41,7 @@ from ..util import (
     is_tensor,
     is_array,
     merge,
-    to_array,
-    unbroadcast_index)
+    to_array)
 from ..workflow import *
 
 
