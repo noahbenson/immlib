@@ -331,7 +331,7 @@ def is_number(obj, /, dtype=None):
     elif dtype is float:
         return _is_scalar(obj, Real)
     elif dtype is complex:
-        return _is_scalar(obj, Comlex)
+        return _is_scalar(obj, Complex)
     else:
         raise ValueError(f"invalid dtype: {dtype}")
 def is_bool(obj):

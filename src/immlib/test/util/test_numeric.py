@@ -131,10 +131,10 @@ class TestUtilNumeric(TestCase):
         self.assertFalse(is_number('10'))
         self.assertFalse(is_number(None))
         # Scalar arrays and tensors are counted as scalars.
-        self.assertFalse(is_number(np.array(5)))
-        self.assertFalse(is_number(np.array(10.0 + 2.0j)))
-        self.assertFalse(is_number(torch.tensor(5)))
-        self.assertFalse(is_number(torch.tensor(10.0 + 2.0j)))
+        self.assertTrue(is_number(np.array(5)))
+        self.assertTrue(is_number(np.array(10.0 + 2.0j)))
+        self.assertTrue(is_number(torch.tensor(5)))
+        self.assertTrue(is_number(torch.tensor(10.0 + 2.0j)))
         # Arrays and tensors are *not* checked for their dtype to be such--that
         # is instead performed by is_numberdata.
         self.assertFalse(is_number(torch.tensor([1,2,3])))
@@ -146,10 +146,30 @@ class TestUtilNumeric(TestCase):
         self.assertTrue(is_number(-2.0 + 9.0j, dtype=complex))
         self.assertTrue(is_number(True, dtype=bool))
         self.assertFalse(is_number(0, dtype=bool))
-        self.assertFalse(is_number(5, dtype=float))
-        self.assertFalse(is_number(10.0, dtype=complex))
+        self.assertTrue(is_number(5, dtype=float))
+        self.assertTrue(is_number(10.0, dtype=complex))
         self.assertFalse(is_number(-2.0 + 9.0j, dtype=int))
-        self.assertFalse(is_number(True, dtype=float))
+        self.assertTrue(is_number(True, dtype=float))
+        # is_number returns True if the argument is a scalar number; otherwise
+        # it returns false.
+        self.assertTrue(is_number(10))
+        self.assertTrue(is_number(10.0))
+        self.assertTrue(is_number(10.0 + 20.5j))
+        self.assertTrue(is_number(True))
+        self.assertTrue(is_number(np.array(10)))
+        self.assertTrue(is_number(torch.tensor(10)))
+        self.assertFalse(is_number([10]))
+        self.assertFalse(is_number([[10]]))
+        self.assertFalse(is_number([[[10]]]))
+        self.assertFalse(is_number(np.array([10])))
+        self.assertFalse(is_number(np.array([[10]])))
+        self.assertFalse(is_number(np.array([[[10]]])))
+        self.assertFalse(is_number(torch.tensor([10])))
+        self.assertFalse(is_number(torch.tensor([[10]])))
+        self.assertFalse(is_number(torch.tensor([[[10]]])))
+        self.assertFalse(is_number('10'))
+        self.assertFalse(is_number({'a':10}))
+        self.assertFalse(is_number([1,2,3]))
     def test_is_bool(self):
         from immlib import is_bool
         import torch, numpy as np
@@ -438,7 +458,7 @@ class TestUtilNumeric(TestCase):
         # We can also specify the units registry (Ellipsis means immlib.units).
         self.assertFalse(is_array(q_arr, unit='s', ureg=Ellipsis))
     def test_to_array(self):
-        from immlib import (to_array, quant, is_quant, units)
+        from immlib import (to_array, quant, is_quant, units, frozenarray)
         from numpy import (array, linspace, dot)
         from scipy.sparse import (csr_matrix, issparse)
         import torch, numpy as np, pint
@@ -448,6 +468,8 @@ class TestUtilNumeric(TestCase):
         sp_mtx = csr_matrix(([1.0, 0.5, 0.5, 0.2, 0.1],
                              ([0, 0, 4, 5, 9], [4, 9, 4, 1, 8])),
                             shape=(10, 10), dtype=float)
+        f_arr = frozenarray(arr)
+        f_sp_mtx = frozenarray(sp_mtx)
         q_arr = quant(arr, 'mm')
         q_mtx = quant(arr, 'seconds')
         q_sp_mtx = quant(sp_mtx, 'kg')
@@ -457,10 +479,15 @@ class TestUtilNumeric(TestCase):
         self.assertIs(arr, to_array(arr))
         self.assertIs(arr, to_array(arr, sparse=False, frozen=False))
         self.assertIs(arr, to_array(arr, quant=False))
+        self.assertIs(f_arr, to_array(f_arr))
+        self.assertIs(f_arr, to_array(f_arr, sparse=False, frozen=True))
+        self.assertIs(f_arr, to_array(f_arr, quant=False))
         # If we change the parameters of the returned array, we will get
         # different (but typically equal) objects back.
         self.assertIsNot(arr, to_array(arr, frozen=True))
+        self.assertIsNot(f_arr, to_array(f_arr, frozen=False))
         self.assertTrue(np.array_equal(arr, to_array(arr, frozen=True)))
+        self.assertTrue(np.array_equal(f_arr, to_array(f_arr, frozen=False)))
         # We can also request that a copy be made like with np.array.
         self.assertIsNot(arr, to_array(arr, copy=True))
         self.assertTrue(np.array_equal(arr, to_array(arr, copy=True)))
@@ -836,29 +863,6 @@ class TestUtilNumeric(TestCase):
         self.assertFalse(like_number([1,2,3]))
         # ragged arrays are not like numbers:
         self.assertFalse(like_number([[1,2,3],[2,3]]))
-    def test_is_number(self):
-        from immlib import is_number
-        import torch, numpy as np
-        # is_number returns True if the argument is a scalar number; otherwise
-        # it returns false.
-        self.assertTrue(is_number(10))
-        self.assertTrue(is_number(10.0))
-        self.assertTrue(is_number(10.0 + 20.5j))
-        self.assertTrue(is_number(True))
-        self.assertTrue(is_number(np.array(10)))
-        self.assertTrue(is_number(torch.tensor(10)))
-        self.assertFalse(is_number([10]))
-        self.assertFalse(is_number([[10]]))
-        self.assertFalse(is_number([[[10]]]))
-        self.assertFalse(is_number(np.array([10])))
-        self.assertFalse(is_number(np.array([[10]])))
-        self.assertFalse(is_number(np.array([[[10]]])))
-        self.assertFalse(is_number(torch.tensor([10])))
-        self.assertFalse(is_number(torch.tensor([[10]])))
-        self.assertFalse(is_number(torch.tensor([[[10]]])))
-        self.assertFalse(is_number('10'))
-        self.assertFalse(is_number({'a':10}))
-        self.assertFalse(is_number([1,2,3]))
     def test_to_number(self):
         from immlib import to_number
         import torch, numpy as np
