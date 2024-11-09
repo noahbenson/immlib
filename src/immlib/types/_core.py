@@ -128,16 +128,6 @@ class ImmutableType(type):
                 raise TypeError(f"{type(self)} is immutable")
             else:
                 return object.__delattr__(self, k)
-        def __setitem__(self, k, v):
-            if self.__init_status:
-                raise TypeError(f"{type(self)} is immutable")
-            else:
-                return object.__setattr__(self, k, v)
-        def __delitem__(self, k):
-            if self.__init_status:
-                raise TypeError(f"{type(self)} is immutable")
-            else:
-                return object.__delattr__(self, k)
         def __init_wrap(self, *args, **kw):
             # Find the correct __init__ function to run:
             initfn = next(
@@ -233,7 +223,7 @@ class ArrayIndex:
         return self
     # Public Methods -----------------------------------------------------------
     @docwrap(indent=8)
-    def find(self, ids, ravel=False, **kw):
+    def find(self, ids, *, ravel=False, **kw):
         """Finds and returns the indices of the given identities.
         
         `index.find(id)` returns the index, in the original array on which
@@ -262,7 +252,12 @@ class ArrayIndex:
             identities, `ids`.
        """
         if len(kw) == 1:
-            default = kw.pop('default')
+            try:
+                default = kw.pop('default')
+            except KeyError:
+                err = TypeError(
+                    f'unrecognized option for find: {next(iter(kw.keys()))}')
+                raise err from None
             error = False
         else:
             default = None
@@ -278,28 +273,31 @@ class ArrayIndex:
         ii = np.searchsorted(flatids, ids)
         try:
             ins = flatins[ii]
+            ok = flatids[ii] == ids
         except IndexError:
-            bad = (ii == len(flatids))
-            bad = ids[bad]
-            raise KeyError(bad.flat[0]) from None
-        notfound = flatids[ii] != ids
-        anymissing = np.any(notfound)
+            ok = np.asarray((ii < len(flatids)) & (ii >= 0))
+            ok[ok] &= flatids[ii[ok]] == ids[ok]
+            ins = np.empty_like(ii, dtype=flatins.dtype)
+            ins[ok] = flatins[ii[ok]]
+        bad = ~ok
+        anymissing = np.any(bad)
         # If some were not found, we might need to raise an error.
-        if error and anymissing:
-            k = np.atleast_1d(ids[notfound])[0]
-            raise KeyError(k)
-        if ravel:
+        if anymissing:
+            if error:
+                raise KeyError(ids[bad].flat[0])
+            else:
+                ins[bad] = default
+        if not ravel:
             if anymissing:
-                ins = np.asarray(ins)
-                ins[notfound] = default
-        else:
-            ins = np.unravel_index(ins, self.array.shape)
-            if anymissing:
+                unrav = np.unravel_index(ins[ok], self.array.shape)
                 if not is_tuple(default):
-                    default = (default,) * len(ins)
-                ins = tuple(np.asarray(u) for u in ins)
-                for (u,d) in zip(ins, default):
-                    u[notfound] = default
+                    default = (default,) * np.size(ins)
+                ins = tuple(np.empty_like(ins) for u in unrav)
+                for (u,r,d) in zip(ins, unrav, default):
+                    u[bad] = d
+                    u[ok] = r
+            else:
+                ins = np.unravel_index(ins, self.array.shape)
         return ins
     @property
     def flatdata(self):

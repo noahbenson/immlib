@@ -662,4 +662,23 @@ class TestUtilCore(TestCase):
         self.assertEqual(cos_halfangle(0, unit='degrees'), 1.0)
         self.assertTrue(np.abs(cos_halfangle(np.pi)) < 1e-9)
         self.assertTrue(np.abs(cos_halfangle(180, unit='degrees')) < 1e-9)
-        
+    def test_unitregistry(self):
+        from immlib.util import unitregistry
+        from immlib import unit, units, mag, quant, default_ureg
+        with default_ureg(units):
+            q = quant(10.5, 'mm')
+            p = quant(55, 's')
+            self.assertIs(units, unitregistry(units))
+            self.assertIs(units, unitregistry(...))
+            self.assertIs(units, unitregistry(q))
+            self.assertIs(units, unitregistry(p))
+            self.assertIs(units, unitregistry(q.u))
+            self.assertIs(units, unitregistry(p.u))
+            with self.assertRaises(TypeError):
+                unitregistry(units, None, 1)
+            with self.assertRaises(TypeError):
+                unitregistry()
+            with self.assertRaises(TypeError):
+                unitregistry(units, None, 1)
+            
+

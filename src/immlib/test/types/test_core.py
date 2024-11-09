@@ -57,6 +57,8 @@ class TestTypesCore(TestCase):
             immobj.a = 10
         with self.assertRaises(TypeError):
             immobj.b = 20
+        with self.assertRaises(TypeError):
+            del immobj.b
     def test_array_index(self):
         "Tests the ArrayIndex type."
         from ...types import ArrayIndex
@@ -68,6 +70,16 @@ class TestTypesCore(TestCase):
         # We can also find multiple elements at once:
         els = [2,5,9]
         self.assertTrue(np.array_equal(arr[ai.find(els)], els))
+        # Default values can be provided when not found:
+        self.assertEqual(ai.find(100, default=-1, ravel=True), -1)
+        # Otherwise, if we look for something not there, we get a KeyError:
+        with self.assertRaises(KeyError):
+            ai.find(100)
+        # The index freezes its array.
+        self.assertFalse(ai.array.flags['WRITEABLE'])
+        # But we can instruct the array to stay writeable if desired.
+        ai = ArrayIndex(arr, freeze=False)
+        self.assertTrue(ai.array.flags['WRITEABLE'])
         # Tests with strings instead of integers.
         lorem = '''Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed
             do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut
@@ -92,4 +104,7 @@ class TestTypesCore(TestCase):
             ai.flatdata = ()
         with self.assertRaises(TypeError):
             ai[0] = 0
+        # They raise some other errors too:
+        with self.assertRaises(TypeError):
+            ai.find(0, xyz=10)
 

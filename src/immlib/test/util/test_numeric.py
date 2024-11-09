@@ -139,6 +139,17 @@ class TestUtilNumeric(TestCase):
         # is instead performed by is_numberdata.
         self.assertFalse(is_number(torch.tensor([1,2,3])))
         self.assertFalse(is_number(np.array([[-12.0]])))
+        # Specific dtypes can also be tested for.
+        self.assertTrue(is_number(0), dtype=int)
+        self.assertTrue(is_number(5), dtype=int)
+        self.assertTrue(is_number(10.0), dtype=float)
+        self.assertTrue(is_number(-2.0 + 9.0j), dtype=complex)
+        self.assertTrue(is_number(True), dtype=bool)
+        self.assertFalse(is_number(0), dtype=bool)
+        self.assertFalse(is_number(5), dtype=float)
+        self.assertFalse(is_number(10.0), dtype=complex)
+        self.assertFalse(is_number(-2.0 + 9.0j), dtype=int)
+        self.assertFalse(is_number(True), dtype=float)
     def test_is_bool(self):
         from immlib import is_bool
         import torch, numpy as np
@@ -326,9 +337,11 @@ class TestUtilNumeric(TestCase):
         # lets you specify what kind of shape is required of the array. The most
         # straightforward usage is to require a specific shape.
         self.assertTrue(is_array(arr, shape=(25,)))
+        self.assertTrue(is_array(arr, shape=25))
         self.assertTrue(is_array(mtx, shape=(10,10)))
         self.assertFalse(is_array(arr, shape=(25,25)))
         self.assertFalse(is_array(mtx, shape=(10,)))
+        self.assertTrue(is_array(np.array(100), shape=()))
         # A -1 value that appears in the shape option represents any size along
         # that dimension (a wildcard). Any number of -1s can be included.
         self.assertTrue(is_array(arr, shape=(-1,)))
@@ -353,7 +366,9 @@ class TestUtilNumeric(TestCase):
         # The numel option allows one to specify the number of elements that an
         # object must have. This does not care about dimensionality.
         self.assertTrue(is_array(arr, numel=25))
+        self.assertTrue(is_array(arr, numel=(25,26))) # Is numel either 25 or 26?
         self.assertFalse(is_array(arr, numel=26))
+        self.assertFalse(is_array(arr, numel=(24,26)))
         self.assertTrue(is_array(np.array(0), numel=1))
         self.assertTrue(is_array(np.array([0]), numel=1))
         self.assertTrue(is_array(np.array([[0]]), numel=1))
@@ -383,6 +398,10 @@ class TestUtilNumeric(TestCase):
         # You can also require a kind of sparse matrix.
         self.assertTrue(is_array(sp_mtx, sparse='csr'))
         self.assertFalse(is_array(sp_mtx, sparse='csc'))
+        with self.assertRaises(ValueError):
+            is_array(sp_mtx, sparse='???')
+        with self.assertRaises(ValueError):
+            is_array(sp_mtx, sparse=object())
         # The quant option can be used to control whether the object must or
         # must not be a quantity.
         self.assertTrue(is_array(arr, quant=False))
@@ -802,6 +821,8 @@ class TestUtilNumeric(TestCase):
         self.assertFalse(like_number('10'))
         self.assertFalse(like_number({'a':10}))
         self.assertFalse(like_number([1,2,3]))
+        # ragged arrays are not like numbers:
+        self.assertFalse(like_number([[1,2,3],[2,3]]))
     def test_is_number(self):
         from immlib import is_number
         import torch, numpy as np

@@ -366,7 +366,7 @@ def like_number(obj):
     if not isinstance(obj, np.ndarray):
         try:
             obj = np.asarray(obj)
-        except TypeError:
+        except (TypeError, ValueError):
             return False
     return obj.size == 1 and is_numberdata(obj)
 @docwrap
@@ -715,11 +715,11 @@ def is_array(obj,
         sparse = strnorm(sparse.strip(), case=True, unicode=False)
         mtype = _sparse_types.get(sparse, None)
         if mtype is None:
-            raise ValueErroor(f"invalid sparse matrix type: {sparse}")
+            raise ValueError(f"invalid sparse array type: {sparse}")
         btype = _sparse_base_types.get(sparse, None)
         if not isinstance(obj, btype): return False
     else:
-        raise ValueErroor(f"invalid sparse parameter: {sparse}")
+        raise ValueError(f"invalid sparse parameter of {type(sparse)}")
     # Check that the object is read-only
     if frozen is True:
         if scipy__is_sparse(obj):
@@ -1201,7 +1201,7 @@ def is_tensor(obj,
     elif streq(sparse, 'csr', case=False, unicode=False, strip=True):
         if obj.layout != torch.sparse_csr: return False
     elif sparse is not None:
-        raise ValueErroor(f"invalid sparse parameter: {sparse}")
+        raise ValueError(f"invalid sparse parameter: {sparse}")
     # Next, check compatibility of the units.
     if unit is None:
         # We are required to not be a quantity.
