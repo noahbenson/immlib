@@ -614,20 +614,6 @@ SparseLayout = namedtuple(
     ('name',
      'scipy_type', 'scipy_matrix_type', 'scipy_tomethod',
      'torch_constructor', 'torch_layout', 'torch_tomethod'))
-_sparse_torch_layouts = tdict()
-# This will drop out anything that isn't found in the package (including if the
-# package isn't loaded).
-for (k,(gen,lay,cast)) in _sparse_torch_layouts.items():
-    try:
-        tup = (
-            getattr(torch, gen),
-            getattr(torch, lay),
-            getattr(torch.Tensor, cast))
-        _sparse_torch_layouts = _sparse_torch_layouts.set(k, tup)
-        _sparse_torch_layout[tup[1]] = k
-    except Exception:
-        _sparse_torch_layouts = _sparse_torch_layouts.drop(k)
-_sparse_torch_layouts = _sparse_torch_layouts.persistent()
 _sparse_layouts = tdict(
     bsr=SparseLayout(
         'bsr',
@@ -684,6 +670,14 @@ for (k,st) in _sparse_layouts.items():
     if st.torch_layout is not None:
         _sparse_index[st.torch_layout] = st
 _sparse_index = _sparse_index.persistent()
+_sparse_torch_layouts = frozenset(
+    st.torch_layout
+    for st in _sparse_layouts.values()
+    if st.torch_layout is not None)
+def torch__is_sparse(obj):
+    if not torch.is_tensor(obj):
+        return False
+    return obj.layout in _sparse_torch_layouts
 @docwrap
 def sparse_layout(obj):
     """Returns a tuple containing data about a sparse array layout.
@@ -697,7 +691,7 @@ def sparse_layout(obj):
       * `'csr'`
       * `'csc'`
       * `'dia'`
-      * `'doc'`
+      * `'dok'`
       * `'lil'`
 
     Alternatively, `sparse_layout(obj)` returns the sparse layout information
@@ -723,7 +717,7 @@ def sparse_layout(obj):
     elif isinstance(obj, pint.Quantity):
         return sparse_layout(obj.m)
     elif torch.is_tensor(obj):
-        if obj.is_sparse:
+        if obj.layout in _sparse_torch_layouts:
             return _sparse_index.get(obj.layout, None)
     elif scipy__is_sparse(obj):
         return _sparse_index.get(type(obj), None)
@@ -741,7 +735,7 @@ def sparse_haslayout(arr, layout):
     if isinstance(arr, pint.Quantity):
         return sparse_haslayout(arr.m, layout)
     is_sparr = scipy__is_sparse(arr)
-    is_sptns = torch.is_tensor(arr) and arr.is_sparse
+    is_sptns = torch__is_sparse(arr)
     srclay = sparse_layout(arr) if is_sparr or is_sptns else None
     dstlay = sparse_layout(layout)
     if dstlay is None:
@@ -773,7 +767,7 @@ def sparse_find(arr):
         return f[:-1] + (f[-1]*arr.u,)
     elif scipy__is_sparse(arr):
         return sps.find(arr)
-    elif torch.is_tensor(arr) and arr.is_sparse:
+    elif torch__is_sparse(arr):
         arr = arr.coalesce()
         return tuple(arr.indices()) + (arr.values().clone().detach(),)
     else:
@@ -790,9 +784,9 @@ def sparse_indices(arr):
         return sparse_indices(arr.m)
     elif scipy__is_sparse(arr):
         return np.stack(sps.find(arr)[:-1])
-    elif torch.is_tensor(arr) and arr.is_sparse:
+    elif torch__is_sparse(arr):
         arr = arr.coalesce()
-        return arr.values()
+        return arr.indices()
     else:
         raise TypeError(f"sparse_data requires a sparse array or sparse tensor")
 @docwrap
@@ -809,7 +803,7 @@ def sparse_data(arr):
         return sparse_data(arr.m) * arr.u
     elif scipy__is_sparse(arr):
         return arr.data
-    elif torch.is_tensor(arr) and arr.is_sparse:
+    elif torch__is_sparse(arr):
         arr = arr.coalesce()
         return arr.values()
     else:
@@ -834,15 +828,15 @@ def sparse_tolayout(obj, layout):
             raise ValueError(f"layout is invalid for scipy arrays: {layout}")
         arr = method()
         # If obj was frozen, duplicate that.
-        if arr is not obj and sparray_frozen(obj):
+        if arr is not obj and sparray_isfrozen(obj):
             sparray_freeze(arr)
         return arr
-    elif torch.is_tensor(obj) and obj.is_sparse:
+    elif torch__is_sparse(obj):
         obj = obj.coalesce()
-        method = getattr(obj, lay.torch_tomethod)
-        if method is None:
+        mtd = lay.torch_tomethod
+        if mtd is None:
             raise ValueError(f"layout is invalid for pytorch tensors: {layout}")
-        return method()
+        return mtd(obj)
     else:
         raise TypeError(
             "sparse_tolayout requires a sparse scipy array or"
@@ -1119,7 +1113,7 @@ def to_array(obj,
     # requested in sparse format. If so, we handle the conversion differently.
     obj_is_spsparse = scipy__is_sparse(obj)
     obj_is_tensor = not obj_is_spsparse and torch.is_tensor(obj)
-    obj_is_sparse = obj_is_spsparse or (obj_is_tensor and obj.is_sparse)
+    obj_is_sparse = obj_is_spsparse or torch__is_sparse(obj)
     # If this is a tensor and it requires grad, we can check whether we can
     # duplicate it now or not.
     if obj_is_tensor and obj.requires_grad:
@@ -1500,9 +1494,9 @@ def is_tensor(obj,
         if obj.requires_grad != requires_grad: return False
     # Do we match the sparsity requirement?
     if sparse is True:
-        if not obj.is_sparse: return False
+        if not torch__is_sparse(obj): return False
     elif sparse is False:
-        if obj.is_sparse: return False
+        if torch__is_sparse(obj): return False
     elif streq(sparse, 'coo', case=False, unicode=False, strip=True):
         if obj.layout != torch.sparse_coo: return False
     elif streq(sparse, 'csr', case=False, unicode=False, strip=True):
@@ -1657,15 +1651,15 @@ def to_tensor(obj,
     # now.
     if sparse is True:
         # arr must be sparse (COO by default); make sure it is.
-        if not arr.is_sparse: arr = arr.to_sparse()
+        if not torch__is_sparse(arr): arr = arr.to_sparse()
     elif sparse is False:
         # arr must not be a sparse array; make sure it isn't.
-        if arr.is_sparse: arr = arr.to_dense()
+        if torch__is_sparse(arr): arr = arr.to_dense()
     elif streq(sparse, 'csr', case=False, unicode=False, strip=True):
         if arr.layout is not torch.sparse_csr:
             arr = arr.to_sparse_csr()
     elif streq(sparse, 'coo', case=False, unicode=False, strip=True):
-        if not arr.is_sparse: arr = arr.to_sparse()
+        if not torch__is_sparse(arr): arr = arr.to_sparse()
         if arr.layout is not torch.sparse_coo:
             arr = arr.coalesce()
             arr = torch.sparse_coo_tensor(

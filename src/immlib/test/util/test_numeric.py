@@ -294,6 +294,66 @@ class TestUtilNumeric(TestCase):
         # Ordinary tags can be converted into dtypes as well.
         self.assertEqual(np.dtype(np.float64), to_numpydtype(np.float64))
         self.assertEqual(np.dtype('int32'), to_numpydtype('int32'))
+    def test_sparray_utils(self):
+        import scipy.sparse as sps, numpy as np, torch
+        from immlib.util import (
+            sparse_find, sparse_data, sparse_indices, sparse_layout,
+            sparse_haslayout, sparse_tolayout)
+        sparr = sps.csr_array(
+            ([1.0, 0.5, 0.5, 0.2, 0.1],
+             ([0, 0, 4, 5, 9], [4, 9, 4, 1, 8])),
+            shape=(10, 10),
+            dtype=float)
+        sptns = torch.sparse_coo_tensor(
+            torch.tensor([[0, 0, 4, 5, 9], [4, 9, 4, 1, 8]]),
+            torch.tensor([1.0, 0.5, 0.5, 0.2, 0.1]),
+            size=(10, 10),
+            dtype=float)
+        sptns = sptns.coalesce()
+        # We can get a sparse layout from names or objects.
+        for k in ('coo', 'csr', 'csc', 'bsr', 'bsc', 'dok', 'lil', 'dia'):
+            sl = sparse_layout(k)
+            self.assertEqual(k, sl.name)
+            self.assertIs(sl, sparse_layout(sl))
+        # We can also look up things by numpy array or torch tensor type.
+        self.assertEqual('csr', sparse_layout(sparr).name)
+        self.assertEqual('coo', sparse_layout(sptns).name)
+        # Unrecognized objects and names produce None:
+        self.assertIs(None, sparse_layout('???'))
+        self.assertIs(None, sparse_layout(object()))
+        # We can convert between layouts:
+        cooarr = sparse_tolayout(sparr, 'coo')
+        self.assertEqual(cooarr.format, 'coo')
+        self.assertTrue(np.array_equal(sparr.todense(), cooarr.todense()))
+        csrtns = sparse_tolayout(sptns, 'csr')
+        self.assertEqual(csrtns.layout, torch.sparse_csr)
+        self.assertTrue(torch.equal(sptns.to_dense(), csrtns.to_dense()))
+        # Check if a sparse object has a particular layout:
+        self.assertTrue(sparse_haslayout(sparr, 'csr'))
+        self.assertTrue(sparse_haslayout(cooarr, 'coo'))
+        self.assertFalse(sparse_haslayout(sparr, 'coo'))
+        self.assertFalse(sparse_haslayout(cooarr, 'csr'))
+        self.assertTrue(sparse_haslayout(csrtns, 'csr'))
+        self.assertTrue(sparse_haslayout(sptns, 'coo'))
+        self.assertFalse(sparse_haslayout(csrtns, 'coo'))
+        self.assertFalse(sparse_haslayout(sptns, 'csr'))
+        # We can extract the various bits of data also:
+        self.assertTrue(
+            all(map(np.array_equal, sparse_find(sparr), sps.find(sparr))))
+        self.assertTrue(
+            np.array_equal(sparse_data(sparr), sparr.data))
+        ii = np.stack(sparse_find(sparr)[:-1])
+        self.assertTrue(
+            np.array_equal(sparse_indices(sparr), ii))
+        sfnd = sparse_find(sptns)
+        ii = sptns.indices()
+        vv = sptns.values()
+        tfnd = tuple(ii) + (vv,)
+        self.assertTrue(all(map(torch.equal, sfnd, tfnd)))
+        self.assertTrue(
+            torch.equal(vv, sparse_data(sptns)))
+        self.assertTrue(
+            torch.equal(ii, sparse_indices(sptns)))
     def test_is_array(self):
         from immlib import (is_array, quant)
         from numpy import (array, linspace, dot)
@@ -386,7 +446,7 @@ class TestUtilNumeric(TestCase):
         # The numel option allows one to specify the number of elements that an
         # object must have. This does not care about dimensionality.
         self.assertTrue(is_array(arr, numel=25))
-        self.assertTrue(is_array(arr, numel=(25,26))) # Is numel either 25 or 26?
+        self.assertTrue(is_array(arr, numel=(25,26))) # Is numel 25 or 26?
         self.assertFalse(is_array(arr, numel=26))
         self.assertFalse(is_array(arr, numel=(24,26)))
         self.assertTrue(is_array(np.array(0), numel=1))
