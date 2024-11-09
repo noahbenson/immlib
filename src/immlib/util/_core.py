@@ -1431,7 +1431,7 @@ def valmap(f, d, *args, **kwargs):
     elif is_pdict(d):
         t = tdict()
         for (k,v) in d.items():
-            t[k] = v
+            t[k] = f(v, *args, **kwargs)
         return t.persistent()
     else:
         return {k: f(v, *args, **kwargs) for (k,v) in d.items()}
@@ -1564,7 +1564,7 @@ def ldictmap(f, keys, *args, **kw):
     t = tdict()
     for k in keys:
         t[k] = lazy(f, k, *args, **kw)
-    return t.persistent()
+    return ldict(t)
 def merge(*args, **kw):
     '''Merges dict-like objects left-to-right. See also `rmerge`.
 
@@ -1614,7 +1614,6 @@ def rmerge(*args, **kw):
             res.update(d.to_pdict())
         else:
             res.update(d)
-    res.update(kw)
     return ldict(res) if lazy else pdict(res)
 def assoc(d, *args, **kw):
     """Returns a copy of the given dictionary with additional key-value pairs.
