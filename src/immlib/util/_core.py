@@ -1615,7 +1615,7 @@ def rmerge(*args, **kw):
         else:
             res.update(d)
     return ldict(res) if lazy else pdict(res)
-def assoc(d, *args, **kw):
+def assoc(d, /, *args, **kw):
     """Returns a copy of the given dictionary with additional key-value pairs.
 
     `assoc(d, key, val)` returns a copy of the dictionary `d` with the given
@@ -1639,7 +1639,7 @@ def assoc(d, *args, **kw):
             d[k] = v
         for (k,v) in kw.items():
             d[k] = v
-    elif is_pdict(d):
+    elif is_apmap(d):
         nels = len(ks) + len(kw)
         if nels > 1:
             d = d.transient()
@@ -1656,7 +1656,7 @@ def assoc(d, *args, **kw):
     else:
         raise TypeError(f"cannot assoc to type {type(d)}")
     return d
-def dissoc(d, *args):
+def dissoc(d, /, *args):
     """Returns a copy of the given dictionary with certain keys removed.
 
     `dissoc(d, key)` returns a copy of the dictionary `d` with the given
@@ -1683,25 +1683,30 @@ def dissoc(d, *args):
             return d.persistent()
     else:
         raise TypeError(f"cannot dissoc from type {type(d)}")
+from pcollections import unlazy
 def _lambdadict_call(data, fn):
-    spec = inspect.getfullargspec(fn)
-    dflts = spec.defaults or fdict()
+    spec = getfullargspec(fn)
+    dflts = spec.defaults or pdict()
     args = []
     kwargs = {}
     pos = True
     for k in spec.args:
         if k in data:
-            v = undelay(data[k])
-            if pos: args.append(v)
-            else:   kwargs[k] = v
+            v = unlazy(data[k])
+            if pos:
+                args.append(v)
+            else:
+                kwargs[k] = v
         else:
             pos = False
-            if k in dflts: kwargs[k] = dflts[k]
+            if k in dflts:
+                kwargs[k] = dflts[k]
     for k in spec.kwonlyargs:
         if k in data:
-            kwargs[k] = undelay(data[k])
+            kwargs[k] = unlazy(data[k])
         else:
-            if k in dflts: kwargs[k] = dflts[k]
+            if k in dflts:
+                kwargs[k] = dflts[k]
     return fn(*args, **kwargs)
 def lambdadict(*args, **kwargs):
     """Builds and returns a `ldict` with lambda functions calculated lazily.
@@ -1719,7 +1724,9 @@ def lambdadict(*args, **kwargs):
     Examples
     --------
     >>> d = lambdadict(a=1, b=2, c=lambda a,b: a + b)
-    >>> d.is_cached('c')
+    >>> d.is_lazy('c')
+    True
+    >>> d.is_ready('c')
     False
     >>> d['c']
     3
@@ -1728,7 +1735,9 @@ def lambdadict(*args, **kwargs):
     """
     d = merge(*args, **kwargs)
     finals = d.transient()
-    for (k,v) in d.to_pdict().items():
+    if isinstance(d, ldict):
+        d = d.to_pdict()
+    for (k,v) in d.items():
         if isinstance(v, LambdaType):
             finals[k] = lazy(_lambdadict_call, finals, v)
         else:
@@ -1738,7 +1747,9 @@ def lambdadict(*args, **kwargs):
 
 # Argument Utilities ###########################################################
 
-class args:
+from collections import namedtuple
+argstuple = namedtuple('argstuple', ('args', 'kwargs'))
+class args(argstuple):
     """An object type that represents a set of function arguments.
 
     `args(x1, x2 ... k1=v1, k2=v2 ...)` yields an `args` object that represents
@@ -1752,29 +1763,21 @@ class args:
     former syntax will call that method instead of the `__rmatmul__` method of
     the `args` object `a` and thus won't work.
     """
-    __slots__ = ('args', 'kwargs')
-    def __setattr__(self, k, v):
-        raise TypeError("args type is immutable")
-    @classmethod
-    def _new(cls, args, kwargs):
-        self = object.__new__(cls)
-        object.__setattr__(self, 'args', tuple(args))
-        object.__setattr__(self, 'kwargs', ldict(kwargs))
-        return self
     def __new__(cls, *args, **kwargs):
-        return cls._new(args, kwargs)
+        return argstuple.__new__(cls, args, kwargs)
     def __rmatmul__(self, fn):
         return fn(*self.args, **self.kwargs)
     def passto(self, fn):
         return fn(*self.args, **self.kwargs)
     def copy(self, args=None, kwargs=None):
+        """Returns a copy of the current """
         if args is None:
             args = self.args
         if kwargs is None:
             kwargs = self.kwargs
         if args is self.args and kwargs is self.kwargs:
             return self
-        return self._new(args, kwargs)
+        return argstuple.__new__(type(self), args, kwargs)
 def argfilter(fn):
     """A decorator that creates decorators that filter function arguments.
 

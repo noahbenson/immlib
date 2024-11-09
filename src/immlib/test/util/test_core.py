@@ -11,6 +11,8 @@ immlib.util._core module.
 
 from unittest import TestCase
 
+import numpy as np
+
 
 # Tests ########################################################################
 
@@ -54,6 +56,12 @@ class TestUtilCore(TestCase):
         self.assertEqual(1, strcmp('abc def ghi', ' abc  def ghi '))
         self.assertEqual(0, strcmp('abc def ghi', ' abc  def ghi ', split=True))
         self.assertEqual(0, strcmp('abc_def_ghi', 'abc_def_ghi', split='_'))
+        self.assertEqual(-1, strcmp('abc def ghi', ' bbc def ghi ', split=True))
+        self.assertEqual(1, strcmp('abc eef ghi', ' abc def ghi ', split=True))
+        self.assertEqual(0, strcmp('a b c d', 'a b c d', split=True))
+        self.assertEqual(1, strcmp('a b c d', 'a b c', split=True))
+        self.assertEqual(-1, strcmp('a b c', 'a b c d', split=True))
+        self.assertEqual(0, strcmp('abc def ghi', ' abc def ghi ', split=True))
         # In some cases, we can split and strip:
         self.assertEqual(
             strcmp('abc_def_ghi', '_abc_def_ghi_', split='_', strip='_'),
@@ -158,7 +166,9 @@ class TestUtilCore(TestCase):
 
     # Freeze/Thaw Utilities ####################################################
     def test_frozenarray(self):
+        "Tests the frozenarray() and freezearray() functions."
         from immlib.util import frozenarray, freezearray
+        from immlib import quant
         import numpy as np
         # frozenarray converts a read-write numpy array into a frozen one.
         x = np.linspace(0, 1, 25)
@@ -186,9 +196,37 @@ class TestUtilCore(TestCase):
             shape=(5,5))
         y = frozenarray(x)
         self.assertIsNot(x, y)
+        self.assertIs(frozenarray(y), y)
+        self.assertIsNot(y, frozenarray(y, copy=True))
         self.assertFalse(y.data.flags['WRITEABLE'])
         self.assertTrue(x.data.flags['WRITEABLE'])
         self.assertTrue(np.array_equal(x.data, y.data))
+        # As does freeze:
+        freezearray(x)
+        self.assertFalse(x.data.flags['WRITEABLE'])
+        # Both also work with quantities.
+        x = quant(
+            sps.csr_array(
+                ([1.0, 2.0, 3.5, 6.0], ([0,1,3,4], [3,4,2,1])),
+                shape=(5,5)),
+            'mm')
+        y = frozenarray(x)
+        self.assertIsNot(x, y)
+        self.assertIs(frozenarray(y), y)
+        self.assertIsNot(y, frozenarray(y, copy=True))
+        self.assertFalse(y.m.data.flags['WRITEABLE'])
+        self.assertTrue(x.m.data.flags['WRITEABLE'])
+        self.assertTrue(np.array_equal(x.m.data, y.m.data))
+        freezearray(x)
+        self.assertFalse(x.m.data.flags['WRITEABLE'])
+        # We can also use frozenarray as a substitute for the array function:
+        x = frozenarray([1,2,3,4])
+        self.assertIsInstance(x, np.ndarray)
+        self.assertFalse(x.flags['WRITEABLE'])
+        self.assertTrue(np.array_equal(x, [1,2,3,4]))
+        # freezearray fails when given objects not compatible with arrays:
+        with self.assertRaises(TypeError):
+            freezearray(Ellipsis)
     def test_to_pcoll(self):
         from immlib.util import to_pcoll
         from pcollections import pdict, plist, pset
@@ -206,6 +244,9 @@ class TestUtilCore(TestCase):
         self.assertEqual(to_pcoll(list(y)), y)
         self.assertIsInstance(to_pcoll(set(z)), pset)
         self.assertEqual(to_pcoll(set(z)), z)
+        # If the argument isn't a valid collection, it raises an error.
+        with self.assertRaises(TypeError):
+            to_pcoll(10)
     def test_to_tcoll(self):
         from immlib.util import to_tcoll
         from pcollections import pdict, plist, pset, tdict, tlist, tset
@@ -222,8 +263,10 @@ class TestUtilCore(TestCase):
         self.assertIsInstance(tx, tdict)
         self.assertIsInstance(ty, tlist)
         self.assertIsInstance(tz, tset)
-        # to_tcoll always makes a copy.
+        # to_tcoll always makes a copy...
         self.assertIsNot(tx, to_tcoll(tx))
+        # ...unless requested not to...
+        self.assertIs(tx, to_tcoll(tx, copy=False))
         # They convert equivalent non-transient objects into transient ones.
         self.assertIsInstance(to_tcoll(dict(x)), tdict)
         self.assertEqual(to_tcoll(dict(x)), x)
@@ -231,6 +274,9 @@ class TestUtilCore(TestCase):
         self.assertEqual(to_tcoll(list(y)), y)
         self.assertIsInstance(to_tcoll(set(z)), tset)
         self.assertEqual(to_tcoll(set(z)), z)
+        # If the argument isn't a valid collection, it raises an error.
+        with self.assertRaises(TypeError):
+            to_tcoll(10)
     def test_to_mcoll(self):
         from immlib.util import to_mcoll
         from pcollections import pdict, plist, pset, tdict, tlist, tset
@@ -247,8 +293,10 @@ class TestUtilCore(TestCase):
         self.assertIsInstance(mx, dict)
         self.assertIsInstance(my, list)
         self.assertIsInstance(mz, set)
-        # to_mcoll always makes a copy.
+        # to_mcoll always makes a copy...
         self.assertIsNot(mx, to_mcoll(mx))
+        # ...unless requested not to.
+        self.assertIs(mx, to_mcoll(mx, copy=False))
         # They convert equivalent non-transient objects into transient ones.
         self.assertIsInstance(to_mcoll(dict(x)), dict)
         self.assertEqual(to_mcoll(dict(x)), x)
@@ -256,13 +304,16 @@ class TestUtilCore(TestCase):
         self.assertEqual(to_mcoll(list(y)), y)
         self.assertIsInstance(to_mcoll(set(z)), set)
         self.assertEqual(to_mcoll(set(z)), z)
+        # If the argument isn't a valid collection, it raises an error.
+        with self.assertRaises(TypeError):
+            to_mcoll(10)
         
     # Other Utilities ##########################################################
     def test_predicates(self):
         from immlib.util import (
             is_acallable, is_lambda, is_asized, is_acontainer,
             is_aiterable, is_aiterator, is_areversible, is_acoll,
-            is_abytes, is_bytes, is_ahashable, is_tuple,
+            is_abytes, is_bytes, is_ahashable, is_tuple, is_frozenset,
             is_aseq, is_amseq, is_apseq,
             is_aset, is_amset, is_apset,
             is_amap, is_ammap, is_apmap,
@@ -292,10 +343,14 @@ class TestUtilCore(TestCase):
         self.assertFalse(is_acoll(10))
         self.assertTrue(is_abytes(b'abc'))
         self.assertFalse(is_abytes('abc'))
+        self.assertTrue(is_bytes(b'abc'))
+        self.assertFalse(is_bytes('abc'))
         self.assertTrue(is_ahashable('abc'))
         self.assertFalse(is_ahashable({}))
         self.assertTrue(is_tuple((1,2,3)))
         self.assertFalse(is_tuple([]))
+        self.assertTrue(is_frozenset(frozenset((1,2,3))))
+        self.assertFalse(is_frozenset(set()))
         self.assertTrue(is_aseq([1,2,3]))
         self.assertFalse(is_aseq({}))
         self.assertTrue(is_amseq([]))
@@ -393,8 +448,218 @@ class TestUtilCore(TestCase):
         with self.assertRaises(KeyError):
             get(x, 'q')
         with self.assertRaises(KeyError):
+            get(x['a'], 'q')
+        with self.assertRaises(KeyError):
+            get(x['a'], 10)
+        with self.assertRaises(KeyError):
             nestget(x, 'a', 5)
         with self.assertRaises(TypeError):
             nestget(x, 'b', 0, 'x', 10)
+        with self.assertRaises(KeyError):
+            nestget(x, 'b', 'q')
+        with self.assertRaises(TypeError):
+            get(None, 'q')
         self.assertEqual(get(x, 'q', default=...), ...)
         self.assertEqual(nestget(x, 'b', 4, default=...), ...)
+        # Other errors that can be caused:
+        with self.assertRaises(TypeError):
+            get(x, 'a', other=10)
+        with self.assertRaises(TypeError):
+            nestget(x, 'a', other=10)
+    def test_maps(self):
+        from immlib.util import (
+            lazyvalmap, valmap, lazykeymap, keymap, lazyitemmap, itemmap,
+            dictmap, pdictmap, ldictmap)
+        from pcollections import pdict, ldict, lazy
+        d = dict(a=1, b=2, c=3)
+        make_ld = lambda:ldict(a=lazy(lambda:1), b=lazy(lambda:2), c=3)
+        # lazyvalmap
+        md = lazyvalmap(lambda x: x+1, d)
+        self.assertIsInstance(md, ldict)
+        self.assertTrue(md.is_lazy('a'))
+        self.assertFalse(md.is_ready('a'))
+        self.assertEqual(md['a'], 2)
+        self.assertTrue(md.is_ready('a'))
+        mmd = lazyvalmap(lambda x: x+1, md)
+        self.assertIsInstance(mmd, ldict)
+        self.assertTrue(mmd.is_lazy('a'))
+        self.assertTrue(md.is_lazy('b'))
+        self.assertFalse(mmd.is_ready('a'))
+        self.assertFalse(md.is_ready('b'))
+        self.assertEqual(mmd['a'], 3)
+        self.assertEqual(md, dict(a=2, b=3, c=4))
+        self.assertEqual(mmd, dict(a=3, b=4, c=5))
+        # valmap
+        ld = make_ld()
+        md = valmap(lambda x: x+1, d)
+        mld = valmap(lambda x: x+1, ld)
+        mpd = valmap(lambda x: x+1, pdict(d))
+        self.assertIs(type(md), dict)
+        self.assertIs(type(mpd), pdict)
+        self.assertIs(type(mld), ldict)
+        self.assertTrue(mld.is_lazy('a'))
+        self.assertEqual(mld['a'], 2)
+        self.assertTrue(mld.is_ready('a'))
+        self.assertEqual(md, dict(a=2, b=3, c=4))
+        self.assertEqual(mpd, dict(a=2, b=3, c=4))
+        self.assertEqual(mld, dict(a=2, b=3, c=4))
+        # lazykeymap
+        md = lazykeymap(lambda x:x, d)
+        self.assertIsInstance(md, ldict)
+        self.assertTrue(md.is_lazy('a'))
+        self.assertFalse(md.is_ready('a'))
+        self.assertEqual(md['a'], 'a')
+        self.assertTrue(md.is_ready('a'))
+        self.assertEqual(md, dict(a='a', b='b', c='c'))
+        # keymap
+        ld = make_ld()
+        md = keymap(lambda x: x, d)
+        mld = keymap(lambda x: x, ld)
+        mpd = keymap(lambda x: x, pdict(d))
+        self.assertIs(type(md), dict)
+        self.assertIs(type(mpd), pdict)
+        self.assertIs(type(mld), ldict)
+        self.assertTrue(mld.is_lazy('a'))
+        self.assertFalse(mld.is_ready('a'))
+        self.assertEqual(mld['a'], 'a')
+        self.assertTrue(mld.is_ready('a'))
+        self.assertEqual(md, dict(a='a', b='b', c='c'))
+        self.assertEqual(mpd, dict(a='a', b='b', c='c'))
+        self.assertEqual(mld, dict(a='a', b='b', c='c'))
+        # lazyitemmap
+        md = lazyitemmap(lambda x,y: x*y, d)
+        self.assertIsInstance(md, ldict)
+        self.assertTrue(md.is_lazy('a'))
+        self.assertFalse(md.is_ready('a'))
+        self.assertEqual(md['a'], 'a')
+        self.assertTrue(md.is_ready('a'))
+        mmd = lazyitemmap(lambda x,y: x*y, ldict(d))
+        self.assertIsInstance(mmd, ldict)
+        self.assertTrue(mmd.is_lazy('a'))
+        self.assertTrue(md.is_lazy('b'))
+        self.assertFalse(mmd.is_ready('a'))
+        self.assertFalse(md.is_ready('b'))
+        self.assertEqual(mmd['a'], 'a')
+        self.assertEqual(md, dict(a='a', b='bb', c='ccc'))
+        self.assertEqual(mmd, dict(a='a', b='bb', c='ccc'))
+        # itemmap
+        ld = make_ld()
+        md = itemmap(lambda x,y: x*y, d)
+        mld = itemmap(lambda x,y: x*y, ld)
+        mpd = itemmap(lambda x,y: x*y, pdict(d))
+        self.assertIs(type(md), dict)
+        self.assertIs(type(mpd), pdict)
+        self.assertIs(type(mld), ldict)
+        self.assertTrue(mld.is_lazy('a'))
+        self.assertEqual(mld['a'], 'a')
+        self.assertTrue(mld.is_ready('a'))
+        self.assertEqual(md, dict(a='a', b='bb', c='ccc'))
+        self.assertEqual(mpd, dict(a='a', b='bb', c='ccc'))
+        self.assertEqual(mld, dict(a='a', b='bb', c='ccc'))
+        # dictmap
+        ks = list('abcdefghij')
+        ref = dict(zip(ks, range(10)))
+        d = dictmap(lambda k: ref[k] + 1, ks)
+        pd = pdictmap(lambda k: ref[k] + 1, ks)
+        ld = ldictmap(lambda k: ref[k] + 1, ks)
+        self.assertIs(type(pd), pdict)
+        self.assertIs(type(ld), ldict)
+        self.assertEqual(valmap(lambda x:x+1, ref), d)
+        self.assertEqual(valmap(lambda x:x+1, ref), pd)
+        self.assertTrue(ld.is_lazy('a'))
+        self.assertFalse(ld.is_ready('a'))
+        self.assertEqual(ld['a'], 1)
+        self.assertTrue(ld.is_ready('a'))
+        self.assertEqual(valmap(lambda x:x+1, ref), ld)
+    def test_merge(self):
+        from immlib.util import merge, rmerge
+        from pcollections import ldict, lazy
+        d1 = dict(a=1, b=2, c=3)
+        d2 = dict(b=3, c=4, d=5)
+        d3 = ldict(c=lazy(lambda:5), d=6, e=lazy(lambda:7))
+        d = merge(d1, d2, d3, a=0)
+        self.assertIs(type(d), ldict)
+        self.assertTrue(d.is_lazy('c'))
+        self.assertTrue(d.is_lazy('e'))
+        self.assertFalse(d.is_ready('c'))
+        self.assertFalse(d.is_ready('e'))
+        self.assertFalse(d.is_lazy('d'))
+        self.assertEqual(d['c'], 5)
+        self.assertTrue(d.is_ready('c'))
+        self.assertFalse(d.is_ready('e'))
+        self.assertEqual(d, dict(a=0, b=3, c=5, d=6, e=7))
+        d3 = ldict(c=lazy(lambda:5), d=6, e=lazy(lambda:7))
+        d = rmerge(d1, d2, d3, a=0)
+        self.assertIs(type(d), ldict)
+        self.assertFalse(d.is_lazy('c'))
+        self.assertTrue(d.is_lazy('e'))
+        self.assertFalse(d.is_ready('e'))
+        self.assertEqual(d['c'], 3)
+        self.assertEqual(d['e'], 7)
+        self.assertTrue(d.is_ready('e'))
+        self.assertEqual(d, dict(a=1, b=2, c=3, d=5, e=7))
+    def test_assoc(self):
+        from immlib.util import assoc, dissoc
+        from pcollections import pdict
+        with self.assertRaises(ValueError):
+            assoc({}, 'a')
+        with self.assertRaises(TypeError):
+            assoc('abc', 'a', 1)
+        with self.assertRaises(TypeError):
+            dissoc('abc', 'a')
+        d = dict(a=1, b=2, c=3)
+        self.assertEqual(assoc(d, d=4), dict(d, d=4))
+        self.assertEqual(assoc(d, 'd', 4), dict(d, d=4))
+        self.assertEqual(assoc(d, 'd', 4, e=5), dict(d, d=4, e=5))
+        self.assertIsNot(assoc(d, 'd', 4), d)
+        self.assertEqual(dissoc(d, 'b'), dict(a=1, c=3))
+        self.assertEqual(dissoc(d, 'b', 'c'), dict(a=1))
+        self.assertIsNot(dissoc(d, 'b'), d)
+        d = pdict(a=1, b=2, c=3)
+        self.assertEqual(assoc(d, d=4), dict(d, d=4))
+        self.assertEqual(assoc(d, 'd', 4), dict(d, d=4))
+        self.assertEqual(assoc(d, 'd', 4, e=5), dict(d, d=4, e=5))
+        self.assertIsNot(assoc(d, 'd', 4), d)
+        self.assertEqual(dissoc(d, 'b'), dict(a=1, c=3))
+        self.assertEqual(dissoc(d, 'b', 'c'), dict(a=1))
+        self.assertIsNot(dissoc(d, 'b'), d)
+    def test_lambdadict(self):
+        from immlib.util import lambdadict
+        from pcollections import ldict
+        d = lambdadict(a=1, b=2, c=lambda a,b: a+b)
+        self.assertIsInstance(d, ldict)
+        self.assertTrue(d.is_lazy('c'))
+        self.assertFalse(d.is_ready('c'))
+        self.assertEqual(d['c'], 3)
+        self.assertTrue(d.is_ready('c'))
+        self.assertEqual(d, dict(a=1, b=2, c=3))
+    def test_args(self):
+        from immlib.util import args, argfilter
+        # First test the args type:
+        (a, kw) = args(1, 2, 3, a=1, b=2)
+        self.assertEqual(a, (1,2,3))
+        self.assertEqual(kw, dict(a=1, b=2))
+        aa = args(1, 2, 3, a=1, b=2)
+        self.assertIs(type(aa), args)
+        self.assertEqual(aa, ((1,2,3), {'a':1,'b':2}))
+        bb = aa.copy(args=(2,3,4))
+        self.assertEqual(bb, ((2,3,4), {'a':1,'b':2}))
+        cc = aa.copy(kwargs={'c':3})
+        self.assertEqual(cc, ((1,2,3), {'c':3}))
+        # Next test the argfilter:
+        @argfilter
+        def fix_angle(angle, *, unit):
+            angle = np.asarray(angle)
+            if unit == 'degrees':
+                angle = np.pi / 180 * angle
+            elif unit != 'radians':
+                raise ValueError(f'unrecognized unit: {unit}')
+            return (angle,)
+        @fix_angle
+        def cos_halfangle(angle, unit='radians'):
+            return np.cos(angle / 2)
+        self.assertEqual(cos_halfangle(0), 1.0)
+        self.assertEqual(cos_halfangle(0, unit='degrees'), 1.0)
+        self.assertTrue(np.abs(cos_halfangle(np.pi)) < 1e-9)
+        self.assertTrue(np.abs(cos_halfangle(180, unit='degrees')) < 1e-9)
+        

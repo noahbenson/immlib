@@ -89,6 +89,7 @@ from ._core import (
     assoc,
     dissoc,
     lambdadict,
+    args,
     argfilter,
     unitregistry)
 
@@ -245,6 +246,8 @@ __all__ = (
     "assoc",
     "dissoc",
     "lambdadict",
+    "args",
+    "argfilter",
     "is_url",
     "url_download",
     "reclaim")
