@@ -1475,44 +1475,60 @@ def is_tensor(obj,
     boolean
         `True` if `obj` is a valid PyTorch tensor, otherwise `False`.
     """
-    if ureg is Ellipsis: from immlib import units as ureg
+    # If so, we can process the arguments.
+    if ureg is Ellipsis:
+        from immlib import units as ureg
     # If this is a quantity, just extract the magnitude.
     if isinstance(obj, pint.Quantity):
-        if quant is False: return False
+        if quant is False:
+            return False
         if ureg is None:
             from ._quantity import unitregistry
             ureg = unitregistry(obj)
         u = obj.u
         obj = obj.m
     else:
-        if quant is True: return False
-        if ureg is None: from immlib import units as ureg
+        if quant is True:
+            return False
+        if ureg is None:
+            from immlib import units as ureg
         u = None
-    # Also here: is this a torch tensor or not?
-    if not torch.is_tensor(obj): return False
-    # Do we match the varioous torch field requirements?
+    # Right away: is this a torch tensor or not?
+    if not torch.is_tensor(obj):
+        return False
+    # Do we match the various torch field requirements?
     if device is not None:
-        if obj.device != device: return False
+        if obj.device != device:
+            return False
     if requires_grad is not None:
-        if obj.requires_grad != requires_grad: return False
+        if obj.requires_grad != requires_grad:
+            return False
     # Do we match the sparsity requirement?
     if sparse is True:
-        if not torch__is_sparse(obj): return False
+        if not torch__is_sparse(obj):
+            return False
     elif sparse is False:
-        if torch__is_sparse(obj): return False
-    elif streq(sparse, 'coo', case=False, unicode=False, strip=True):
-        if obj.layout != torch.sparse_coo: return False
-    elif streq(sparse, 'csr', case=False, unicode=False, strip=True):
-        if obj.layout != torch.sparse_csr: return False
+        if torch__is_sparse(obj):
+            return False
     elif sparse is not None:
-        raise ValueError(f"invalid sparse parameter: {sparse}")
+        layout = sparse_layout(sparse)
+        if layout is None:
+            if isinstance(sparse, str):
+                raise ValueError(f"invalid sparse option: {sparse}")
+            else:
+                raise ValueError(
+                    f"invalid sparse option of type {type(sparse)}")
+        if not sparse_haslayout(obj, layout):
+            return False
     # Next, check compatibility of the units.
     if unit is None:
         # We are required to not be a quantity.
-        if u is not None: return False
+        if u is not None:
+            return False
     elif unit is not Ellipsis:
         from ._quantity import alike_units
-        if not is_tuple(unit): unit = (unit,)
+        if not is_tuple(unit):
+            unit = (unit,)
         if not any(alike_units(u, uu) for uu in unit):
             return False
     # Check the match to the numeric collection last.

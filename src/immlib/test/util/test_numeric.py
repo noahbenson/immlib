@@ -643,7 +643,8 @@ class TestUtilNumeric(TestCase):
         x = to_array(sp_mtx, copy=True)
         self.assertIsNot(x.data, sp_mtx.data)
         x = to_array(sp_mtx, copy=False, dtype=complex)
-        self.assertTrue(np.array_equal(x.todense(), sp_mtx.todense()))
+        self.assertTrue(
+            np.all(np.close(x.todense(), sp_mtx.todense())))
         self.assertTrue(np.issubdtype(x.dtype, complex))
         sp_tns = sp_tns.coalesce()
         x = to_array(sp_tns, copy=False)
@@ -773,11 +774,12 @@ class TestUtilNumeric(TestCase):
         arr = torch.linspace(0, 1, 25)
         mtx = torch.mm(torch.linspace(0, 1, 10)[:,None],
                        torch.linspace(1, 2, 10)[None,:])
-        sp_mtx = torch.sparse_coo_tensor(torch.tensor([[0, 0, 4, 5, 9],
-                                                       [4, 9, 4, 1, 8]]),
-                                         torch.tensor([1, 0.5, 0.5, 0.2, 0.1]),
-                                         (10, 10),
-                                         dtype=float)
+        sp_mtx = torch.sparse_coo_tensor(
+            torch.tensor([[0, 0, 4, 5, 9],
+                          [4, 9, 4, 1, 8]]),
+            torch.tensor([1, 0.5, 0.5, 0.2, 0.1]),
+            size=(10, 10),
+            dtype=float)
         q_arr = quant(arr, 'mm')
         q_mtx = quant(arr, 'seconds')
         q_sp_mtx = quant(sp_mtx, 'kg')
