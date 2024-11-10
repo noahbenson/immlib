@@ -881,6 +881,13 @@ class TestUtilNumeric(TestCase):
         self.assertFalse(is_tensor(arr, sparse=True))
         self.assertFalse(is_tensor(mtx, sparse=True))
         self.assertTrue(is_tensor(sp_mtx, sparse=True))
+        # You can also require a kind of sparse matrix.
+        self.assertTrue(is_tensor(sp_mtx, sparse='coo'))
+        self.assertFalse(is_tensor(sp_mtx, sparse='csc'))
+        with self.assertRaises(ValueError):
+            is_tensor(sp_mtx, sparse='???')
+        with self.assertRaises(ValueError):
+            is_tensor(sp_mtx, sparse=object())
         # The quant option can be used to control whether the object must or
         # must not be a quantity.
         self.assertTrue(is_tensor(arr, quant=False))
@@ -903,6 +910,20 @@ class TestUtilNumeric(TestCase):
         self.assertTrue(is_tensor(q_mtx, unit='s'))
         self.assertFalse(is_tensor(q_arr, unit='s'))
         self.assertFalse(is_tensor(q_mtx, unit='mm'))
+        # The units option can be used to require that either an object have
+        # no units (or is not a quantity) or that it have specific units.
+        self.assertTrue(is_tensor(arr, unit=None))
+        self.assertTrue(is_tensor(mtx, unit=None))
+        self.assertFalse(is_tensor(arr, unit='mm'))
+        self.assertFalse(is_tensor(mtx, unit='s'))
+        self.assertFalse(is_tensor(q_arr, unit=None))
+        self.assertFalse(is_tensor(q_mtx, unit=None))
+        self.assertTrue(is_tensor(q_arr, unit='mm'))
+        self.assertTrue(is_tensor(q_mtx, unit='s'))
+        self.assertFalse(is_tensor(q_arr, unit='s'))
+        self.assertFalse(is_tensor(q_mtx, unit='mm'))
+        # We can also specify the units registry (Ellipsis means immlib.units).
+        self.assertFalse(is_tensor(q_arr, unit='s', ureg=Ellipsis))
         # We can also test on torch data like device and requires_grad:
         self.assertTrue(is_tensor(arr, device='cpu'))
         self.assertFalse(is_tensor(arr, device='cuda'))
