@@ -779,7 +779,7 @@ class TestUtilNumeric(TestCase):
         self.assertEqual(torch.int32, to_torchdtype(np.int32))
     def test_is_tensor(self):
         from immlib import (is_tensor, quant)
-        from scipy.sparse import csr_matrix
+        from scipy.sparse import csr_matrix, csr_array
         import torch, numpy as np
         # By default, is_tensor() returns True for PyTorch tensors and
         # quantities whose magnitudes are PyTorch tensors.
@@ -903,6 +903,14 @@ class TestUtilNumeric(TestCase):
         self.assertTrue(is_tensor(q_mtx, unit='s'))
         self.assertFalse(is_tensor(q_arr, unit='s'))
         self.assertFalse(is_tensor(q_mtx, unit='mm'))
+        # We can also test on torch data like device and requires_grad:
+        self.assertTrue(is_tensor(arr, device='cpu'))
+        self.assertFalse(is_tensor(arr, device='cuda'))
+        self.assertTrue(is_tensor(arr, requires_grad=False))
+        self.assertFalse(is_tensor(arr, requires_grad=True))
+        gradtns = arr.clone().requires_grad_(True)
+        self.assertFalse(is_tensor(gradtns, requires_grad=False))
+        self.assertTrue(is_tensor(gradtns, requires_grad=True))
     def test_to_tensor(self):
         from immlib import (to_tensor, quant, is_quant, units)
         import torch, numpy as np

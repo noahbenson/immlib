@@ -1501,6 +1501,7 @@ def is_tensor(obj,
         return False
     # Do we match the various torch field requirements?
     if device is not None:
+        device = torch.device(device)
         if obj.device != device:
             return False
     if requires_grad is not None:
