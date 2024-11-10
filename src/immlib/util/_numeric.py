@@ -815,11 +815,11 @@ def sparse_tolayout(obj, layout):
     with the `sparse_layout` function. The backend (PyTorch or SciPy) will not
     be changed.
     """
-    lay = sparse_layout(layout)
     if isinstance(obj, pint.Quantity):
         arr = sparse_tolayout(obj.m, layout)
         return obj if arr is obj.m else (arr * obj.u)
-    elif scipy__is_sparse(obj):
+    lay = sparse_layout(layout)
+    if scipy__is_sparse(obj):
         method = getattr(obj, lay.scipy_tomethod)
         if method is None:
             raise ValueError(f"layout is invalid for scipy arrays: {layout}")

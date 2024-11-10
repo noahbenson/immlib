@@ -302,7 +302,7 @@ class TestUtilNumeric(TestCase):
         from immlib.util import (
             sparse_find, sparse_data, sparse_indices, sparse_layout,
             sparse_haslayout, sparse_tolayout)
-        from immlib import units
+        from immlib import (units, quant)
         sparr = sps.csr_array(
             ([1.0, 0.5, 0.5, 0.2, 0.1],
              ([0, 0, 4, 5, 9], [4, 9, 4, 1, 8])),
@@ -335,7 +335,7 @@ class TestUtilNumeric(TestCase):
         csrtns = sparse_tolayout(sptns, 'csr')
         self.assertEqual(csrtns.layout, torch.sparse_csr)
         self.assertTrue(torch.equal(sptns.to_dense(), csrtns.to_dense()))
-        q_sparr = sparr * units.mm
+        q_sparr = quant(sparr, units.mm)
         q_cooarr = sparse_tolayout(q_sparr, 'coo')
         self.assertIsInstance(q_cooarr, pint.Quantity)
         self.assertTrue(np.array_equal(sparr.todense(), q_cooarr.m.todense()))
@@ -613,9 +613,20 @@ class TestUtilNumeric(TestCase):
         with self.assertRaises(ValueError):
             to_array(gradtns, detach=False)
         # Sparse arrays/tensors should also convert fine.
+        dn_tns = sp_tns.to_dense()
         x = to_array(sp_tns)
         self.assertTrue(issparse(x))
         self.assertEqual(x.format, 'coo')
+        x = to_array(dn_tns, sparse='lil')
+        self.assertTrue(issparse(x))
+        self.assertEqual(x.format, 'lil')
+        x = to_array(dn_tns, sparse='lil')
+        self.assertTrue(issparse(x))
+        self.assertEqual(x.format, 'lil')
+        x = to_array(dn_tns, sparse=False)
+        self.assertFalse(issparse(x))
+        self.assertTrue(
+            np.array_equal(dn_tns.numpy(), x))
         # If we change the parameters of the returned array, we will get
         # different (but typically equal) objects back.
         self.assertIsNot(arr, to_array(arr, frozen=True))
