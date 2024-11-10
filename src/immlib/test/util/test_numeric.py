@@ -295,10 +295,11 @@ class TestUtilNumeric(TestCase):
         self.assertEqual(np.dtype(np.float64), to_numpydtype(np.float64))
         self.assertEqual(np.dtype('int32'), to_numpydtype('int32'))
     def test_sparray_utils(self):
-        import scipy.sparse as sps, numpy as np, torch
+        import scipy.sparse as sps, numpy as np, torch, pint
         from immlib.util import (
             sparse_find, sparse_data, sparse_indices, sparse_layout,
             sparse_haslayout, sparse_tolayout)
+        from immlib import units
         sparr = sps.csr_array(
             ([1.0, 0.5, 0.5, 0.2, 0.1],
              ([0, 0, 4, 5, 9], [4, 9, 4, 1, 8])),
@@ -318,6 +319,9 @@ class TestUtilNumeric(TestCase):
         # We can also look up things by numpy array or torch tensor type.
         self.assertEqual('csr', sparse_layout(sparr).name)
         self.assertEqual('coo', sparse_layout(sptns).name)
+        # sparse_layout works with quantities.
+        self.assertEqual('csr', sparse_layout(sparr * units.mm).name)
+        self.assertEqual('coo', sparse_layout(sptns * units.mm).name)
         # Unrecognized objects and names produce None:
         self.assertIs(None, sparse_layout('???'))
         self.assertIs(None, sparse_layout(object()))
@@ -328,6 +332,16 @@ class TestUtilNumeric(TestCase):
         csrtns = sparse_tolayout(sptns, 'csr')
         self.assertEqual(csrtns.layout, torch.sparse_csr)
         self.assertTrue(torch.equal(sptns.to_dense(), csrtns.to_dense()))
+        q_sparr = sparr * units.mm
+        q_cooarr = sparse_tolayout(q_sparr, 'coo')
+        self.assertTrue(np.array_equal(sparr.todense(), q_cooarr.m.todense()))
+        f_sparr = sparr.copy()
+        f_sparr.data.setflags(write=False)
+        f_cooarr = sparse_tolayout(f_sparr, 'coo')
+        self.assertTrue(np.array_equal(sparr.todense(), f_cooarr.todense()))
+        self.assertFalse(f_cooarr.data.flags['WRITEABLE'])
+        with self.assertRaises(TypeError):
+            sparse_tolayout(object(), 'coo')
         # Check if a sparse object has a particular layout:
         self.assertTrue(sparse_haslayout(sparr, 'csr'))
         self.assertTrue(sparse_haslayout(cooarr, 'coo'))
@@ -337,6 +351,10 @@ class TestUtilNumeric(TestCase):
         self.assertTrue(sparse_haslayout(sptns, 'coo'))
         self.assertFalse(sparse_haslayout(csrtns, 'coo'))
         self.assertFalse(sparse_haslayout(sptns, 'csr'))
+        with self.assertRaises(ValueError):
+            sparse_haslayout(sptns, '???')
+        with self.assertRaises(ValueError):
+            sparse_haslayout(sptns, object())
         # We can extract the various bits of data also:
         self.assertTrue(
             all(map(np.array_equal, sparse_find(sparr), sps.find(sparr))))
@@ -354,6 +372,23 @@ class TestUtilNumeric(TestCase):
             torch.equal(vv, sparse_data(sptns)))
         self.assertTrue(
             torch.equal(ii, sparse_indices(sptns)))
+        # These also work for quantities:
+        q_sparr = sparr * units.mm
+        self.assertTrue(
+            all(np.array_equal(u.m if isinstance(u, pint.Quantity) else u, v) 
+                for (u,v) in zip(sparse_find(q_sparr), sps.find(sparr))))
+        self.assertTrue(
+            np.array_equal(sparse_data(q_sparr).m, q_sparr.data))
+        ii = np.stack(sparse_find(sparr)[:-1])
+        self.assertTrue(
+            np.array_equal(sparse_indices(q_sparr), ii))
+        # They throw reasonable errors too:
+        with self.assertRaises(TypeError):
+            sparse_find('')
+        with self.assertRaises(TypeError):
+            sparse_indices('')
+        with self.assertRaises(TypeError):
+            sparse_data('')
     def test_is_array(self):
         from immlib import (is_array, quant)
         from numpy import (array, linspace, dot)
@@ -460,6 +495,10 @@ class TestUtilNumeric(TestCase):
         self.assertTrue(is_array(mtx, frozen=False))
         with self.assertRaises(ValueError):
             is_array(mtx, frozen='fail')
+        farr = arr.copy()
+        farr.setflags(write=False)
+        self.assertFalse(is_array(farr, frozen=False))
+        self.assertTrue(is_array(farr, frozen=True))
         # If we change the flags of these arrays, they become frozen.
         arr.setflags(write=False)
         mtx.setflags(write=False)
@@ -493,6 +532,11 @@ class TestUtilNumeric(TestCase):
         self.assertTrue(is_array(sp_mtx, sparse=True, frozen=False))
         self.assertFalse(is_array(sp_mtx, sparse=False, frozen=True))
         self.assertFalse(is_array(sp_mtx, sparse=False, frozen=False))
+        sp_mtx.data.setflags(write=False)
+        self.assertTrue(is_array(sp_mtx, sparse=True, frozen=True))
+        self.assertFalse(is_array(sp_mtx, sparse=True, frozen=False))
+        self.assertFalse(is_array(sp_mtx, sparse=False, frozen=True))
+        self.assertFalse(is_array(sp_mtx, sparse=False, frozen=False))
         # The quant option can be used to control whether the object must or
         # must not be a quantity.
         self.assertTrue(is_array(arr, quant=False))
@@ -524,10 +568,18 @@ class TestUtilNumeric(TestCase):
         import torch, numpy as np, pint
         # We'll use a few objects throughout our tests, which we setup now.
         arr = linspace(0, 1, 25)
+        tns = torch.linspace(0, 1, 25)
         mtx = dot(linspace(0, 1, 10)[:,None], linspace(0, 2, 10)[None,:])
-        sp_mtx = csr_matrix(([1.0, 0.5, 0.5, 0.2, 0.1],
-                             ([0, 0, 4, 5, 9], [4, 9, 4, 1, 8])),
-                            shape=(10, 10), dtype=float)
+        sp_mtx = csr_matrix(
+            ([1.0, 0.5, 0.5, 0.2, 0.1],
+             ([0, 0, 4, 5, 9], [4, 9, 4, 1, 8])),
+            shape=(10, 10),
+            dtype=float)
+        sp_tns = torch.sparse_coo_tensor(
+            torch.tensor([[0, 0, 4, 5, 9], [4, 9, 4, 1, 8]]),
+            torch.tensor([1.0, 0.5, 0.5, 0.2, 0.1]),
+            size=(10, 10),
+            dtype=float)
         f_arr = frozenarray(arr)
         f_sp_mtx = frozenarray(sp_mtx)
         q_arr = quant(arr, 'mm')
@@ -542,6 +594,21 @@ class TestUtilNumeric(TestCase):
         self.assertIs(f_arr, to_array(f_arr))
         self.assertIs(f_arr, to_array(f_arr, sparse=False, frozen=True))
         self.assertIs(f_arr, to_array(f_arr, quant=False))
+        # to_array can be used to convert from tensors into arrays; the detach
+        # parameter lets us automatically detach tensors from the gradient
+        # system (this is the default) or raise an error if that would be
+        # required (detach=False).
+        self.assertIsInstance(to_array(tns), np.ndarray)
+        gradtns = tns.clone().requires_grad_(True)
+        self.assertIsInstance(to_array(gradtns), np.ndarray)
+        self.assertTrue(np.isclose(to_array(tns), arr).all())
+        self.assertTrue(np.isclose(to_array(gradtns), arr).all())
+        with self.assertRaises(ValueError):
+            to_array(gradtns, detach=False)
+        # Sparse arrays/tensors should also convert fine.
+        x = to_array(sp_tns)
+        self.assertTrue(issparse(x))
+        self.assertEqual(x.format, 'coo')
         # If we change the parameters of the returned array, we will get
         # different (but typically equal) objects back.
         self.assertIsNot(arr, to_array(arr, frozen=True))
