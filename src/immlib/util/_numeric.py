@@ -712,16 +712,17 @@ def sparse_layout(obj):
     """
     if isinstance(obj, SparseLayout):
         return obj
-    elif isinstance(obj, str):
-        return _sparse_layouts.get(obj, None)
     elif isinstance(obj, pint.Quantity):
         return sparse_layout(obj.m)
+    elif isinstance(obj, str):
+        return _sparse_layouts.get(obj, None)
     elif torch.is_tensor(obj):
         if obj.layout in _sparse_torch_layouts:
             return _sparse_index.get(obj.layout, None)
     elif scipy__is_sparse(obj):
         return _sparse_index.get(type(obj), None)
-    return None
+    else:
+        return _sparse_index.get(obj, None)
 def sparse_haslayout(arr, layout):
     """Returns true if the given sparse array or tensor has the given layout.
 

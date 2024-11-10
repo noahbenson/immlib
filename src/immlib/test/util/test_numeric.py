@@ -626,9 +626,9 @@ class TestUtilNumeric(TestCase):
         x = to_array(dn_tns, sparse='lil')
         self.assertTrue(issparse(x))
         self.assertEqual(x.format, 'lil')
-        x = to_array(dn_tns, sparse='lil')
+        x = to_array(dn_tns, sparse=torch.sparse_csr)
         self.assertTrue(issparse(x))
-        self.assertEqual(x.format, 'lil')
+        self.assertEqual(x.format, 'csr')
         x = to_array(dn_tns, sparse=False)
         self.assertFalse(issparse(x))
         self.assertTrue(
