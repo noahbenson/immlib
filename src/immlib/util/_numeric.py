@@ -1173,8 +1173,8 @@ def to_array(obj,
                     vv = np.asarray(uu, dtype=dtype, order=order)
                     arr = None
                 else:
-                    print(' -- ', dtype, order, uu, vv, obj.data)
                     vv = np.asarray(obj.data, dtype=dtype, order=order)
+                    print(' -- ', dtype, order, uu, vv, obj.data)
                     if layout.name == obj.format and vv is obj.data:
                         arr = obj
                     else:
