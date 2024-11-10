@@ -170,6 +170,9 @@ class TestUtilNumeric(TestCase):
         self.assertFalse(is_number('10'))
         self.assertFalse(is_number({'a':10}))
         self.assertFalse(is_number([1,2,3]))
+        # Make sure it throws errors when appropriate:
+        with self.assertRaises(ValueError):
+            is_number(0, dtype=str)
     def test_is_bool(self):
         from immlib import is_bool
         import torch, numpy as np
@@ -334,6 +337,7 @@ class TestUtilNumeric(TestCase):
         self.assertTrue(torch.equal(sptns.to_dense(), csrtns.to_dense()))
         q_sparr = sparr * units.mm
         q_cooarr = sparse_tolayout(q_sparr, 'coo')
+        self.assertIsInstance(q_cooarr, pint.Quantity)
         self.assertTrue(np.array_equal(sparr.todense(), q_cooarr.m.todense()))
         f_sparr = sparr.copy()
         f_sparr.data.setflags(write=False)
@@ -351,6 +355,9 @@ class TestUtilNumeric(TestCase):
         self.assertTrue(sparse_haslayout(sptns, 'coo'))
         self.assertFalse(sparse_haslayout(csrtns, 'coo'))
         self.assertFalse(sparse_haslayout(sptns, 'csr'))
+        self.assertTrue(sparse_haslayout(q_sparr, 'csr'))
+        self.assertTrue(sparse_haslayout(q_cooarr, 'coo'))
+        self.assertFalse(sparse_haslayout(object(), 'csr'))
         with self.assertRaises(ValueError):
             sparse_haslayout(sptns, '???')
         with self.assertRaises(ValueError):
@@ -637,6 +644,12 @@ class TestUtilNumeric(TestCase):
         # The unit parameter can be used to specify what unit to use.
         self.assertTrue(np.array_equal(q_arr.m,
                                        to_array(arr, quant=True, unit='mm').m))
+        # We can also specify the units registry (Ellipsis means immlib.units).
+        self.assertTrue(
+            np.all(
+                np.isclose(
+                    to_array(q_arr, unit='m', ureg=Ellipsis).m,
+                    q_arr.m / 1000.0)))
         # We can also use unit to extract a specific unit from a quantity.
         self.assertEqual(1000, to_array(1 * units.meter, unit='mm').m)
         # However, a non-quantity is always assumed to already have the units

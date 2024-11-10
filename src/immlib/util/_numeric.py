@@ -734,16 +734,13 @@ def sparse_haslayout(arr, layout):
     """
     if isinstance(arr, pint.Quantity):
         return sparse_haslayout(arr.m, layout)
-    is_sparr = scipy__is_sparse(arr)
-    is_sptns = torch__is_sparse(arr)
-    srclay = sparse_layout(arr) if is_sparr or is_sptns else None
     dstlay = sparse_layout(layout)
     if dstlay is None:
         raise ValueError(f"invalid layout: {layout}")
-    if srclay is None:
+    if not (scipy__is_sparse(arr) or torch__is_sparse(arr)):
         return False
-    else:
-        return srclay.name == dstlay.name
+    srclay = sparse_layout(arr)
+    return srclay.name == dstlay.name
 @docwrap
 def sparse_find(arr):
     """Returns the indices and values of nonzero elements of a sparse object.
