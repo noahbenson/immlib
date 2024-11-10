@@ -633,6 +633,9 @@ class TestUtilNumeric(TestCase):
         self.assertFalse(issparse(x))
         self.assertTrue(
             np.array_equal(dn_tns.numpy(), x))
+        x = to_array(sp_tns, sparse=False)
+        self.assertTrue(
+            np.array_equal(dn_tns.numpy(), x))
         with self.assertRaises(ValueError):
             to_array(dn_tns, sparse=object())
         with self.assertRaises(ValueError):
@@ -692,6 +695,16 @@ class TestUtilNumeric(TestCase):
                 np.isclose(
                     to_array(q_arr, quant=True, unit='m').m,
                     to_array(arr, quant=True, unit='mm').m_as('m'))))
+        self.assertTrue(
+            np.all(
+                np.isclose(
+                    to_array(q_arr, quant=True, unit='m').m,
+                    to_array(q_arr, quant=True, unit='mm').m_as('m'))))
+        self.assertTrue(
+            np.all(
+                np.isclose(
+                    to_array(arr, quant=False, unit='mm'),
+                    to_array(q_arr, quant=False, unit='m')*1000)))
         # We can also use quant=False and a unit to extract the array in a
         # with a certain unit (like the mag function).
         e_arr = to_array(q_arr, quant=False, unit=...)
@@ -706,6 +719,8 @@ class TestUtilNumeric(TestCase):
             to_array(arr, quant=True, unit=Ellipsis)
         with self.assertRaises(ValueError):
             to_array(arr, quant=True, unit=None)
+        with self.assertRaises(ValueError):
+            to_array(q_arr, quant=True, unit=None)
         with self.assertRaises(ValueError):
             to_array(arr, quant=object())
         # We can also specify the units registry (Ellipsis means immlib.units).
