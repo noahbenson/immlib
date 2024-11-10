@@ -384,11 +384,14 @@ class TestUtilNumeric(TestCase):
             torch.equal(ii, sparse_indices(sptns)))
         # These also work for quantities:
         q_sparr = sparr * units.mm
+        self.assertIsInstance(q_sparr, pint.Quantity)
         self.assertTrue(
             all(np.array_equal(u.m if isinstance(u, pint.Quantity) else u, v) 
                 for (u,v) in zip(sparse_find(q_sparr), sps.find(sparr))))
+        q_spdat = sparse_data(q_sparr)
+        self.assertIsInstance(q_spdat, pint.Quantity)
         self.assertTrue(
-            np.array_equal(sparse_data(q_sparr).m, q_sparr.data))
+            np.array_equal(q_spdat.m, q_sparr.data))
         ii = np.stack(sparse_find(sparr)[:-1])
         self.assertTrue(
             np.array_equal(sparse_indices(q_sparr), ii))
