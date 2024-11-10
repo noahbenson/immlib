@@ -1610,8 +1610,10 @@ def to_tensor(obj,
         If invalid parameter values are given or if the parameters conflict.
 
     """
-    if ureg is Ellipsis: from immlib import units as ureg
-    if dtype is not None: dtype = to_torchdtype(dtype)
+    if ureg is Ellipsis:
+        from immlib import units as ureg
+    if dtype is not None:
+        dtype = to_torchdtype(dtype)
     # If obj is a quantity, we handle things differently.
     if isinstance(obj, pint.Quantity):
         q = obj
@@ -1621,7 +1623,8 @@ def to_tensor(obj,
             ureg = unitregistry(q)
     else:
         q = None
-        if ureg is None: from immlib import units as ureg
+        if ureg is None:
+            from immlib import units as ureg
     # Translate obj depending on whether it's a pytorch tensor already or a
     # scipy sparse matrix.
     if torch.is_tensor(obj):

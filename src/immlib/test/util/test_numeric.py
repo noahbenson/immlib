@@ -644,7 +644,7 @@ class TestUtilNumeric(TestCase):
         self.assertIsNot(x.data, sp_mtx.data)
         x = to_array(sp_mtx, copy=False, dtype=complex)
         self.assertTrue(
-            np.all(np.close(x.todense(), sp_mtx.todense())))
+            np.all(np.isclose(x.todense(), sp_mtx.todense())))
         self.assertTrue(np.issubdtype(x.dtype, complex))
         sp_tns = sp_tns.coalesce()
         x = to_array(sp_tns, copy=False)
