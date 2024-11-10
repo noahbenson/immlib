@@ -1132,6 +1132,8 @@ def to_array(obj,
         #    requested no change in output sparsity and the input is sparse).
         if sparse is None or sparse is True:
             layout = sparse_layout(obj if obj_is_sparse else 'coo')
+            print('\n' + ('*'*80))
+            print(' -- ', layout, sparse)
         elif isinstance(sparse, str):
             sparse = strnorm(sparse.strip(), case=True, unicode=False)
             layout = sparse_layout(sparse)
@@ -1171,6 +1173,7 @@ def to_array(obj,
                     vv = np.asarray(uu, dtype=dtype, order=order)
                     arr = None
                 else:
+                    print(' -- ', dtype, order, uu, vv, obj.data)
                     vv = np.asarray(obj.data, dtype=dtype, order=order)
                     if layout.name == obj.format and vv is obj.data:
                         arr = obj

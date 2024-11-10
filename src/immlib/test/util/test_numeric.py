@@ -644,11 +644,6 @@ class TestUtilNumeric(TestCase):
         self.assertIsNot(x.data, sp_mtx.data)
         x = to_array(sp_mtx, copy=False, dtype=complex)
         self.assertTrue(np.issubdtype(x.dtype, complex))
-        print('\n' + ('*'*80))
-        print(' -', x.data)
-        print('  ', x.todense().real.flatten())
-        print(' -', sp_mtx.data)
-        print('  ', sp_mtx.todense().real.flatten())
         self.assertTrue(
             np.all(np.isclose(x.todense().real, sp_mtx.todense())))
         self.assertTrue(
