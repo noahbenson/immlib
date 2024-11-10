@@ -1757,41 +1757,6 @@ def to_tensor(obj,
             f" got object of type {type(quant)}")
 
 
-    # Next, we switch on whether we are being asked to return a quantity or not.
-    if quant is None:
-        quant = (q if unit is Ellipsis else unit) is not None
-    if quant is True:
-        if unit is None:
-            raise ValueError("to_array: cannot make a quantity (quant=True)"
-                             " without a unit (unit=None)")
-        if q is None:
-            if unit is Ellipsis: unit = None
-            return ureg.Quantity(arr, unit)
-        else:
-            from ._quantity import unitregistry
-            if unit is Ellipsis: unit = q.u
-            if ureg is not unitregistry(q) or obj is not arr:
-                q = ureg.Quantity(arr, q.u)
-            return q.to(unit)
-    elif quant is False:
-        # Don't return a quantity, whatever the input argument.
-        if unit is Ellipsis:
-            # We return the current array/magnitude whatever its unit.
-            return arr
-        elif q is None:
-            # We just pretend this was already in the given unit (i.e., ignore
-            # unit).
-            return arr
-        elif unit is None:
-            raise ValueError("cannot extract unit None from quantity; to get"
-                             " the native unit, use unit=Ellipsis")
-        else:
-            if obj is not arr: q = ureg.Quantity(arr, q.u)
-            # We convert to the given unit and return that.
-            return q.m_as(unit)
-    else:
-        raise ValueError(f"invalid value for quant: {quant}")
-
 # General Numeric Collection Functions #########################################
 @docwrap
 def is_numeric(obj,
@@ -1955,7 +1920,7 @@ def to_numeric(obj,
                         quant=quant, unit=unit, ureg=ureg)
 
 
-# Sparse Matrices and Dense Collections#########################################
+# Sparse Matrices and Dense Collections ########################################
 @docwrap
 def is_sparse(obj,
               dtype=None, shape=None, ndim=None, numel=None,

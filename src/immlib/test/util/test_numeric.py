@@ -1219,3 +1219,29 @@ class TestUtilNumeric(TestCase):
         with self.assertRaises(TypeError): to_number('10')
         with self.assertRaises(TypeError): to_number({'a':10})
         with self.assertRaises(TypeError): to_number([1,2,3])
+
+    # The numapi Decorator #####################################################
+    def test_numapi(self):
+        from immlib.util import numapi
+        import numpy as np, torch
+        # Basic test:
+        @numapi
+        def l2_distance(pt1, pt2):
+            "Calculates the L2 distance between two points."
+            pass
+        @l2_distance.array
+        def _(pt1, pt2):
+            return np.sqrt(np.sum((pt1 - pt2)**2, axis=0))
+        @l2_distance.tensor
+        def _(pt1, pt2):
+            return torch.sqrt(torch.sum((pt1 - pt2)**2, axis=0))
+        tns = l2_distance(torch.tensor([0,0]), [0,1])
+        self.assertIsInstance(tns, torch.Tensor)
+        self.assertEqual(tns, 1.0)
+        tns = l2_distance([0,0], torch.tensor([0,1]))
+        self.assertIsInstance(tns, torch.Tensor)
+        self.assertEqual(tns, 1.0)
+        arr = l2_distance([0,0], [0,1])
+        self.assertIsInstance(arr, float)
+        self.assertEqual(arr, 1.0)
+    
