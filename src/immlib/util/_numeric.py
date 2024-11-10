@@ -816,8 +816,9 @@ def sparse_tolayout(obj, layout):
     be changed.
     """
     if isinstance(obj, pint.Quantity):
+        from ._quantity import quant
         arr = sparse_tolayout(obj.m, layout)
-        return obj if arr is obj.m else (arr * obj.u)
+        return obj if arr is obj.m else quant(arr, obj.u)
     lay = sparse_layout(layout)
     if scipy__is_sparse(obj):
         method = getattr(obj, lay.scipy_tomethod)
