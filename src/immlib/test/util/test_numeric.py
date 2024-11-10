@@ -934,60 +934,144 @@ class TestUtilNumeric(TestCase):
         self.assertTrue(is_tensor(gradtns, requires_grad=True))
     def test_to_tensor(self):
         from immlib import (to_tensor, quant, is_quant, units)
-        import torch, numpy as np
-        import pint
+        from immlib.util._numeric import torch__is_sparse
+        from numpy import (linspace, dot)
+        from scipy.sparse import (csr_array, issparse)
+        import torch, numpy as np, pint
         # We'll use a few objects throughout our tests, which we setup now.
-        arr = torch.linspace(0, 1, 25)
-        mtx = torch.mm(torch.linspace(0, 1, 10)[:,None],
-                       torch.linspace(0, 2, 10)[None,:])
-        sp_mtx = torch.sparse_coo_tensor(torch.tensor([[0, 0, 4, 5, 9],
-                                                       [4, 9, 4, 1, 8]]),
-                                         torch.tensor([1, 0.5, 0.5, 0.2, 0.1]),
-                                         (10,10),
-                                         dtype=float)
+        arr = linspace(0, 1, 25)
+        tns = torch.linspace(0, 1, 25)
+        sp_arr = csr_array(
+            ([1.0, 0.5, 0.5, 0.2, 0.1],
+             ([0, 0, 4, 5, 9], [4, 9, 4, 1, 8])),
+            shape=(10, 10),
+            dtype=float)
+        sp_tns = torch.sparse_coo_tensor(
+            torch.tensor([[0, 0, 4, 5, 9], [4, 9, 4, 1, 8]]),
+            torch.tensor([1.0, 0.5, 0.5, 0.2, 0.1]),
+            size=(10, 10),
+            dtype=float)
         q_arr = quant(arr, 'mm')
-        q_mtx = quant(arr, 'seconds')
-        q_sp_mtx = quant(sp_mtx, 'kg')
-        # For an object that is already a numpy array, any call that doesn't
+        q_tns = quant(tns, 'mm')
+        q_sp_tns = quant(sp_tns, 'kg')
+        q_sp_arr = quant(sp_arr, 'lb')
+        # For an object that is already a numpy tensor, any call that doesn't
         # request a copy and that doesn't change its parameters will return the
         # identical object.
-        self.assertIs(arr, to_tensor(arr))
-        self.assertIs(arr, to_tensor(arr, sparse=False))
-        self.assertIs(arr, to_tensor(arr, quant=False))
-        # If we change the parameters of the returned array, we will get
-        # different (but typically equal) objects back.
-        self.assertTrue(torch.equal(arr, to_tensor(arr, requires_grad=True)))
+        self.assertIs(tns, to_tensor(tns))
+        self.assertIs(tns, to_tensor(tns, quant=False))
+        # to_tensor can be used to convert from arrayss into tensors
+        self.assertIsInstance(to_tensor(arr), torch.Tensor)
+        # Sparse tensors/tensors should also convert fine.
+        dn_tns = sp_tns.to_dense()
+        dn_arr = sp_arr.todense()
+        x = to_tensor(sp_arr)
+        self.assertTrue(torch__is_sparse(x))
+        self.assertEqual(x.layout, torch.sparse_csr)
+        x = to_tensor(dn_tns, sparse='coo')
+        self.assertTrue(torch__is_sparse(x))
+        self.assertEqual(x.layout, torch.sparse_coo)
+        self.assertIsInstance(x, torch.Tensor)
+        x = to_tensor(dn_tns, sparse=torch.sparse_csr)
+        self.assertTrue(torch__is_sparse(x))
+        self.assertEqual(x.layout, torch.sparse_csr)
+        self.assertIsInstance(x, torch.Tensor)
+        x = to_tensor(dn_tns, sparse=False)
+        self.assertFalse(torch__is_sparse(x))
+        self.assertTrue(torch.equal(dn_tns, x))
+        self.assertIsInstance(x, torch.Tensor)
+        x = to_tensor(sp_tns, sparse=False)
+        self.assertTrue(torch.equal(dn_tns, x))
+        self.assertIsInstance(x, torch.Tensor)
+        x = to_tensor(sp_arr, sparse=False)
+        self.assertTrue(torch.all(torch.isclose(dn_tns, x)))
+        self.assertIsInstance(x, torch.Tensor)
+        with self.assertRaises(ValueError):
+            to_tensor(dn_tns, sparse=object())
+        with self.assertRaises(ValueError):
+            to_tensor(dn_tns, sparse='???')
+        with self.assertRaises(ValueError):
+            x = to_tensor(sp_tns, copy=False, dtype=complex)
+        x = to_tensor(sp_tns, copy=None, dtype=complex)
+        self.assertEqual(x.dtype, torch.complex128)
+        self.assertTrue(
+            torch.all(torch.isclose(x.to_dense().real, sp_tns.to_dense())))
+        self.assertTrue(
+            torch.all(torch.abs(x.to_dense().imag) < 1e-9))
         # We can also request that a copy be made like with np.array.
-        self.assertIsNot(arr, to_tensor(arr, copy=True))
-        self.assertTrue(torch.equal(arr, to_tensor(arr, copy=True)))
-        # The sparse flag can be used to convert to/from a sparse array.
-        self.assertIsInstance(to_tensor(sp_mtx, sparse=False), torch.Tensor)
-        self.assertTrue(torch.equal(to_tensor(sp_mtx, sparse=False),
-                                    sp_mtx.to_dense()))
-        self.assertTrue(to_tensor(mtx, sparse=True).is_sparse)
-        self.assertTrue(torch.equal(to_tensor(mtx, sparse=True).to_dense(),
-                                    mtx))
+        self.assertIsNot(arr, to_tensor(arr, copy=True).numpy())
+        self.assertTrue(torch.equal(tns, to_tensor(tns, copy=True)))
+        self.assertTrue(
+            np.shares_memory(arr.data, to_tensor(arr, copy=False).numpy().data))
+        # The sparse flag can be used to convert to/from a sparse tensor.
+        self.assertIsInstance(to_tensor(sp_tns, sparse=False), torch.Tensor)
+        self.assertEqual(to_tensor(sp_tns, sparse=False).layout, torch.strided)
+        self.assertTrue(
+            torch.equal(to_tensor(sp_tns, sparse=False), sp_tns.to_dense()))
+        self.assertTrue(torch__is_sparse(to_tensor(tns, sparse=True)))
+        self.assertTrue(
+            torch.equal(to_tensor(tns, sparse=True).to_dense(), tns))
         # The quant argument can be used to enforce the return of quantities or
-        # non-quantities.
-        self.assertIsInstance(to_tensor(arr, quant=True), units.Quantity)
+        # non-quantities, but you can't force a quantity without a unit:
+        with self.assertRaises(ValueError):
+            arr = to_tensor(arr, quant=True, unit=None)
         # The unit parameter can be used to specify what unit to use.
-        self.assertTrue(torch.equal(q_arr.m,
-                                    to_tensor(arr, quant=True, unit='mm').m))
-        # If no unit is provided, then dimensionless units are assumed (1
-        # dimensionless is equivalent to 1 count, 1 turn, and a few others).
-        self.assertEqual(to_tensor(arr, quant=True).u, units.dimensionless)
+        self.assertTrue(
+            torch.equal(q_tns.m, to_tensor(tns, quant=True, unit='mm').m))
+        self.assertTrue(
+            torch.all(
+                torch.isclose(
+                    to_tensor(q_arr, quant=True, unit='m').m,
+                    to_tensor(arr, quant=True, unit='mm').m_as('m'))))
+        self.assertTrue(
+            torch.all(
+                torch.isclose(
+                    to_tensor(q_arr, quant=True, unit='m').m,
+                    to_tensor(q_arr, quant=True, unit='mm').m_as('m'))))
+        self.assertTrue(
+            torch.all(
+                torch.isclose(
+                    to_tensor(arr, quant=False, unit='mm'),
+                    to_tensor(q_arr, quant=False, unit='m')*1000)))
+        # We can also use quant=False and a unit to extract the tensor with a
+        # certain unit (like the mag function).
+        e_tns = to_tensor(q_tns, quant=False, unit=...)
+        self.assertIsInstance(e_tns, torch.Tensor)
+        self.assertTrue(torch.all(torch.isclose(e_tns, tns)))
+        e_tns = to_tensor(q_tns, quant=False, unit='m')
+        self.assertIsInstance(e_tns, torch.Tensor)
+        self.assertTrue(torch.all(torch.isclose(e_tns, tns/1000)))
+        self.assertTrue(
+            torch.equal(q_tns.m, to_tensor(tns, quant=True, unit='mm').m))
+        with self.assertRaises(ValueError):
+            to_tensor(tns, quant=True, unit=Ellipsis)
+        with self.assertRaises(ValueError):
+            to_tensor(tns, quant=True, unit=None)
+        with self.assertRaises(ValueError):
+            to_tensor(q_tns, quant=True, unit=None)
+        with self.assertRaises(ValueError):
+            to_tensor(tns, quant=object())
+        # We can also specify the units registry (Ellipsis means immlib.units).
+        self.assertTrue(
+            torch.all(
+                torch.isclose(
+                    to_tensor(q_tns, unit='m', ureg=Ellipsis).m,
+                    q_tns.m / 1000.0)))
         # We can also use unit to extract a specific unit from a quantity.
         self.assertEqual(1000, to_tensor(quant(1, units.meter), unit='mm').m)
         # However, a non-quantity is always assumed to already have the units
         # requested, so converting it to a particular unit (but not converting
         # it to a quantity) results in the same object.
-        self.assertIs(to_tensor(arr, quant=False, unit='mm'), arr)
-        # If we simply request an array with a unit, without specifying that it
+        self.assertIs(to_tensor(tns, quant=False, unit='mm'), tns)
+        # If we simply request an tensor with a unit, without specifying that it
         # not be a quantity, we get a quantity back.
-        self.assertIsInstance(to_tensor(arr, unit='mm'), pint.Quantity)
+        self.assertIsInstance(to_tensor(tns, unit='mm'), pint.Quantity)
         # An error is raised if you try to request no units for a quantity.
         with self.assertRaises(ValueError):
-            to_tensor(arr, quant=True, unit=None)
+            to_tensor(tns, quant=True, unit=None)
+        # If we change the parameters of the returned array, we will get
+        # different (but typically equal) objects back.
+        self.assertTrue(torch.equal(tns, to_tensor(tns, requires_grad=True)))
 
     # PyTorch and Numpy Helper Functions #######################################
     def test_is_numeric(self):

@@ -1259,9 +1259,8 @@ def to_array(obj,
         if q is None:
             if unit is Ellipsis:
                 raise ValueError(
-                    "to_array(x): cannot make x into a quantity (quant=True)"
-                    " with the same unit as x (unit=...) when the x is not a"
-                    " quantity")
+                    "to_array(x): cannot make a quantity (quant=True) with the"
+                    " same unit as x (unit=...) when the x is not a quantity")
             return ureg.Quantity(arr, unit)
         else:
             from ._quantity import unitregistry
@@ -1281,8 +1280,9 @@ def to_array(obj,
             # unit).
             return arr
         elif unit is None:
-            raise ValueError("cannot extract unit None from quantity; to get"
-                             " the native unit, use unit=Ellipsis")
+            raise ValueError(
+                "to_tensor: cannot extract unit None from quantity; to get the"
+                " native unit, use unit=Ellipsis")
         else:
             if obj is not arr:
                 q = ureg.Quantity(arr, q.u)
@@ -1632,18 +1632,24 @@ def to_tensor(obj,
     # Translate obj depending on whether it's a pytorch tensor already or a
     # scipy sparse matrix.
     if torch.is_tensor(obj):
-        if requires_grad is None: requires_grad = obj.requires_grad
-        if device is None:        device = obj.device
-        if dtype is None:         dtype = obj.dtype
+        if requires_grad is None:
+            requires_grad = obj.requires_grad
+        if device is None:
+            device = obj.device
+        if dtype is None:
+            dtype = obj.dtype
         needs_copy = device != obj.device or dtype != obj.dtype
         prefs_copy = copy or requires_grad != obj.requires_grad
         if copy is False:
             if needs_copy:
-                if device == obj.device: msg = "dtype change"
-                elif dtype == obj.dtype: msg = "device change"
-                else:                    msg = "device and dtype change"
-                raise ValueError("copy=False requested,"
-                                 f" but copy required by {msg}")
+                if device == obj.device:
+                    msg = "dtype change"
+                elif dtype == obj.dtype:
+                    msg = "device change"
+                else:
+                    msg = "device and dtype change"
+                raise ValueError(
+                    f"copy=False requested, but copy required by {msg}")
             else: 
                 arr = obj
         elif needs_copy:
@@ -1654,46 +1660,103 @@ def to_tensor(obj,
             arr = obj
         if arr.requires_grad != requires_grad:
             arr = arr.requires_grad_(requires_grad)
-    elif scipy__is_sparse(obj):
-        if requires_grad is None: requires_grad = False
-        if dtype is None: dtype = obj.dtype
-        (rows, cols, vals) = sps.find(obj)
-        # Process these into a PyTorch COO matrix.
-        ii = torch.tensor([rows, cols], dtype=torch.long, device=device)
-        arr = torch.sparse_coo_tensor(ii, vals, obj.shape,
-                                      dtype=dtype, device=device,
-                                      requires_grad=requires_grad)
-        # Convert to a CSR tensor if we were given a CSR matrix.
-        if isinstance(obj, sps.csr_matrix): arr = arr.to_sparse_csr()
-    elif (copy or requires_grad is True or 
-          (isinstance(obj, np.ndarray) and not obj.flags['WRITEABLE'])):
-        arr = torch.tensor(obj, dtype=dtype, device=device,
-                           requires_grad=requires_grad)
-        dtype = arr.dtype
     else:
-        arr = torch.as_tensor(obj, dtype=dtype, device=device)
-        dtype = arr.dtype
+        if requires_grad is None:
+            requires_grad = False
+        if scipy__is_sparse(obj):
+            (rows, cols, vals) = sps.find(obj)
+            # Process these into a PyTorch COO matrix.
+            ii = torch.as_tensor(
+                np.array([rows, cols], dtype=np.long),
+                dtype=torch.long,
+                device=device)
+            vals = torch.as_tensor(vals, dtype=dtype, device=device)
+            if dtype is None:
+                dtype = vals.dtype
+            arr = torch.sparse_coo_tensor(
+                ii, vals, obj.shape,
+                dtype=dtype,
+                device=device,
+                requires_grad=requires_grad)
+            # If possible, convert to the layout we want.
+            arr = sparse_tolayout(arr, obj.format)
+        elif (copy or requires_grad is True or 
+              (isinstance(obj, np.ndarray) and not obj.flags['WRITEABLE'])):
+            arr = torch.tensor(
+                obj,
+                dtype=dtype,
+                device=device,
+                requires_grad=requires_grad)
+            dtype = arr.dtype
+        else:
+            arr = torch.as_tensor(obj, dtype=dtype, device=device)
+            dtype = arr.dtype
     # If there is an instruction regarding the output's sparsity, handle that
     # now.
     if sparse is True:
         # arr must be sparse (COO by default); make sure it is.
-        if not torch__is_sparse(arr): arr = arr.to_sparse()
+        if not torch__is_sparse(arr):
+            arr = arr.to_sparse()
     elif sparse is False:
         # arr must not be a sparse array; make sure it isn't.
-        if torch__is_sparse(arr): arr = arr.to_dense()
-    elif streq(sparse, 'csr', case=False, unicode=False, strip=True):
-        if arr.layout is not torch.sparse_csr:
-            arr = arr.to_sparse_csr()
-    elif streq(sparse, 'coo', case=False, unicode=False, strip=True):
-        if not torch__is_sparse(arr): arr = arr.to_sparse()
-        if arr.layout is not torch.sparse_coo:
-            arr = arr.coalesce()
-            arr = torch.sparse_coo_tensor(
-                arr.indices(), arr.vales(), arr.shape,
-                dtype=dtype, device=device,
-                requires_grad=requires_grad)
+        if torch__is_sparse(arr):
+            arr = arr.to_dense()
     elif sparse is not None:
-        raise ValueError(f"invalid value for parameter sparse: {sparse}")
+        layout = sparse_layout(sparse)
+        if layout is None:
+            if isinstance(sparse, str):
+                raise ValueError(f"invalid pytorch sparse layout: {sparse}")
+            else:
+                raise ValueError(
+                    f"to_tensor: invalid sparse option of type {type(sparse)}")
+        if arr.layout != layout.torch_layout:
+            arr = layout.torch_tomethod(arr)
+    # Next, we switch on whether we are being asked to return a quantity or not.
+    if quant is None:
+        quant = (q if unit is Ellipsis else unit) is not None
+    if quant is True:
+        if unit is None:
+            raise ValueError(
+                "to_tensor: cannot make a quantity (quant=True) without a unit"
+                " (unit=None)")
+        if q is None:
+            if unit is Ellipsis:
+                raise ValueError(
+                    "to_tensor(x): cannot make a quantity (quant=True) with the"
+                    " same unit as x (unit=...) when the x is not a quantity")
+            return ureg.Quantity(arr, unit)
+        else:
+            from ._quantity import unitregistry
+            if ureg is not unitregistry(q) or obj is not arr:
+                q = ureg.Quantity(arr, q.u)
+            if unit is not Ellipsis and ureg.Unit(unit) != q.u:
+                return q.to(unit)
+            else:
+                return q
+    elif quant is False:
+        # Don't return a quantity, whatever the input argument.
+        if unit is Ellipsis:
+            # We return the current array/magnitude whatever its unit.
+            return arr
+        elif q is None:
+            # We just pretend this was already in the given unit (i.e., ignore
+            # unit).
+            return arr
+        elif unit is None:
+            raise ValueError(
+                "to_tensor: cannot extract unit None from quantity; to get the"
+                " native unit, use unit=Ellipsis")
+        else:
+            if obj is not arr:
+                q = ureg.Quantity(arr, q.u)
+            # We convert to the given unit and return that.
+            return q.m_as(unit)
+    else:
+        raise ValueError(
+            f"to_tensor: quant must be boolean or None;"
+            f" got object of type {type(quant)}")
+
+
     # Next, we switch on whether we are being asked to return a quantity or not.
     if quant is None:
         quant = (q if unit is Ellipsis else unit) is not None
