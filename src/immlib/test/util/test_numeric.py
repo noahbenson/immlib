@@ -301,7 +301,7 @@ class TestUtilNumeric(TestCase):
         import scipy.sparse as sps, numpy as np, torch, pint
         from immlib.util import (
             sparse_find, sparse_data, sparse_indices, sparse_layout,
-            sparse_haslayout, sparse_tolayout)
+            sparse_haslayout, sparse_tolayout, quant)
         from immlib import (units, quant)
         sparr = sps.csr_array(
             ([1.0, 0.5, 0.5, 0.2, 0.1],
@@ -323,8 +323,8 @@ class TestUtilNumeric(TestCase):
         self.assertEqual('csr', sparse_layout(sparr).name)
         self.assertEqual('coo', sparse_layout(sptns).name)
         # sparse_layout works with quantities.
-        self.assertEqual('csr', sparse_layout(sparr * units.mm).name)
-        self.assertEqual('coo', sparse_layout(sptns * units.mm).name)
+        self.assertEqual('csr', sparse_layout(quant(sparr, units.mm)).name)
+        self.assertEqual('coo', sparse_layout(quant(sptns, units.mm)).name)
         # Unrecognized objects and names produce None:
         self.assertIs(None, sparse_layout('???'))
         self.assertIs(None, sparse_layout(object()))
@@ -383,7 +383,7 @@ class TestUtilNumeric(TestCase):
         self.assertTrue(
             torch.equal(ii, sparse_indices(sptns)))
         # These also work for quantities:
-        q_sparr = sparr * units.mm
+        q_sparr = quant(sparr, units.mm)
         self.assertIsInstance(q_sparr, pint.Quantity)
         self.assertTrue(
             all(np.array_equal(u.m if isinstance(u, pint.Quantity) else u, v) 
@@ -668,7 +668,7 @@ class TestUtilNumeric(TestCase):
                     to_array(q_arr, unit='m', ureg=Ellipsis).m,
                     q_arr.m / 1000.0)))
         # We can also use unit to extract a specific unit from a quantity.
-        self.assertEqual(1000, to_array(1 * units.meter, unit='mm').m)
+        self.assertEqual(1000, to_array(quant(1, units.meter), unit='mm').m)
         # However, a non-quantity is always assumed to already have the units
         # requested, so converting it to a particular unit (but not converting
         # it to a quantity) results in the same object.
@@ -885,7 +885,7 @@ class TestUtilNumeric(TestCase):
         # dimensionless is equivalent to 1 count, 1 turn, and a few others).
         self.assertEqual(to_tensor(arr, quant=True).u, units.dimensionless)
         # We can also use unit to extract a specific unit from a quantity.
-        self.assertEqual(1000, to_tensor(1 * units.meter, unit='mm').m)
+        self.assertEqual(1000, to_tensor(quant(1, units.meter), unit='mm').m)
         # However, a non-quantity is always assumed to already have the units
         # requested, so converting it to a particular unit (but not converting
         # it to a quantity) results in the same object.

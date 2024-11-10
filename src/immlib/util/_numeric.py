@@ -760,8 +760,9 @@ def sparse_find(arr):
     For any non-sparse input, a `TypeError` is raised.
     """
     if isinstance(arr, pint.Quantity):
+        from ._quantity import quant
         f = sparse_find(arr.m)
-        return f[:-1] + (f[-1]*arr.u,)
+        return f[:-1] + (quant(f[-1], arr.u),)
     elif scipy__is_sparse(arr):
         return sps.find(arr)
     elif torch__is_sparse(arr):
@@ -797,7 +798,8 @@ def sparse_data(arr):
     be reflected in `arr`.
     """
     if isinstance(arr, pint.Quantity):
-        return sparse_data(arr.m) * arr.u
+        from ._quantity import quant
+        return quant(sparse_data(arr.m), arr.u)
     elif scipy__is_sparse(arr):
         return arr.data
     elif torch__is_sparse(arr):
