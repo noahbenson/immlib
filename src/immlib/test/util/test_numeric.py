@@ -693,10 +693,23 @@ class TestUtilNumeric(TestCase):
             np.all(
                 np.isclose(
                     to_array(q_arr, quant=True, unit='m').m,
-                    to_array(arr, quant=True, unit='m').m)))
-        # unit=Ellipsis indicates that the unit shouldn't be changed.
+                    to_array(arr, quant=True, unit='mm').m_as('m'))))
+        # We can also use quant=False and a unit to extract the array in a
+        # with a certain unit (like the mag function).
+        e_arr = to_array(q_arr, quant=False, unit=...)
+        self.assertIsInstance(e_arr, np.ndarray)
+        self.assertTrue(np.all(np.isclose(e_arr, arr)))
+        e_arr = to_array(q_arr, quant=False, unit='m')
+        self.assertIsInstance(e_arr, np.ndarray)
+        self.assertTrue(np.all(np.isclose(e_arr, arr/1000)))
         self.assertTrue(
-            np.array_equal(q_arr.m, to_array(arr, quant=True, unit=...).m))
+            np.array_equal(q_arr.m, to_array(arr, quant=True, unit='mm').m))
+        with self.assertRaises(ValueError):
+            to_array(arr, quant=True, unit=Ellipsis)
+        with self.assertRaises(ValueError):
+            to_array(arr, quant=True, unit=None)
+        with self.assertRaises(ValueError):
+            to_array(arr, quant=object())
         # We can also specify the units registry (Ellipsis means immlib.units).
         self.assertTrue(
             np.all(

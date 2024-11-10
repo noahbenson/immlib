@@ -1286,7 +1286,9 @@ def to_array(obj,
             # We convert to the given unit and return that.
             return q.m_as(unit)
     else:
-        raise ValueError(f"invalid value for quant: {quant}")
+        raise ValueError(
+            f"to_array: quant must be boolean or None;"
+            f" got object of type {type(quant)}")
 
 
 # PyTorch Tensors ##############################################################
