@@ -75,7 +75,7 @@ jobs:
         with:
           python-version: ${{ matrix.version }}
           architecture: ${{ matrix.arch }}
-      - name: Setip Miniconda
+      - name: Setup Miniconda
         uses: conda-incubator/setup-miniconda@v3
         with:
           python-version: ${{ matrix.version }}
