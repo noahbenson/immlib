@@ -633,6 +633,25 @@ class TestUtilNumeric(TestCase):
         self.assertFalse(issparse(x))
         self.assertTrue(
             np.array_equal(dn_tns.numpy(), x))
+        with self.assertRaises(ValueError):
+            to_array(dn_tns, sparse=object())
+        with self.assertRaises(ValueError):
+            to_array(dn_tns, sparse='???')
+        # If we request copy=True it duplicates the data array.
+        x = to_array(sp_mtx, copy=False)
+        self.assertIs(x.data, sp_mtx.data)
+        x = to_array(sp_mtx, copy=True)
+        self.assertIsNot(x.data, sp_mtx.data)
+        x = to_array(sp_mtx, copy=False, dtype=complex)
+        self.assertTrue(np.array_equal(x.todense(), sp_mtx.todense()))
+        self.assertTrue(np.issubdtype(x.dtype, complex))
+        sp_tns = sp_tns.coalesce()
+        x = to_array(sp_tns, copy=False)
+        self.assertTrue(
+            np.shares_memory(x.data, sp_tns.values().detach().numpy()))
+        x = to_array(sp_tns, copy=True)
+        self.assertFalse(
+            np.shares_memory(x.data, sp_tns.values().detach().numpy()))
         # If we change the parameters of the returned array, we will get
         # different (but typically equal) objects back.
         self.assertIsNot(arr, to_array(arr, frozen=True))
@@ -654,13 +673,30 @@ class TestUtilNumeric(TestCase):
         self.assertFalse(to_array(mtx, frozen=True).flags['WRITEABLE'])
         self.assertTrue(np.array_equal(to_array(mtx, frozen=True), mtx))
         self.assertIsNot(to_array(mtx, frozen=True), mtx)
+        fsp_mtx = to_array(sp_mtx, frozen=True)
+        self.assertTrue(np.array_equal(fsp_mtx.todense(), sp_mtx.todense()))
+        self.assertFalse(fsp_mtx.data.flags['WRITEABLE'])
+        tfsp_mtx = to_array(fsp_mtx, frozen=False)
+        self.assertTrue(np.array_equal(tfsp_mtx.todense(), sp_mtx.todense()))
+        self.assertTrue(tfsp_mtx.data.flags['WRITEABLE'])
+        self.assertFalse(fsp_mtx.data.flags['WRITEABLE'])
+        with self.assertRaises(ValueError):
+            to_array(sp_mtx, frozen=object())
         # The quant argument can be used to enforce the return of quantities or
         # non-quantities, but you can't force a quantity without a unit:
         with self.assertRaises(ValueError):
             arr = to_array(arr, quant=True)
         # The unit parameter can be used to specify what unit to use.
-        self.assertTrue(np.array_equal(q_arr.m,
-                                       to_array(arr, quant=True, unit='mm').m))
+        self.assertTrue(
+            np.array_equal(q_arr.m, to_array(arr, quant=True, unit='mm').m))
+        self.assertTrue(
+            np.all(
+                np.isclose(
+                    to_array(q_arr, quant=True, unit='m').m,
+                    to_array(arr, quant=True, unit='m').m)))
+        # unit=Ellipsis indicates that the unit shouldn't be changed.
+        self.assertTrue(
+            np.array_equal(q_arr.m, to_array(arr, quant=True, unit=...).m))
         # We can also specify the units registry (Ellipsis means immlib.units).
         self.assertTrue(
             np.all(
