@@ -1132,8 +1132,6 @@ def to_array(obj,
         #    requested no change in output sparsity and the input is sparse).
         if sparse is None or sparse is True:
             layout = sparse_layout(obj if obj_is_sparse else 'coo')
-            print('\n' + ('*'*80))
-            print(' -- ', layout, sparse)
         elif isinstance(sparse, str):
             sparse = strnorm(sparse.strip(), case=True, unicode=False)
             layout = sparse_layout(sparse)
@@ -1166,24 +1164,26 @@ def to_array(obj,
                     dtype=dtype)
             else:
                 # We're creating a scipy sparse output from another scipy sparse
-                # matrix.
-                (rr,cc,uu) = sps.find(obj)
-                if copy:
-                    # uu is already a copy, so we use asarray.
-                    vv = np.asarray(uu, dtype=dtype, order=order)
-                    arr = None
+                # matrix. The scipy.sparse API (i.e., the find() function) does
+                # not let us get access to the data itself, and using obj.data
+                # along with the first two return values of sps.find (the
+                # indices) can cause problems because find doesn't always return
+                # the data in the same order as obj.data. So we must make a copy
+                # of the data in this case unless we know that the dtype and
+                # order have not been changed; since order doesn't apply to 1d
+                # vectors we can ignore it.
+                if dtype is None or dtype == obj.dtype:
+                    arr = obj
                 else:
-                    vv = np.asarray(obj.data, dtype=dtype, order=order)
-                    print(' -- ', dtype, order, uu, vv, obj.data)
-                    if layout.name == obj.format and vv is obj.data:
+                    (rr,cc,uu) = sps.find(obj)
+                    vv = np.asarray(uu, dtype=dtype)
+                    if vv is uu:
                         arr = obj
                     else:
-                        arr = None
-                if arr is None:
-                    arr = layout.scipy_type(
-                        (vv, (rr,cc)),
-                        shape=obj.shape,
-                        dtype=dtype)
+                        arr = layout.scipy_type(
+                            (vv, (rr,cc)),
+                            shape=obj.shape,
+                            dtype=dtype)
         else:
             # We're creating a scipy sparse matrix from a dense matrix.
             arr = obj.numpy() if obj_is_tensor else obj

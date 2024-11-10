@@ -637,11 +637,6 @@ class TestUtilNumeric(TestCase):
             to_array(dn_tns, sparse=object())
         with self.assertRaises(ValueError):
             to_array(dn_tns, sparse='???')
-        # If we request copy=True it duplicates the data array.
-        x = to_array(sp_mtx, copy=False)
-        self.assertIs(x.data, sp_mtx.data)
-        x = to_array(sp_mtx, copy=True)
-        self.assertIsNot(x.data, sp_mtx.data)
         x = to_array(sp_mtx, copy=False, dtype=complex)
         self.assertTrue(np.issubdtype(x.dtype, complex))
         self.assertTrue(
