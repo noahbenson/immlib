@@ -56,7 +56,8 @@ jobs:
           - {"os": "windows-latest", "arch": "x86", "version": "3.10"}
           - {"os": "windows-latest", "arch": "x86", "version": "3.11"}
           - {"os": "windows-latest", "arch": "x86", "version": "3.12"}
-          - {"os": "windows-latest", "arch": "x86", "version": "3.13"}
+          # The windows python-3.13 VM can't install pytorch currently.
+          #- {"os": "windows-latest", "arch": "x86", "version": "3.13"}
           - {"os": "macos-latest", "arch": "arm64", "version": "3.8"}
           - {"os": "macos-latest", "arch": "arm64", "version": "3.9"}
           - {"os": "macos-latest", "arch": "arm64", "version": "3.10"}
