@@ -1667,7 +1667,7 @@ def to_tensor(obj,
             (rows, cols, vals) = sps.find(obj)
             # Process these into a PyTorch COO matrix.
             ii = torch.as_tensor(
-                np.array([rows, cols], dtype=np.long),
+                np.array([rows, cols], dtype=np.int_),
                 dtype=torch.long,
                 device=device)
             vals = torch.as_tensor(vals, dtype=dtype, device=device)
