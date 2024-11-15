@@ -6,6 +6,7 @@
 # Dependencies #################################################################
 
 import inspect
+from functools import wraps
 
 from pcollections import (pdict, ldict, lazy)
 
@@ -43,11 +44,10 @@ class plantype(type):
         """
         __slots__ = ('__plandict__',)
         def __getattr__(self, k):
-            pd = object.__getattribute__(self, '__plandict__')
-            if k == '__plandict__': return pd
+            pd = self.__plandict__
             r = pd.get(k, pd)
             if r is pd:
-                return object.__getattribute__(self, k)
+                raise AttributeError
             else:
                 return r
         def __setattr__(self, k, v):
@@ -69,10 +69,10 @@ class plantype(type):
             # cleaned up (this is guaranteed by the plantype meta-class).
             return obj
         def __dir__(self):
-            object.__getattribute__(self, '__plandict__')
-            l = type.__dir__(self)
-            for k in pd.keys():
-                l.append(k)
+            pd = self.__plandict__
+            l = object.__dir__(self)
+            l.extend(pd.keys())
+            l.sort()
             return l
         def __init__(self, *args, **kwargs):
             for (k,v) in merge(*args, **kwargs).items():
@@ -97,10 +97,11 @@ class plantype(type):
             """
             # If the plandict is not a mutable dictionary, we have already been
             # initialized.
-            pd = object.__getattribute__(self, '__plandict__')
+            pd = self.__plandict__
             if is_pdict(pd):
-                raise RuntimeError("_init_wrapper method called on an already-"
-                                   "initialized planobject")
+                raise RuntimeError(
+                    "_init_wrapper method called on an already-initialized"
+                    " planobject")
             elif pd is not None:
                 # We're already in the middle of initializing; one of the
                 # __init__ methods probably just called a parent class's
@@ -155,7 +156,7 @@ class plantype(type):
             return plantype.planobject_base._init_wrapper(
                 _initfn.cls, self, *args,
                 **kwargs)
-        attrs['__init__'] = _initfn
+        attrs['__init__'] = wraps(init)(_initfn)
         # (3) Go through the bases: see if there are planobject bases already,
         #     and if not, add planobject in. As we go, collect calculations.
         calcs = {k:v for (k,v) in attrs.items() if is_calc(v)}

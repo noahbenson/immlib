@@ -103,3 +103,15 @@ class TestWorkflowPlanType(TestCase):
         self.assertEqual(tri.area, 0.5)
         self.assertEqual(sys.stdout.getvalue(), 'Calculating area...\n')
         sys.stdout = sys.__stdout__
+        # Objects of type planobject are immutable:
+        with self.assertRaises(TypeError):
+            tri.a = (2,2)
+        with self.assertRaises(TypeError):
+            del tri.a
+        # The dir function should return normal object items as well as the
+        # plan's values:
+        d = dir(tri)
+        for k in ('a', 'b', 'c', 'base', 'height', 'area', '__class__',
+                  '__plandict__', '__new__'):
+            self.assertIn(k, d)
+

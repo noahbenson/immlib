@@ -1136,7 +1136,7 @@ def to_tcoll(obj, copy=True):
 
     Note that if `to_tcoll` is given a lazy dict (`ldict`), the resulting
     transient dictionary does not dereference the lazy elements. To prevent
-    this, an `ldict` object can be passed as `to_tcoll(obj.to_pdict())`.
+    this, an `ldict` object can be passed as `to_tcoll(obj.as_pdict())`.
 
     Parameters
     ----------
@@ -1586,7 +1586,7 @@ def merge(*args, **kw):
     for d in args[1:]:
         if is_ldict(d):
             lazy = True
-            res.update(d.to_pdict())
+            res.update(d.as_pdict())
         else:
             res.update(d)
     res.update(kw)
@@ -1611,7 +1611,7 @@ def rmerge(*args, **kw):
     for d in reversed(args):
         if is_ldict(d):
             lazy = True
-            res.update(d.to_pdict())
+            res.update(d.as_pdict())
         else:
             res.update(d)
     return ldict(res) if lazy else pdict(res)
@@ -1736,7 +1736,7 @@ def lambdadict(*args, **kwargs):
     d = merge(*args, **kwargs)
     finals = d.transient()
     if isinstance(d, ldict):
-        d = d.to_pdict()
+        d = d.as_pdict()
     for (k,v) in d.items():
         if isinstance(v, LambdaType):
             finals[k] = lazy(_lambdadict_call, finals, v)

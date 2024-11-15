@@ -28,7 +28,7 @@ classifiers = [
     'Operating System :: Unix',
     'Operating System :: MacOS']
 dependencies = [
-     'pcollections >= 0.2.9',
+     'pcollections >= 0.3',
      'numpy >= 1.24.0',
      'scipy >= 1.7.0',
      'pint >= 0.20.0',
@@ -38,8 +38,8 @@ dependencies = [
      'pyyaml >= 6.0']
 
 [project.optional-dependencies]
-dev = ["torch >= 2.2.0", "pyyaml"]
-test = ["torch >= 2.2.0", "pyyaml"]
+dev = ["torch >= 2.2.0"]
+test = ["torch >= 2.2.0"]
 
 [project.urls]
 homepage = "https://github.com/noahbenson/immlib"
