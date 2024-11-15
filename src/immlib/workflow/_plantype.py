@@ -61,6 +61,12 @@ class plantype(type):
                 pd[k] = v
             else:
                 raise TypeError(f"type {type(self)} is immutable")
+        def __delattr__(self, k):
+            pd = object.__getattribute__(self, '__plandict__')
+            if type(pd) is dict:
+                raise TypeError(f"cannot delete attributes from plantype: {type(self)}")
+            else:
+                raise TypeError(f"type {type(self)} is immutable")
         def __new__(cls, *args, **kwargs):
             # Start by creating the object itself and setting up its slots.
             obj = object.__new__(cls)
