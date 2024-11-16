@@ -28,7 +28,7 @@ classifiers = [
     'Operating System :: Unix',
     'Operating System :: MacOS']
 dependencies = [
-     'pcollections >= 0.3',
+     'pcollections >= 0.3.1',
      'numpy >= 1.24.0',
      'scipy >= 1.7.0',
      'pint >= 0.20.0',

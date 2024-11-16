@@ -13,7 +13,11 @@ from inspect import getfullargspec
 
 import numpy as np
 
-from pcollections import (pdict, tdict, ldict, lazy, pset, tset, plist)
+from pcollections import (
+    pdict, tdict, ldict,
+    lazy, holdlazy,
+    pset, tset,
+    plist)
 
 from ..doc import (docwrap, docproc, make_docproc)
 from ..util import (
@@ -477,7 +481,7 @@ class calc:
             return None
         tup_ii = int(not is_input)
         is_ld = is_ldict(m)
-        it = (m.as_pdict() if is_ld else m).items()
+        it = holdlazy(m).items()
         d = tdict()
         for (k,v) in it:
             kk = tr.get(k,k)
@@ -1069,7 +1073,7 @@ class plandict(ldict):
             raise ValueError(f"extra inputs: {tuple(extra_params)}")
         # Okay, we have the correct parameters. We can make the input tuple.
         inp = []
-        pparams = params.as_pdict() if isinstance(params, ldict) else params
+        pparams = holdlazy(params)
         for k in plan.inputs:
             v = pparams[k]
             if isinstance(v, lazy):
@@ -1120,7 +1124,7 @@ class plandict(ldict):
             raise ValueError(f"unrecognized inputs: {tuple(extras)}")
         # Make a new inputtup and calctup.
         inputtup = list(pd._inputdata)
-        pparams = params.as_pdict() if isinstance(params, ldict) else params
+        pparams = holdlazy(params)
         allvals = set()
         allcals = set()
         for (ii,k) in enumerate(plan.inputs):
