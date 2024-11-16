@@ -675,35 +675,6 @@ class plan(pdict):
     def _filter_sort(kv):
         return len(kv[1].inputs)
     @staticmethod
-    def _iter_layer_filters(layer):
-        "Iterates over the calcs in layer that filter their inputs."
-        calcs = sorted(layer.calcs.items(), key=plan._filter_sort)
-        for (nm,c) in calcs:
-            filts = set(c.inputs)
-            filts &= set(c.outputs)
-            if len(filts) > 0:
-                yield (nm, c, filts)
-    @staticmethod
-    def _separate_filters(layer):
-        "Separates a layer into a sequence of layers with ordered filters."
-        # Go through each calc in this layer that filters its inputs and figure
-        # out if we need a separate layer for it.
-        names = []
-        ins = layer.inputs
-        for (nm,c,filts) in plan._iter_filters(layer):
-            outs = ins.transient()
-            outs |= set(c.outputs)
-            outs = outs.persistent()
-            yield plan.Layer(ins, pdict(nm=c), outs)
-            ins = outs
-            names.append(nm)
-        if len(names) == 0:
-            # We didn't return any separate layers, so we just yield the
-            # original layer.
-            yield layer
-        else:
-            yield plan.Layer(ins, layer.calcs.dropall(names), layer.outputs)
-    @staticmethod
     def _find_trname(valnames, k, suffix=None):
         "Returns a new unique value name appropriate for internal translation."
         if suffix is not None:
