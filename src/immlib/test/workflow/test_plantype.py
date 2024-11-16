@@ -91,8 +91,9 @@ class TestWorkflowPlanType(TestCase):
     """Tests the immlib.workflow._plantype module."""
     def test_plantype(self):
         import numpy as np
-        from immlib.workflow import (planobject, plantype, calc)
-        import sys, io
+        from immlib.workflow import (
+            planobject, plantype, calc, is_plantype, is_planobject)
+        import sys, io, pickle
         # We can instantiate the plantype as normal:
         tri = TriangleData((0,0), (1,0), (0,1))
         # We've setup the class to print some messages the first time values get
@@ -175,6 +176,47 @@ class TestWorkflowPlanType(TestCase):
         with self.assertRaises(ValueError):
             ai = AutoInit(x=1, z='4')
         # planobjects can be serialized and deserialized:
-        import pickle
         tri = TriangleData((0,0), (1,0), (0,1))
         self.assertEqual(tri, pickle.loads(pickle.dumps(tri)))
+        # planobjects are by default only equal on the basis of their type and
+        # their inputs.
+        tri1 = TriangleData((0,0), (1,0), (0,1))
+        tri2 = TriangleData((0.0,0.0), (1.0,0.0), (0.0,1.0))
+        tri3 = TriangleData((0.1,0.0), (1.0,0.0), (0.0,1.0))
+        tri4 = ChildTri((0,0), (1,0), (0,1))
+        self.assertEqual(tri1, tri2)
+        self.assertNotEqual(tri2, tri3)
+        self.assertNotEqual(tri1, tri4)
+        self.assertEqual(hash(tri1), hash(tri2))
+        # We can turn planobjects into strings:
+        class SimpleObj(planobject):
+            @calc('x')
+            def filter_x(x):
+                return (int(x),)
+            @calc('z')
+            def calc_z(x, y):
+                return ((x*y),)
+        obj = SimpleObj(x=10.0, y=2.0)
+        self.assertEqual(str(obj), 'SimpleObj(x=<lazy>, y=2.0; z=<lazy>)')
+        self.assertTrue(
+            repr(obj).startswith(
+                f'{__name__}.SimpleObj(x=10, y=2.0; z=lazy(<'))
+        self.assertTrue(
+            repr(obj).endswith(
+                '>: waiting))'))
+        self.assertIsInstance(obj.x, int)
+        self.assertEqual(str(obj), 'SimpleObj(x=10, y=2.0; z=<lazy>)')
+        # If the class has no outputs, there is no semicolon.
+        class TrivialObj(planobject):
+            @calc('x')
+            def filter_x(x):
+                return (int(x),)
+        trivobj = TrivialObj(x=10.0)
+        self.assertEqual(str(trivobj), 'TrivialObj(x=<lazy>)')
+        self.assertEqual(trivobj.x, 10)
+        self.assertEqual(repr(trivobj), f'{__name__}.TrivialObj(x=10)') 
+        # There are tests for the objects and types also:
+        self.assertTrue(is_planobject(obj))
+        self.assertFalse(is_planobject(None))
+        self.assertTrue(is_plantype(SimpleObj))
+        self.assertFalse(is_plantype(type))

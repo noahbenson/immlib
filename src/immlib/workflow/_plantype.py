@@ -222,12 +222,16 @@ class planobject(plantype.planobject_base, metaclass=plantype):
         pd = object.__getattribute__(self, '__plandict__')
         p = pd.plan
         param_str = ", ".join(
-            f"{k}={pd[k]}" for k in p.inputs)
+            f"{k}={pd[k] if pd.is_ready(k) else '<lazy>'}"
+            for k in p.inputs)
         rest_str = ", ".join(
             f"{k}={pd[k] if pd.is_ready(k) else '<lazy>'}"
             for k in p.outputs if not k.startswith('_'))
         cls = type(self)
-        return f"{cls.__name__}({param_str}; {rest_str})"
+        if rest_str:
+            return f"{cls.__name__}({param_str}; {rest_str})"
+        else:
+            return f"{cls.__name__}({param_str})"
     def __repr__(self):
         pd = object.__getattribute__(self, '__plandict__')
         p = pd.plan
@@ -236,7 +240,10 @@ class planobject(plantype.planobject_base, metaclass=plantype):
         rest_str = ", ".join(
             f"{k}={repr(pd.getlazy(k))}" for k in p.outputs)
         cls = type(self)
-        return f"{cls.__module__}.{cls.__name__}({param_str}; {rest_str})"
+        if rest_str:
+            return f"{cls.__module__}.{cls.__name__}({param_str}; {rest_str})"
+        else:
+            return f"{cls.__module__}.{cls.__name__}({param_str})"
     def __eq__(self, other):
         if type(self) is not type(other):
             return False
