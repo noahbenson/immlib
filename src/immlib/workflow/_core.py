@@ -290,7 +290,9 @@ class calc:
         else:
             return to_pathcache(pathcache)
     @staticmethod
-    def _pathcache_woutsig(base_fn, *args, cache_path=None, **kw):
+    def _pathcache_woutsig(base_fn, *args, **kw):
+        cache_path = args[-1]
+        args = args[:-1]
         if cache_path is None or cache_path is False:
             return base_fn(*args, **kw)
         cp = to_pathcache(cache_path)

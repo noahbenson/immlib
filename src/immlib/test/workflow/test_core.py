@@ -261,7 +261,7 @@ class TestWorkflowCore(TestCase):
         """Tests that the pathcache argument works correctly."""
         # We make a temporary cache path directory for all of this:
         from tempfile import TemporaryDirectory
-        from immlib import calc
+        from immlib import calc, plan
         with TemporaryDirectory() as tmpdir:
             self.pc_runcount = 0
             @calc('outputval1', 'outputval2', pathcache=tmpdir)
@@ -284,3 +284,30 @@ class TestWorkflowCore(TestCase):
             self.assertEqual(d['outputval1'], 2)
             self.assertEqual(d['outputval2'], 0)
             self.assertEqual(self.pc_runcount, 2)
+            # We can also use pathcache=True and pass the tmpdir as a cache_path
+            # parameter.
+            self.pc_runcount = 0
+            @calc('outputval1', 'outputval2', pathcache=True)
+            def test_cache2(inputval1, inputval2):
+                self.pc_runcount = self.pc_runcount + 1
+                return (inputval1 // inputval2, inputval1 % inputval2)
+            p = plan(test=test_cache2)
+            # No cache_path, no caching.
+            d = p(inputval1=10, inputval2=3)
+            self.assertEqual(d['outputval1'], 3)
+            self.assertEqual(d['outputval2'], 1)
+            self.assertEqual(self.pc_runcount, 1)
+            d = p(inputval1=10, inputval2=3)
+            self.assertEqual(d['outputval1'], 3)
+            self.assertEqual(d['outputval2'], 1)
+            self.assertEqual(self.pc_runcount, 2)
+            # With a cache_path, it gets cached.
+            d = p(inputval1=10, inputval2=3, cache_path=tmpdir)
+            self.assertEqual(d['outputval1'], 3)
+            self.assertEqual(d['outputval2'], 1)
+            self.assertEqual(self.pc_runcount, 3)
+            d = p(inputval1=10, inputval2=3, cache_path=tmpdir)
+            self.assertEqual(d['outputval1'], 3)
+            self.assertEqual(d['outputval2'], 1)
+            self.assertEqual(self.pc_runcount, 3)
+
