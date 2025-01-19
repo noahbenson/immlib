@@ -9,7 +9,7 @@ import copy
 from collections.abc import Callable
 from collections import (defaultdict, namedtuple)
 from functools import (reduce, lru_cache, wraps, partial)
-from inspect import getfullargspec
+from inspect import getfullargspec, signature
 
 import numpy as np
 
@@ -41,25 +41,49 @@ def to_pathcache(obj):
     If the `obj` is `None`, then `None` is returned. However, a `joblib.Memory`
     object whose location parameter is `None` can be created by using the
     object `(None, opts)` where `opts` may be `None` or an empty dict.
+
+    The `joblib.Memory` constructor takes certain arguments; this function makes
+    one change to those arguments: the `verbose` option is by default 0 when
+    filtered through this function, meaning that no output will be printed
+    unless a `verbose` argument of greater than 0 is explicitly given.
     """
     from joblib import Memory
     from pathlib import Path
-    # If we have been given a Memory object, just return it.
-    if isinstance(obj, Memory): return obj
-    # Otherwise, check if we have been given options first.
-    if is_tuple(obj):
-        if   len(obj) == 1: (obj,opts) = (obj[0], {})
-        elif len(obj) == 2: (obj,opts) = obj
-        else: raise ValueError("only 1- or 2-tuples can become memcaches")
-        if opts is None: opts = {}
+    from ..util import args
+    # If we have been given a Memory object, just return it; otherwise, we check
+    # to parse the object into path or path + options.
+    if isinstance(obj, Memory):
+        return obj
+    elif is_tuple(obj):
+        n = len(obj)
+        if n == 1:
+            (obj,opts) = (obj[0], {})
+        elif n == 2:
+            (obj,opts) = obj
+        else:
+            raise ValueError("only 1- or 2-tuples can become pathcaches")
+        if opts is None:
+            opts = {}
+    elif isinstance(obj, args):
+        (obj,opts) = (obj.args, obj.kwargs)
+        if len(obj) == 1:
+            obj = obj[0]
+        else:
+            raise TypeError(
+                f"to_pathcache() takes exactly one argument ({len(obj)} given")
     else:
         opts = {}
+    # We change the default argument of verbose into 0 in this function because
+    # we don't want unintentional logging.
+    if 'verbose' not in opts:
+        opts['verbose'] = 0
     # Whether there were or were not any options, then we now have either a
     # string or pathlib path that we want to pass to the memory constructor.
     if isinstance(obj, Path) or isinstance(obj, str) or obj is None:
         return Memory(obj, **opts)
     else:
-        raise TypeError(f"location must be path, str, or None")
+        raise TypeError(
+            f"to_pathcache: arg must be path, str, or None; not {type(obj)}")
 @docwrap
 def to_lrucache(obj):
     """Returns an lru_cache function appropriate for the given object.
@@ -74,16 +98,23 @@ def to_lrucache(obj):
      * a positive integer indicating the number of most recently used items
        to keep in the cache.
     """
-    if   obj is lru_cache: return obj
-    elif obj is None: return None
+    if obj is lru_cache:
+        return obj
+    elif obj is None:
+        return None
     elif is_number(obj):
-        if   obj == 0: return None
-        elif obj == np.inf: return lru_cache(maxsize=None)
-        elif not is_integer(obj): raise TypeError("lru_cache size must be int")
-        elif obj < 1: raise ValueError("lrucache maxsize must be > 0")
-        else: return lru_cache(maxsize=obj)
-    elif callable(obj): return obj
-    else: raise TypeError(f"bad type for to_lrucache: {type(obj)}")
+        if obj == 0:
+            return None
+        elif obj == np.inf:
+            return lru_cache(maxsize=None)
+        elif not is_integer(obj):
+            raise TypeError("to_lrucache size must be an int")
+        elif obj < 1:
+            raise ValueError("to_lrucache size must be > 0")
+        else:
+            return lru_cache(maxsize=int(obj))
+    else:
+        raise TypeError(f"bad type for to_lrucache: {type(obj)}")
 def identfn(x):
     "The identify function; `identfn(x)` returns `x`."
     return x
@@ -98,36 +129,60 @@ def identfn(x):
 
 # calc #########################################################################
 class calc:
-    '''Class that represents a single calculation in a calc-plan.
+    '''Decorator type that represents a single calculation in a calc-plan.
     
     The `calc` class encapsulates data regarding the calculation of a single set
-    of data from a separate set of input data. The input parameters are
-    sometimes referred to as afferent values and the output variables are
-    sometimes referred to as efferent values.
+    of output values from a separate set of input values: a calculation
+    component that can be fit together with other such components to make a
+    calculation plan.
 
-    `@calc` is typically used as a decorator that indicates that the function
+    `@calc` by itself can be used as a decorator to indicate that the function
     that follows is a calculation component; calculation components can be
     combined to form `plan` objects, which can encapsulate a flexible workflow
-    of simple Python computations. When `@calc` is used as a decorator by
-    itself, then the calc is considered to have a single output value whose name
-    is the same as that of the function it decorates.
+    of Python computations. When `@calc` is used as a decorator by itself, then
+    the calc is considered to have a single output value whose name is the same
+    as that of the function it decorates.
     
     `@calc(names...)` accepts a string or strings that name the output values of
     the calc function. In this case, the decorated function must return either a
     tuple of thes values in the order they are given or a dictionary in which
     the keys are the same as the given names.
     
-    `@calc(None)` is a special instance in which the lazy argument is ignored
-    (it is forced to be `False`), no output values are expected, and the
-    calculation is always run when the input parameters are updated.
+    `@calc(None)` is a special instance which indicates that the lazy argument
+    is to be ignored (it is forced to be `False`), no output values are to be
+    produced by the function, and the calculation must always run when the input
+    parameters are updated.
     
-    The `calc` class starts by runnings its input through the `immlib.docwrap`
-    function in order to gather input information about it. The `'Inputs'` and
-    `'Outputs'` sections are tracked as documentation of the parameters and the
-    data that are produced. Users of calculation objects should run their
-    functions through `docwrap` manually themselves, however (if desired),
-    because the docwrap used by `calc` does not put function documentation in
-    the immlib namespace.
+    The `calc` class parses its inputs and outputs through the `immlib.docwrap`
+    function in order to collect documentation (see the `input_docs` and
+    `output_docs` attributes, below). The `'Inputs'` and `'Outputs'` sections
+    are tracked as the documentation of the parameters, and are required to be
+    formatted using numpy's documentation syntax. Users of calculation objects
+    should decorate their functions using `docwrap` manually themselves, however
+    (if desired), because the docwrap used by `calc` does not put function
+    documentation in the `immlib` namespace.
+
+    Caching for calculations requires some care. First, `immlib`'s `calc`- and
+    `plan`-based workflow system is designed to work best with `calc` objects
+    that are pure functions. A function `f(*args, **kw)` is pure if it has no
+    side-effects and if `f(*args1, **kw1) == f(*args2, **kw2)` is true whenever
+    `args1 == args2 and kw1 == kw2`. That is, `f` always produces the same
+    outputs when given the same inputs. Plans that contain unpure functions can
+    work fine in many contexts, but unpure calc objects will break caching
+    because the return value of a cached unpure calculation will always be the
+    same value, i.e. the value that is calculated and cached by the function the
+    first time it is called.
+
+    Second, the `calc` type has an option, `pathcache`, which can be set to an
+    explicit path to which all calculations run by the created `calc` object
+    will be saved, cached, and later uncached if re-requested. This is
+    occasionally appropriate for a particular compute environment, but a better
+    approach is typically to grant control of caching and cache paths to the
+    user who creates the `plandict` object downstream of the creation of the
+    `calc` objects. To enable this behavior, one should instead use the option
+    `pathcache=True`, which enables caching of calculations to a specific cache
+    path when provided by the user during the creation of the `plandict` (the
+    default is `False`, which disables path caching for the calculation).
 
     Parameters
     ----------
@@ -141,16 +196,16 @@ class calc:
     lazy : boolean, optional
         Whether the calculation unit should be calculated lazily (`True`) or
         eagerly (`False`) when a plandict is created. The default is `True`.
-    cache_memory : int, optional
+    lrucache : int, optional
         The number of recently calculated results to cache. If this value is 0,
-        then no memoization is done (the default). If `cache_memory` is an
+        then no memoization is done (the default). If `lrucache` is an
         integer greater than 0, then an LRU cache is used with a maxsize of
-        `cache_memory`. If `cache_memory` is `inf`, then all values are cached
+        `lrucache`. If `lrucache` is `inf`, then all values are cached
         indefinitely. Note that this cache is performed at the level of the
         calculation using Python's `functools` caching decorators.
-    cache_path : None or directory-name, optional
-        If `cache_path` is not `None` (the default), then cached results are
-        also cached to the given directory when possible. The `cache_path`
+    pathcache : None or directory-name, optional
+        If `pathcache` is not `None` (the default), then cached results are
+        also cached to the given directory when possible. The `pathcache`
         option may also be either a `pathlib.Path` object or a 2-tuple
         containing a path followed by options to the `joblib.Memory`
         constructor; see `to_pathcache` for more information.
@@ -163,14 +218,23 @@ class calc:
         The name of the calculation function.
     base_function : callable
         The original function, prior to decoration for caching.
-    cache_memory : None or lru_cache-like function
+    lrucache : None or lrucache-like
         Either `None`, indicating that no in-memory cache is being used by the
-        calculation directly, or the function used to wrap the `base_function`
-        for caching.
-    cache_path : None or joblib.Memory object
+        calculation directly, the number of least recently used objects to store
+        in the cache, or a function used to wrap the `base_function` of the calc
+        for caching. The `lrucache` parameter is filtered by the `to_lrucache`
+        function in order to convert it into a valid `functools.lru_cache` 
+        object.
+    pathcache : None or pathcache-like
         Either `None`, indicating that no filesystem cache is being used by the
-        calculation directly, or the `joblib.Memory` object that handles the
-        caching for the calculation.
+        calculation directly (or equivalently `False`), a path to which this
+        calc unit should cache directly, a `joblib.Memory` object to handle the
+        caching for the calculation, or `True`, indicating that caching should
+        be performed automatically using the `cache_path` input to the calc. If
+        `cache_path` is not already one of the inputs, it is added as an input
+        with the default value `None`. When automatic caching is performed, the
+        `cache_path` is automatically converted into a `joblib.Memory` object
+        using the `to_pathcache` function.
     function : callable
         The function itself.
     argspec : FullArgSpec
@@ -199,7 +263,7 @@ class calc:
 
     '''
     __slots__ = (
-        'name', 'base_function', 'cache_memory', 'cache_path',
+        'name', 'base_function', 'lrucache', 'pathcache',
         'function', 'argspec', 'inputs', 'outputs', 'defaults', 'lazy',
         'input_docs', 'output_docs')
     @staticmethod
@@ -217,21 +281,52 @@ class calc:
             kwonlyargs=tuple(spec.kwonlyargs),
             kwonlydefaults=calc._dict_persist(spec.kwonlydefaults),
             annotations=calc._dict_persist(spec.annotations))
-    @staticmethod
-    def _apply_caching(base_fn, cache_memory, cache_path):
-        # We assume that cache and cache_path have already been appropriately
-        # filtered by the to_lrucache and to_pathcache functions.
-        if cache_path is None:
-            fn = base_fn
+    @classmethod
+    def _interpret_pathcache(cls, pathcache):
+        if pathcache is None or pathcache is False:
+            return None
+        elif pathcache is True:
+            return True
         else:
-            fn = cache_path.cache(base_fn)
-        if cache_memory is not None:
-            fn = cache_memory(fn)
+            return to_pathcache(pathcache)
+    @staticmethod
+    def _pathcache_woutsig(base_fn, *args, cache_path=None, **kw):
+        if cache_path is None or cache_path is False:
+            return base_fn(*args, **kw)
+        cp = to_pathcache(cache_path)
+        cache_fn = cp.cache(base_fn)
+        return cache_fn(*args, **kw)
+    @staticmethod
+    def _pathcache_withsig(base_fn, sig, *args, **kw):
+        ba = sig.bind(*args, **kw)
+        ba.apply_defaults()
+        cp = ba.arguments['cache_path']
+        return calc._pathcache_woutsig(base_fn, *args, cache_path=cp, **kw)
+    @staticmethod
+    def _apply_caching(base_fn, argspec, lrucache, pathcache):
+        # We assume that cache and pathcache have already been appropriately
+        # filtered by the to_lrucache and to_pathcache functions.
+        if pathcache is None or pathcache is False:
+            # No caching requested, either for plandicts or globally.
+            fn = base_fn
+        elif pathcache is True:
+            # This means we are caching into the cache_path input, which may be
+            # implicitly given. We make a special function if we need to ignore
+            # (not pass along) the cache_path argument.
+            if 'cache_path' in argspec.args:
+                sig = signature(base_fn)
+                fn = partial(calc._pathcache_withsig, base_fn, sig)
+            else:
+                fn = partial(calc._pathcache_woutsig, base_fn)
+        else:
+            fn = pathcache.cache(base_fn)
+        if lrucache is not None:
+            fn = lrucache(fn)
         return fn
     @classmethod
     def _new(cls, fn, outputs,
              name=None, lazy=True, indent=None,
-             cache_memory=0, cache_path=None):
+             lrucache=0, pathcache=None):
         # Check the name.
         if name is None:
             name = fn.__module__ + '.' + fn.__name__
@@ -256,7 +351,7 @@ class calc:
             output_docs = pdict()
             fndoc = None
         # We make a new class that is a subtype of calc and that runs this
-        # specific function when called. This lets us update the documentation.
+        # specific function when called.
         class LambdaClass(cls):
             @wraps(fn)
             def __call__(self, *args, **kw):
@@ -269,14 +364,11 @@ class calc:
         # Save the base_function before we do anything to it.
         object.__setattr__(self, 'base_function', fn)
         # If there's a caching strategy here, use it.
-        cache_memory = to_lrucache(cache_memory)
-        object.__setattr__(self, 'cache_memory', cache_memory)
+        lrucache = to_lrucache(lrucache)
+        object.__setattr__(self, 'lrucache', lrucache)
         # If there's a cache path, note it.
-        cache_path = to_pathcache(cache_path)
-        object.__setattr__(self, 'cache_path', cache_path)
-        # Now save the function.
-        cache_fn = calc._apply_caching(fn, cache_memory, cache_path)
-        object.__setattr__(self, 'function', cache_fn)
+        pathcache = self._interpret_pathcache(pathcache)
+        object.__setattr__(self, 'pathcache', pathcache)
         # Get the argspec for the calculation function.
         spec = getfullargspec(fn)
         if spec.varargs is not None:
@@ -286,9 +378,12 @@ class calc:
         # Save this for future use.
         spec = calc._argspec_persist(spec)
         object.__setattr__(self, 'argspec', spec)
-        # Figure out the inputs from the argspec.
+        # Now save the function.
+        cache_fn = self._apply_caching(fn, spec, lrucache, pathcache)
+        object.__setattr__(self, 'function', cache_fn)
+        # Figure out the inputs from the argspec; we set them below, after we
+        # have checked the pathcache.
         inputs = pset(spec.args + spec.kwonlyargs)
-        object.__setattr__(self, 'inputs', inputs)
         # Check that the outputs are okay.
         outputs = tuple(outputs)
         for out in outputs:
@@ -302,6 +397,14 @@ class calc:
             if not arglst or not argdfs: continue
             arglst = arglst[-len(argdfs):]
             dflts.update(zip(arglst, argdfs))
+        # If pathcache is True, then cache_path is an implicit argument if not
+        # already included; add that here if necessary. This won't screw up the
+        # arguments when the eager_call is eventually made because the
+        # _apply_caching function handles this.
+        if pathcache is True and 'cache_path' not in inputs:
+            inputs = inputs.add('cache_path')
+            dflts['cache_path'] = None
+        object.__setattr__(self, 'inputs', inputs)
         object.__setattr__(self, 'defaults', pdict(dflts))
         # Save the laziness status and the documentations.
         object.__setattr__(self, 'lazy', bool(lazy))
@@ -311,9 +414,9 @@ class calc:
         return self
     def __new__(cls, *args,
                 name=None, lazy=True,
-                cache_memory=0, cache_path=None, indent=None):
-        kw = dict(name=name, lazy=lazy, cache_memory=cache_memory,
-                  cache_path=cache_path, indent=indent)
+                lrucache=0, pathcache=None, indent=None):
+        kw = dict(name=name, lazy=lazy, lrucache=lrucache,
+                  pathcache=pathcache, indent=indent)
         if len(args) == 0:
             # @calc(k1=v1...) :: calc(k1=v1...)(fn)
             # Special case where we are getting the output name from the
@@ -535,8 +638,8 @@ class calc:
         # Simple changes first.
         object.__setattr__(tr, 'name', self.name + f'.tr{hex(id(tr))}')
         object.__setattr__(tr, 'base_function', self.base_function)
-        object.__setattr__(tr, 'cache_memory', self.cache_memory)
-        object.__setattr__(tr, 'cache_path', self.cache_path)
+        object.__setattr__(tr, 'lrucache', self.lrucache)
+        object.__setattr__(tr, 'pathcache', self.pathcache)
         object.__setattr__(tr, 'argspec', self.argspec)
         object.__setattr__(tr, 'inputs', calc._tr_set(d, self.inputs, True))
         object.__setattr__(tr, 'outputs', calc._tr_tup(d, self.outputs, False))
@@ -572,23 +675,29 @@ class calc:
                 return res
         object.__setattr__(tr, 'function', wraps(fn)(_tr_fn_wrapper))
         return tr
-    def with_cache_memory(self, new_cache):
+    def with_lrucache(self, new_cache):
         "Returns a copy of a calc with a different in-memory cache strategy."
         new_cache = to_lrucache(new_cache)
+        if new_cache is self.lrucache:
+            return self
         new_calc = copy.copy(self)
-        object.__setattr__(new_calc, 'cache_memory', new_cache)
-        new_fn = calc._apply_caching(self.base_function, new_cache,
-                                     self.cache_path)
-        object.__setattr__(new_calc, 'function', new_fn)
+        object.__setattr__(new_calc, 'lrucache', new_cache)
+        fn = self.base_function
+        new_fn = calc._apply_caching(fn, new_cache, self.pathcache)
+        if fn is not new_fn:
+            object.__setattr__(new_calc, 'function', new_fn)
         return new_calc
-    def with_cache_path(self, new_path):
+    def with_pathcache(self, new_path):
         """Returns a copy of a calc with a different cache directory."""
-        new_cache = to_pathcache(new_path)
+        new_path = self._interpret_pathcache(new_path)
+        if new_cache is self.pathcache:
+            return self
         new_calc = copy.copy(self)
-        object.__setattr__(new_calc, 'cache_path', new_cache)
-        new_fn = calc._apply_caching(self.base_function,
-                                     self.cache_memory, new_cache)
-        object.__setattr__(new_calc, 'function', new_fn)
+        object.__setattr__(new_calc, 'pathcache', new_cache)
+        fn = self.base_function
+        new_fn = calc._apply_caching(fn, self.lrucache, new_cache)
+        if fn is not new_fn:
+            object.__setattr__(new_calc, 'function', new_fn)
         return new_calc
 @docwrap
 def is_calc(arg):
@@ -607,9 +716,10 @@ class plan(pdict):
     
     The `plan` class encapsulates individual functions that require parameters
     as inputs and produce outputs in the form of named values. Plan objects can
-    be called as functions with a dictionary and/or a list of keyword parameters
-    specifying their parameters; they always return a dictionary of the values
-    they calculate, even if they calculate only a single value.
+    be called as functions with a dictionary and/or a keyword arguments
+    providing the plan's parameters; they always return a type of lazy
+    dictionary called a `plandict` of the values they calculate, even if they
+    calculate only a single value.
 
     Superficially, a `plan` is a `pdict` object whose values must all be `calc`
     objects. However, under the hood, every `plan` object maintains a directed
@@ -617,25 +727,22 @@ class plan(pdict):
     objects such that it can create `plandict` objects that reify the outputs of
     the various calculations lazily.
 
-    The keys that are used in a plan must be strings and must obey the following
-    rules:
-      * Any key that begins with `'filter_'` must end with the name of an input
-        parameter to the plan, and its value must a function of one parameter or
-        a calc object whose only output is the value in question. Such an entry
-        is treated as a filter for the relevant input parameter.
-      * Any key that begins with `'default_'` must end with the name of an input
-        parameter to the plan, and its value is taken to be the default value of
-        the given parameter if no other default is found in the plan and if no
-        explicit value is provided.
-    Keys are not otherwise restricted, but `'calc_'` is suggested as a prefix
-    for standard calculations.
+    The keys that are used in a plan must be strings but are not otherwise
+    restricted.
 
     For a plan `p = plan(calc_key1=calc1, calc_key2=calc2, ...)`, a `plandict`
-    can be instantiated using the following syntax:
-      `pd = p(param1=val1, param2=val2, ...)`.
-    This `plandict` is an enhanced `lazydict` that evaluates components of the
-    plan as requested based on laziness requirements of the calculations in the
-    plan and on dictionary lookups of plan outputs.
+    can be instantiated using the following syntax::
+
+        pd = p(param1=val1, param2=val2, ...)
+
+    This `plandict` is an enhanced `ldict` that evaluates components of the plan
+    as requested based on laziness requirements of the calculations in the plan
+    and on dictionary lookups of plan outputs.
+
+    All plans implicitly contains the parameter `'cache_path'` with the default
+    value of `None`. This parameter is used by the plan's `plandict` objects, to
+    cache the outputs of calculations that were constructed with the option
+    `pathcache=True`.
 
     Attributes
     ----------
@@ -666,6 +773,7 @@ class plan(pdict):
     requirements : pset
         A `pset` of the names of the required calculations of the plan (i.e.,
         those with option `lazy=False`).
+
     '''
     # Subclasses ---------------------------------------------------------------
     CalcData = namedtuple(
@@ -766,7 +874,8 @@ class plan(pdict):
         clos = set(edges)
         while True:
             s = set((u1,v2) for (u1,v1) in clos for (u2,v2) in clos if v2 == u1)
-            if clos.issuperset(s): break
+            if clos.issuperset(s):
+                break
             clos |= s
         res = defaultdict(lambda:set())
         for (u,v) in clos:
@@ -1019,12 +1128,12 @@ class plandict(ldict):
     ----------
     plan : plan
         The `plan` object that is to be instantiated.
-    params : dict-like, optional
+    *params : dict-like, optional
         The dict-like object of the parameters of the `plan`. All and only
         `plan` parameters must be provided, after the `params` argument is
         merged with the `kwargs` options. This may be a `lazydict`, and this
         dict's laziness is respected as much as possible.
-    kwargs : optional keywords
+    **kwargs : optional keywords
         Optional keywords that are merged into `params` to form the set of
         parameters for the plan.
     
@@ -1036,10 +1145,6 @@ class plandict(ldict):
         The parameters that fulfill the plan. Note that these are the only keys
         in the `plandict` that can be updated using methods like `set` and
         `setdefault`.
-    calcs : pdict
-        A `lazydict` whose keys are the calculation names from `plan` and whose
-        values are the `lazydict`s that result from running the associated
-        calculation with this `plandict`'s parameters.
     """
     __slots__ = ('plan', 'inputs', '_calcdata', '_inputdata')
     def __new__(cls, *args, **kwargs):
@@ -1051,12 +1156,13 @@ class plandict(ldict):
                 "plandict() requires 1 argument that is a plan or plandict")
         (obj, args) = (args[0], args[1:])
         if is_plan(obj):
-            return cls._new_from_plan(obj, *args, **kwargs)
+            pd = cls._new_from_plan(obj, *args, **kwargs)
         elif isinstance(obj, plandict):
-            return cls._new_from_plandict(obj, *args, **kwargs)
+            pd = cls._new_from_plandict(obj, *args, **kwargs)
         else:
             raise TypeError(
                 "plandict(obj, ...) requires that obj be a plan or plandict")
+        return pd
     @classmethod
     def _new_from_plan(cls, plan, *args, **kwargs):
         # First, merge from left-to-right, respecting laziness. Then, run them

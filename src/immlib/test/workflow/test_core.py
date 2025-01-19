@@ -257,4 +257,30 @@ class TestWorkflowCore(TestCase):
         self.assertEqual(u['b'], 0.5)
         u = p(c=0.25, b=0.25, **tri)
         self.assertEqual(u['a'], 0.5)
-        
+    def test_pathcache(self):
+        """Tests that the pathcache argument works correctly."""
+        # We make a temporary cache path directory for all of this:
+        from tempfile import TemporaryDirectory
+        from immlib import calc
+        with TemporaryDirectory() as tmpdir:
+            self.pc_runcount = 0
+            @calc('outputval1', 'outputval2', pathcache=tmpdir)
+            def test_cache1(inputval1, inputval2):
+                self.pc_runcount = self.pc_runcount + 1
+                return (inputval1 // inputval2, inputval1 % inputval2)
+            d = test_cache1(10, 3)
+            self.assertEqual(d['outputval1'], 3)
+            self.assertEqual(d['outputval2'], 1)
+            self.assertEqual(self.pc_runcount, 1)
+            d = test_cache1(10, 3)
+            self.assertEqual(d['outputval1'], 3)
+            self.assertEqual(d['outputval2'], 1)
+            self.assertEqual(self.pc_runcount, 1)
+            d = test_cache1(10, 5)
+            self.assertEqual(d['outputval1'], 2)
+            self.assertEqual(d['outputval2'], 0)
+            self.assertEqual(self.pc_runcount, 2)
+            d = test_cache1(10, 5)
+            self.assertEqual(d['outputval1'], 2)
+            self.assertEqual(d['outputval2'], 0)
+            self.assertEqual(self.pc_runcount, 2)

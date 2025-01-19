@@ -1770,7 +1770,7 @@ class args(argstuple):
     def passto(self, fn):
         return fn(*self.args, **self.kwargs)
     def copy(self, args=None, kwargs=None):
-        """Returns a copy of the current """
+        """Returns a copy of the current `args`, potentially with updates."""
         if args is None:
             args = self.args
         if kwargs is None:
