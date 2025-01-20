@@ -261,6 +261,7 @@ class TestWorkflowCore(TestCase):
         """Tests that the pathcache argument works correctly."""
         # We make a temporary cache path directory for all of this:
         from tempfile import TemporaryDirectory
+        from joblib import Memory
         from immlib import calc, plan
         with TemporaryDirectory() as tmpdir:
             self.pc_runcount = 0
@@ -309,5 +310,36 @@ class TestWorkflowCore(TestCase):
             d = p(inputval1=10, inputval2=3, cache_path=tmpdir)
             self.assertEqual(d['outputval1'], 3)
             self.assertEqual(d['outputval2'], 1)
+            self.assertEqual(self.pc_runcount, 3)
+            # We can also test the version of this where we include cache_path
+            # as an input parameter.
+            self.pc_runcount = 0
+            @calc('outputval1', 'outputval2', 'out_cpath', pathcache=True)
+            def test_cache3(inputval1, inputval2, cache_path=None):
+                self.pc_runcount = self.pc_runcount + 1
+                return (inputval1 // inputval2, inputval1 % inputval2,
+                        cache_path)
+            p = plan(test=test_cache3)
+            # No cache_path, no caching.
+            d = p(inputval1=10, inputval2=3)
+            self.assertEqual(d['outputval1'], 3)
+            self.assertEqual(d['outputval2'], 1)
+            self.assertEqual(d['out_cpath'], None)
+            self.assertEqual(self.pc_runcount, 1)
+            d = p(inputval1=10, inputval2=3)
+            self.assertEqual(d['outputval1'], 3)
+            self.assertEqual(d['outputval2'], 1)
+            self.assertEqual(d['out_cpath'], None)
+            self.assertEqual(self.pc_runcount, 2)
+            # With a cache_path, it gets cached.
+            d = p(inputval1=10, inputval2=3, cache_path=tmpdir)
+            self.assertEqual(d['outputval1'], 3)
+            self.assertEqual(d['outputval2'], 1)
+            self.assertEqual(d['out_cpath'], tmpdir)
+            self.assertEqual(self.pc_runcount, 3)
+            d = p(inputval1=10, inputval2=3, cache_path=tmpdir)
+            self.assertEqual(d['outputval1'], 3)
+            self.assertEqual(d['outputval2'], 1)
+            self.assertEqual(d['out_cpath'], tmpdir)
             self.assertEqual(self.pc_runcount, 3)
 
