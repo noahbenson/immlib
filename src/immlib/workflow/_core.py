@@ -119,15 +119,9 @@ def identfn(x):
     "The identify function; `identfn(x)` returns `x`."
     return x
 
-################################################################################
-# The calc, plan, and plandict classes
-
-#TODO: make cache_memory and cache_path work with plans:
-# if cache_path=True or cache_memory=True, then that caching is done at the plan
-# level, with the plan's cache_path giving the calc a cache location, and the
-# plan's cache_memory giving the calc a lru_cache if requested.
 
 # calc #########################################################################
+
 class calc:
     '''Decorator type that represents a single calculation in a calc-plan.
     
@@ -1106,7 +1100,7 @@ def is_plan(arg):
     return isinstance(arg, plan)
 
 
-# #plandict ####################################################################
+# plandict #####################################################################
 
 class plandict(ldict):
     """A persistent dict type that manages the outputs of executing a plan.
