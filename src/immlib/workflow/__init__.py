@@ -13,7 +13,8 @@ from ._core import (
     plan,
     is_plan,
     plandict,
-    is_plandict)
+    is_plandict,
+    is_tplandict)
 
 from ._plantype import (
     plantype,
@@ -30,6 +31,7 @@ __all__ = (
     "is_plan",
     "plandict",
     "is_plandict",
+    "is_tplandict",
     "plantype",
     "planobject",
     "is_plantype",

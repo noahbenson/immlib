@@ -14,7 +14,7 @@ from inspect import getfullargspec, signature
 import numpy as np
 
 from pcollections import (
-    pdict, tdict, ldict,
+    pdict, tdict, ldict, tldict,
     lazy, holdlazy,
     pset, tset,
     plist)
@@ -769,7 +769,6 @@ class plan(pdict):
     requirements : pset
         A `pset` of the names of the required calculations of the plan (i.e.,
         those with option `lazy=False`).
-
     '''
     # Subclasses ---------------------------------------------------------------
     CalcData = namedtuple(
@@ -835,13 +834,61 @@ class plan(pdict):
         return calctup
     @staticmethod
     def _update_calctup(calcdata, inputtup, calctup, cidx):
-        f = plan._call_calc
         calctup[cidx] = lazy(
             plan._call_calc,
             inputtup, calctup,
             calcdata.calcs[cidx],
             calcdata.args[cidx])
         return calctup
+    def _update_dictdata(self, inputtup, calctup, updates):
+        calcdata = self.calcdata
+        sources = calcdata.sources
+        dependants = self.dependants
+        valsources = self.valsources
+        calc_updates = set()
+        # We're outputting/building-up new_inputtup and new_calctup from the
+        # inputtup and calctup values.
+        # We use some sleight of hand in this function:
+        # The a = lazy(fn, arg) construct makes a closure over the value of arg.
+        # The b = lambda:fn(arg) construct makes a closure over the symbol arg.
+        # This means that if arg is updated after both of these lines, then
+        # a() will return fn(original_value) and b() will return fn(new_value).
+        # We can use this to change calctup as we go.
+        new_inputtup = list(inputtup)
+        new_calctup = list(calctup)
+        items = tldict.empty()
+        for (k,v) in holdlazy(updates).items():
+            iidx = sources[k]
+            new_inputtup[iidx] = v if isinstance(v, lazy) else lazy(identfn, v)
+            calc_updates.update(dependants[k].calcs)
+            # Create a new plandict item for the new input value.
+            src = valsources[k]
+            if isinstance(src, tuple):
+                # This input gets filtered, so we need a lazy lookup using a 
+                # lambda that makes a clojure over the new_calctup symbol, which
+                # will get updated as we go.
+                v = lazy(
+                    lambda ii,src: plan._source_lookup(ii, new_calctup, src),
+                    new_inputtup, src)
+            items[k] = v
+        new_inputtup = tuple(new_inputtup)
+        output_updates = set()
+        for cidx in calc_updates:
+            calc = calcdata.calcs[cidx]
+            new_calctup[cidx] = lazy(
+                lambda ii, c, a: plan._call_calc(ii, new_calctup, c, a),
+                new_inputtup, # new_calctup, # <-- here ^
+                calc,
+                calcdata.args[cidx])
+            output_updates.update(calc.outputs)
+        new_calctup = tuple(new_calctup)
+        outputs = self.outputs
+        for k in output_updates:
+            if k not in outputs:  # Skip the internal/translated outputs.
+                continue
+            src = self.valsources[k]
+            items[k] = lazy(plan._source_lookup, new_inputtup, new_calctup, src)
+        return (inputtup, calctup, items.persistent())
     @staticmethod
     def _make_srcs_args(names, calcs, params):
         args = []
@@ -849,8 +896,8 @@ class plan(pdict):
         for (cidx,(nm,c)) in enumerate(zip(names, calcs)):
             # Wire up the inputs/arguments:
             a = []
-            for ii in c.inputs:
-                a.append(srcs[ii])
+            for k in c.inputs:
+                a.append(srcs[k])
             args.append(tuple(a))
             # And the outputs/sources.
             for (oidx, oo) in enumerate(c.outputs):
@@ -869,7 +916,12 @@ class plan(pdict):
     def _transitive_closure(edges):
         clos = set(edges)
         while True:
-            s = set((u1,v2) for (u1,v1) in clos for (u2,v2) in clos if v2 == u1)
+            s = set(
+                (u1,v2)
+                for (u1,v1) in clos
+                for (u2,v2) in clos
+                if u2 == v1
+                if u1 != v2)
             if clos.issuperset(s):
                 break
             clos |= s
@@ -1009,12 +1061,15 @@ class plan(pdict):
             (srcs, args) = plan._make_srcs_args(names, calcs, params)
             calcdata = plan.CalcData(names, calcs, args, srcs, calcidx)
             valsources = srcs
+            tr = {}
+            itr = {}
         else:
             # We need to do two things: (1) make a plan out of the unfiltered
             # calcs (i.e., separate inputs and outputs of each filter calc into
             # different variables and link them up across calculations), and (2)
             # make a translation for the output values.
             tr = {}
+            itr = {}
             valnames = set(val2calc.keys())
             new_calcs = []
             for (nm,c) in zip(names, calcs):
@@ -1025,9 +1080,11 @@ class plan(pdict):
                     new_k = plan._find_trname(valnames, k, nm)
                     valnames.add(new_k)
                     tr[f] = new_k
+                    itr[new_k] = f
                     calctr[f] = (k, new_k)
                 new_calcs.append(c.tr(tr, calctr))
             (srcs, args) = plan._make_srcs_args(names, new_calcs, params)
+            new_calcs = tuple(new_calcs)
             calcdata = plan.CalcData(names, new_calcs, args, srcs, calcidx)
             valsrcs = tdict()
             for k in valnames:
@@ -1049,7 +1106,7 @@ class plan(pdict):
                 depset.add((cidx, k))
         depgraph = plan._transitive_closure(depset)
         deps = tdict()
-        for k in c.inputs:
+        for k in inputs:
             odeps = []
             cdeps = []
             for d in depgraph[k]:
@@ -1057,6 +1114,8 @@ class plan(pdict):
                     odeps.append(d)
                 else:
                     cdeps.append(d)
+            # Translate to original key name (not dep key)
+            k = itr.get(k, k)
             deps[k] = plan.DepData(tuple(odeps), tuple(cdeps))
         dependants = deps.persistent()
         # Now set all the variables, and we're done!
@@ -1087,9 +1146,13 @@ class plan(pdict):
         # Make and return a plandict with these parameters.
         return plandict(self, *args, **kwargs)
     def __str__(self):
-        return f"plan(<{len(self.calcs)} calcs>, <{len(self.inputs)} params>)"
+        n = len(self.calcdata.calcs)
+        m = len(self.inputs)
+        return f"plan(<{n} calcs>, <{m} params>)"
     def __repr__(self):
-        return f"plan(<{len(self.calcs)} calcs>, <{len(self.inputs)} params>)"
+        n = len(self.calcdata.calcs)
+        m = len(self.inputs)
+        return f"plan(<{n} calcs>, <{m} params>)"
 @docwrap
 def is_plan(arg):
     """Determines if an object is a `plan` instance.
@@ -1135,8 +1198,9 @@ class plandict(ldict):
     
     Attributes
     ----------
-    plan : plan
-        The plan object on which this plandict is based.
+    plan : immlib.plan
+        The plan object on which this plandict is based or alternatively a
+        `plandict` or object to copy.
     inputs : pdict
         The parameters that fulfill the plan. Note that these are the only keys
         in the `plandict` that can be updated using methods like `set` and
@@ -1153,12 +1217,33 @@ class plandict(ldict):
         (obj, args) = (args[0], args[1:])
         if is_plan(obj):
             pd = cls._new_from_plan(obj, *args, **kwargs)
-        elif isinstance(obj, plandict):
+        elif isinstance(obj, (plandict, tplandict)):
             pd = cls._new_from_plandict(obj, *args, **kwargs)
         else:
             raise TypeError(
                 "plandict(obj, ...) requires that obj be a plan or plandict")
         return pd
+    @classmethod
+    def _new_plandict(cls, items, plan, params, calctup, inputtup):
+        self = ldict.__new__(cls, items)
+        # params needs to be a pdict (not a tdict)
+        if isinstance(params, tdict):
+            params = params.persistent()
+        elif not isinstance(params, pdict):
+            raise ValueError("plandict received non-pdict inputs")
+        # And set our special member-values.
+        object.__setattr__(self, 'plan', plan)
+        object.__setattr__(self, 'inputs', params)
+        object.__setattr__(self, '_calcdata', calctup)
+        object.__setattr__(self, '_inputdata', inputtup)
+        # At this point, the object should be entirely initialized, so we can go
+        # ahead and run its required calculations.
+        calcdata = plan.calcdata
+        for r in plan.requirements:
+            cidx = calcdata.index[r]
+            calctup[cidx]()
+        # That's all; just return the object.
+        return self
     @classmethod
     def _new_from_plan(cls, plan, *args, **kwargs):
         # First, merge from left-to-right, respecting laziness. Then, run them
@@ -1188,8 +1273,8 @@ class plandict(ldict):
         # Go ahead and do the initialization.
         items = ldict.empty.transient()
         for k in plan.inputs:
-            # If this input gets filtered, we need a lazy lookup:
             src = plan.valsources[k]
+            # If this input gets filtered, we need a lazy lookup:
             if isinstance(src, tuple):
                 v = lazy(plan._source_lookup, inputtup, calctup, src)
             else:
@@ -1198,19 +1283,8 @@ class plandict(ldict):
         for k in plan.outputs:
             src = plan.valsources[k]
             items[k] = lazy(plan._source_lookup, inputtup, calctup, src)
-        self = super(plandict, cls).__new__(cls, items)
-        # And set our special member-values.
-        object.__setattr__(self, 'plan', plan)
-        object.__setattr__(self, 'inputs', params)
-        object.__setattr__(self, '_calcdata', calctup)
-        object.__setattr__(self, '_inputdata', inputtup)
-        # Finally, now that we have the object entirely initialized, we can run
-        # the required calculations.
-        for r in plan.requirements:
-            cidx = plan.calcdata.index[r]
-            calctup[cidx]()
-        # That's all!
-        return self
+        # We can now make and return the object (this also runs requirements).
+        return cls._new_plandict(items, plan, params, calctup, inputtup)
     @classmethod
     def _new_from_plandict(cls, pd, *args, **kwargs):
         plan = pd.plan
@@ -1218,51 +1292,20 @@ class plandict(ldict):
         if len(args) == 0 and len(kwargs) == 0:
             return pd
         # First, merge from left-to-right, respecting laziness.
-        params = merge(pd.inputs, *args, **kwargs)
-        paramkeys = set(params.keys())
+        param_updates = merge(*args, **kwargs)
         # There must only be parameters here.
-        extras = paramkeys - plan.inputs
-        if len(extras) > 0:
+        planins = plan.inputs
+        if any(k not in planins for k in param_updates.keys()):
+            extras = set(params_updates.keys()) - plan.inputs
             raise ValueError(f"unrecognized inputs: {tuple(extras)}")
-        # Make a new inputtup and calctup.
-        inputtup = list(pd._inputdata)
-        pparams = holdlazy(params)
-        allvals = set()
-        allcals = set()
-        for (ii,k) in enumerate(plan.inputs):
-            if k in pparams:
-                v = pparams[k]
-                inputtup[ii] = v if isinstance(v, lazy) else lazy(identfn, v)
-                (vals, cidcs) = plan.dependants[k]
-                allcals.update(cidcs)
-                allvals.update(vals)
-                allvals.add(k)
-        inputtup = tuple(inputtup)
-        calctup = list(pd._calcdata)
-        for cidx in allcals:
-            plan._update_calctup(calcdata, inputtup, calctup, cidx)
-        calctup = tuple(calctup)
-        items = pd.transient()
-        for k in allvals:
-            src = plan.valsources[k]
-            if isinstance(src, tuple):
-                v = lazy(plan._source_lookup, inputtup, calctup, src)
-            else:
-                v = pparams[k]
-            items[k] = v
-        # Allocate the lazy dict.
-        self = super(plandict, cls).__new__(cls, items)
-        # And set our special member-values.
-        object.__setattr__(self, 'plan', plan)
-        object.__setattr__(self, 'inputs', params)
-        object.__setattr__(self, '_calcdata', calctup)
-        object.__setattr__(self, '_inputdata', inputtup)
-        # Finally, now that we have the object entirely initialized, we can run
-        # the required calculations.
-        for r in plan.requirements:
-            cidx = plan.calcdata.index[r]
-            calctup[cidx]()
-        return self
+        # Make a new inputtup, calctup, and updates to the items dict.
+        (inputtup, calctup, items) = plan._update_dictdata(
+            pd._inputdata,
+            pd._calcdata,
+            param_updates)
+        inputs = merge(pd.inputs, param_updates)
+        items = merge(pd, items)
+        return cls._new_plandict(items, plan, inputs, calctup, inputtup)
     def set(self, k, v):
         return plandict(self, {k:v})
     def setdefault(self, k, v=None):
@@ -1271,6 +1314,136 @@ class plandict(ldict):
         return self.set(k, v)
     def delete(self, k):
         raise TypeError("cannot delete from a plandict")
+    def transient(self):
+        return tplandict(self)
+
+class tplandict(tldict):
+    """A transient dict type that follows an `immlib` plan.
+
+    See `immlib.plandict` and `immlib.plan` for more information about `immlib`
+    plans and workflows. The `tplandict` type is a transient counterpart to the
+    persistent `plandict` type. A `tplandict` object can be created from a
+    `plandict` object `pd` using either the syntax `td = tplandict(pd)` or `td =
+    pd.transient()`. The keys corresponding to the inputs of the plan can be
+    changed in the resulting `tplandict` object, and the downstream outputs of
+    the plan will be automatically updated as these are changed. A `plandict`
+    can be recreated using either the syntax `plandict(td)` or `td.transient()`.
+
+    Parameters
+    ----------
+    plan : plan
+        The `plan` object that is to be instantiated or alternatively a
+        `plandict` or `tplandict` object to copy.
+    *params : dict-like, optional
+        The dict-like object of the parameters of the `plan`. All and only
+        `plan` parameters must be provided, after the `params` argument is
+        merged with the `kwargs` options. This may be a `lazydict`, and this
+        dict's laziness is respected as much as possible.
+    **kwargs : optional keywords
+        Optional keywords that are merged into `params` to form the set of
+        parameters for the plan.
+    
+    Attributes
+    ----------
+    plan : plan
+        The plan object on which this tplandict is based.
+    inputs : pdict
+        The parameters that fulfill the plan. Note that these are the only keys
+        in the `tplandict` that can be updated directly.
+    """
+    __slots__ = ('plan', 'inputs', '_calcdata', '_inputdata')
+    def __new__(cls, *args, **kwargs):
+        # There are two valid ways to call plandict(): plandict(planobj, params)
+        # and plandict(plandictobj, new_params). We call different classmethods
+        # for each version.
+        if len(args) == 0:
+            raise TypeError(
+                "tplandict() requires 1 argument that is a plan or plandict")
+        (obj, args) = (args[0], args[1:])
+        if is_plan(obj):
+            pd = plandict(obj, *args, **kwargs)
+        elif isinstance(obj, tplandict):
+            pd = obj.persistent()
+        else:
+            pd = obj
+        if not isinstance(obj, plandict):
+            raise TypeError(
+                "tplandict(obj, ...) requires that obj be a plan or plandict")
+        plan = pd.plan
+        calcdata = plan.calcdata
+        # First, merge from left-to-right, respecting laziness.
+        param_updates = merge(*args, **kwargs)
+        # There must only be parameters here.
+        planins = plan.inputs
+        if any(k not in planins for k in param_updates.keys()):
+            extras = set(params_updates.keys()) - plan.inputs
+            raise ValueError(f"unrecognized inputs: {tuple(extras)}")
+        # Make a new inputtup, calctup, and update the items dict.
+        (inputtup, calctup, items) = plan._update_dictdata(
+            pd._inputdata,
+            pd._calcdata,
+            param_updates)
+        inputs = pd.inputs
+        # Inputs stays a pdict because we don't want to allow the user to update
+        # them directly.
+        inputs = inputs.update(param_updates)
+        items = merge(pd, items)
+        return cls._new_tplandict(items, plan, inputs, calctup, inputtup)
+    @classmethod
+    def _new_tplandict(cls, items, plan, params, calctup, inputtup):
+        self = tldict.__new__(cls, items)
+        # params needs to be a tdict (not a pdict)
+        if isinstance(params, tdict):
+            params = params.persistent()
+        elif not isinstance(params, pdict):
+            raise ValueError("tplandict received non-pdict inputs")
+        # And set our special member-values.
+        object.__setattr__(self, 'plan', plan)
+        object.__setattr__(self, 'inputs', params)
+        object.__setattr__(self, '_calcdata', calctup)
+        object.__setattr__(self, '_inputdata', inputtup)
+        # At this point, the object should be entirely initialized, so we can go
+        # ahead and run its required calculations.
+        calcdata = plan.calcdata
+        for r in plan.requirements:
+            cidx = calcdata.index[r]
+            calctup[cidx]()
+        # That's all; just return the object.
+        return self
+    def __setitem__(self, k, v):
+        vv = holdlazy(self.inputs).get(k, self)
+        if vv is self:
+            raise ValueError(f"cannot set non-input key in tplandict: {k}")
+        elif vv is v:
+            # No change; just return.
+            return
+        plan = self.plan
+        # First, we reset any calculation that relies on this value and update
+        # the calctup / inputtup and items.
+        (inputtup, calctup, items) = plan._update_dictdata(
+            self._inputdata,
+            self._calcdata,
+            {k:v})
+        # Next, we next need to reset the downstream items.
+        for kk in items.keys():
+            tldict.__setitem__(self, kk, items.getlazy(kk))
+        # Before we return, we change the object's values.
+        object.__setattr__(self, 'inputs', self.inputs.set(k, v))
+        object.__setattr__(self, '_inputdata', inputtup)
+        object.__setattr__(self, '_calcdata', calctup)
+        # Finally, we need to rerun any requirements that were changed.
+        calcdataidx = plan.calcdata.index
+        for r in plan.requirements:
+            cidx = calcdataidx[r]
+            calctup[cidx]()
+    def __delitem__(self, k):
+        raise TypeError("cannot delete items from tplandict objects")
+    def setdefault(self, k, default=None, /):
+        # All possible keys to set are already set in a plandict, so just return
+        # the current value of key k
+        return self[k]
+    def persistent(self):
+        return plandict(self)
 @docwrap
 def is_plandict(arg):
     """Determines if an object is a `plandict` instance.
@@ -1279,3 +1452,11 @@ def is_plandict(arg):
     otherwise.
     """
     return isinstance(arg, plandict)
+@docwrap
+def is_tplandict(arg):
+    """Determines if an object is a `tplandict` instance.
+
+    `is_tplandict(x)` returns `True` if `x` is a `tplandict` object and `False`
+    otherwise.
+    """
+    return isinstance(arg, tplandict)

@@ -7,12 +7,13 @@
 
 import inspect
 from functools import wraps
+from copy import copy
 
 from pcollections import (pdict, ldict, lazy)
 
 from ..doc import docwrap
-from ..util import (is_str, is_pdict, is_ldict, assoc, merge)
-from ._core import (calc, plan, plandict, is_calc)
+from ..util import (is_str, is_pdict, is_tdict, is_ldict, assoc, merge)
+from ._core import (calc, plan, plandict, tplandict, is_calc)
 
 
 # #plantype ####################################################################
@@ -51,20 +52,25 @@ class plantype(type):
             else:
                 return r
         def __setattr__(self, k, v):
-            pd = object.__getattribute__(self, '__plandict__')
-            if type(pd) is dict:
-                plan = type(self).plan
+            pd = self.__plandict__
+            pdtype = type(pd)
+            plan = type(self).plan
+            if pdtype is dict or pdtype is tplandict:
                 if k not in plan.inputs:
-                    raise ValueError(
-                        "only planobject inputs may be set in the __init__"
-                        "method")
+                    msg = "only planobject inputs may be mutated in "
+                    if pdtype is dict:
+                        msg += "the __init__ method"
+                    else:
+                        msg += "transient planobjects"
+                    raise ValueError(msg)
                 pd[k] = v
             else:
                 raise TypeError(f"type {type(self)} is immutable")
         def __delattr__(self, k):
             pd = object.__getattribute__(self, '__plandict__')
             if type(pd) is dict:
-                raise TypeError(f"cannot delete attributes from plantype: {type(self)}")
+                raise TypeError(
+                    f"cannot delete attributes from plantype: {type(self)}")
             else:
                 raise TypeError(f"type {type(self)} is immutable")
         def __new__(cls, *args, **kwargs):
@@ -104,7 +110,7 @@ class plantype(type):
             # If the plandict is not a mutable dictionary, we have already been
             # initialized.
             pd = self.__plandict__
-            if is_pdict(pd):
+            if is_pdict(pd) or is_tdict(pd):
                 raise RuntimeError(
                     "_init_wrapper method called on an already-initialized"
                     " planobject")
@@ -140,6 +146,7 @@ class plantype(type):
         sup = super(plantype, cls)
         # Before we go too far, let's extract the valid args from kwargs.
         initplan = kwargs.pop('plan', None)
+        inittrans = kwargs.pop('transient', False)
         if len(kwargs) > 0:
             ks = tuple(kwargs.keys())
             raise ValueError(f"unsupported type options: {ks}")
@@ -261,6 +268,39 @@ class planobject(plantype.planobject_base, metaclass=plantype):
         obj = object.__new__(self.__class__)
         object.__setattr__(obj, '__plandict__', pd)
         return obj
+    def transient(self):
+        """Returns a transient copy of the planobject."""
+        pd = self.__plandict__
+        if pd is None or isinstance(pd, dict):
+            raise RuntimeError(
+                f"cannot create transient copy during initialization")
+        c = copy(self)
+        object.__setattr__(c, '__plandict__', tplandict(pd))
+        return c
+    def persistent(self):
+        """Returns a persistent copy of the planobject. If the planobject is
+        already persistent, it is returned unchanged.
+        """
+        pd = self.__plandict__
+        if pd is None or isinstance(pd, dict):
+            raise RuntimeError(
+                f"cannot create persistent copy during initialization")
+        elif isinstance(pd, plandict):
+            # Already persistent.
+            return self
+        elif not isinstance(pd, tplandict):
+            raise ValueError(f"unknown plandict type: {type(pd)}")
+        c = copy(self)
+        object.__setattr__(c, '__plandict__', pd.persistent())
+        return c
+    def is_persistent(self):
+        """Returns `True` if the planobject is persistent and `False` if it is
+        transient."""
+        pd = self.__plandict__
+        if pd is None or isinstance(pd, dict):
+            return type(self).init_transient
+        else:
+            return isinstance(pd, plandict)
 
 
 # Utilities ####################################################################
