@@ -12,6 +12,7 @@ from functools import (wraps, partial)
 import pint
 import numpy as np
 import scipy.sparse as sps
+from pcollections import holdlazy
 
 from ..doc import docwrap
 
@@ -1570,9 +1571,9 @@ def merge(*args, **kw):
 
     `merge(...)` collapses all arguments, which must be python `Mapping` objects
     of some kind, into a single mapping from left-to-right. The mapping that is
-    returned depends on the inputs: if any of the input mappings are lazydict
-    objects, then a lazydict is returned (and the laziness of arguments is
-    respected); otherwise, a frozendict object is retuend.
+    returned depends on the inputs: if any of the input mappings are `ldict`
+    objects, then an `ldict` is returned (and the laziness of arguments is
+    respected); otherwise, a `pdict` object is retuend.
 
     Note that optional keyword arguments may be passed; these are considered the
     right-most dictionary argument.
@@ -1582,11 +1583,11 @@ def merge(*args, **kw):
     # Make the initial dictionary.
     res = args[0]
     lazy = is_ldict(res)
-    res = tdict(res)
+    res = tdict(holdlazy(res) if lazy else res)
     for d in args[1:]:
         if is_ldict(d):
             lazy = True
-            res.update(d.as_pdict())
+            res.update(holdlazy(d))
         else:
             res.update(d)
     res.update(kw)
@@ -1611,7 +1612,7 @@ def rmerge(*args, **kw):
     for d in reversed(args):
         if is_ldict(d):
             lazy = True
-            res.update(d.as_pdict())
+            res.update(holdlazy(d))
         else:
             res.update(d)
     return ldict(res) if lazy else pdict(res)
