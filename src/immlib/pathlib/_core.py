@@ -295,7 +295,7 @@ def s3path(obj, *args, **kwargs):
         if client is None:
             client = obj.client
     else:
-        # If there's no '://' in the path, then we add 'osf://' to the front.
+        # If there's no '://' in the path, then we add 's3://' to the front.
         obj = pathstr(obj)
         if scheme_sep not in obj:
             obj = 's3://' + obj
