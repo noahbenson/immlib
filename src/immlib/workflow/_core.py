@@ -1404,7 +1404,9 @@ class tplandict(tldict):
         return cls._new_tplandict(items, plan, inputs, calctup, inputtup)
     @classmethod
     def _new_tplandict(cls, items, plan, params, calctup, inputtup):
-        self = tldict.__new__(cls, items)
+        # We make a new tplandict, but we don't initialize items here--we do
+        # that below.
+        self = tldict.__new__(cls)
         # params needs to be a tdict (not a pdict)
         if isinstance(params, tdict):
             params = params.persistent()
@@ -1415,6 +1417,9 @@ class tplandict(tldict):
         object.__setattr__(self, 'inputs', params)
         object.__setattr__(self, '_calcdata', calctup)
         object.__setattr__(self, '_inputdata', inputtup)
+        # Now we add items.
+        for (k,v) in holdlazy(items).items():
+            tldict.__setitem__(self, k, v)
         # At this point, the object should be entirely initialized, so we can go
         # ahead and run its required calculations.
         calcdata = plan.calcdata
