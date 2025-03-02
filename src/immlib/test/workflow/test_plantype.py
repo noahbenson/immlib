@@ -58,14 +58,14 @@ class TriangleData(planobject):
             The height of the triangle a-b-c.
         '''
         print('Calculating base...')
-        xs = [a[0], b[0], c[0]]
-        xmin = min(xs)
-        xmax = max(xs)
+        # We pick AB as the base.
+        base = b - a
+        baselen = np.hypot(base[0], base[1])
+        ubase = base / baselen
         print('Calculating height...')
-        ys = [a[1], b[1], c[1]]
-        ymin = min(ys)
-        ymax = max(ys)
-        return (xmax - xmin, ymax - ymin)
+        uortho = np.array([[0,-1],[1,0]]) @ ubase
+        height = np.abs(np.dot(uortho, c - a))
+        return (baselen, height)
     @calc('area')
     def calc_triangle_area(base, height):
         '''calc_triangle_are computes the area of a triangle with a
@@ -85,7 +85,15 @@ class TriangleData(planobject):
         '''
         print('Calculating area...')
         return {'area': base * height * 0.5}
-
+    def __eq__(self, other):
+        if not isinstance(other, TriangleData):
+            return False
+        return (
+            np.array_equal(self.a, other.a) and
+            np.array_equal(self.b, other.b) and
+            np.array_equal(self.c, other.c))
+    def __hash__(self):
+        return super().__hash__()
 
 class TestWorkflowPlanType(TestCase):
     """Tests the immlib.workflow._plantype module."""
@@ -188,6 +196,22 @@ class TestWorkflowPlanType(TestCase):
         self.assertNotEqual(tri2, tri3)
         self.assertNotEqual(tri1, tri4)
         self.assertEqual(hash(tri1), hash(tri2))
+        # A planobject can be made transient and a transient one can be made
+        # persistent again.
+        ttri1 = tri1.transient()
+        self.assertEqual(tri1, ttri1)
+        self.assertTrue(tri1.is_persistent())
+        self.assertFalse(ttri1.is_persistent())
+        self.assertTrue(np.array_equal(ttri1.a, (0, 0)))
+        self.assertEqual(ttri1.area, 0.5)
+        ttri1.a = (0.2, 0.2)
+        self.assertTrue(np.array_equal(ttri1.a, (0.2, 0.2)))
+        self.assertAlmostEqual(ttri1.area, 0.3)
+        tri5 = ttri1.persistent()
+        self.assertEqual(ttri1, tri5)
+        self.assertTrue(tri5.is_persistent())
+        self.assertTrue(np.array_equal(tri5.a, (0.2, 0.2)))
+        self.assertAlmostEqual(tri5.area, 0.3)
         # We can turn planobjects into strings:
         class SimpleObj(planobject):
             @calc('x')
@@ -214,7 +238,7 @@ class TestWorkflowPlanType(TestCase):
         trivobj = TrivialObj(x=10.0)
         self.assertEqual(str(trivobj), 'TrivialObj(x=<lazy>)')
         self.assertEqual(trivobj.x, 10)
-        self.assertEqual(repr(trivobj), f'{__name__}.TrivialObj(x=10)') 
+        self.assertEqual(repr(trivobj), f'{__name__}.TrivialObj(x=10)')
         # There are tests for the objects and types also:
         self.assertTrue(is_planobject(obj))
         self.assertFalse(is_planobject(None))

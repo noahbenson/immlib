@@ -857,38 +857,40 @@ class plan(pdict):
         new_inputtup = list(inputtup)
         new_calctup = list(calctup)
         items = tldict.empty()
-        for (k,v) in holdlazy(updates).items():
+        srcget = plan._source_lookup
+        updates = holdlazy(updates)
+        for (k,v) in updates.items():
             iidx = sources[k]
-            new_inputtup[iidx] = v if isinstance(v, lazy) else lazy(identfn, v)
+            lv = v if isinstance(v, lazy) else lazy(identfn, v)
+            new_inputtup[iidx] = lv
             calc_updates.update(dependants[k].calcs)
             # Create a new plandict item for the new input value.
             src = valsources[k]
             if isinstance(src, tuple):
                 # This input gets filtered, so we need a lazy lookup using a 
-                # lambda that makes a clojure over the new_calctup symbol, which
+                # lambda that makes a closure over the new_calctup symbol, which
                 # will get updated as we go.
-                v = lazy(
-                    lambda ii,src: plan._source_lookup(ii, new_calctup, src),
-                    new_inputtup, src)
-            items[k] = v
+                lv = lazy(
+                    lambda src: srcget(new_inputtup, new_calctup, src),
+                    src)
+            items[k] = lv
         new_inputtup = tuple(new_inputtup)
         output_updates = set()
         for cidx in calc_updates:
             calc = calcdata.calcs[cidx]
+            output_updates.update(calc.outputs)
             new_calctup[cidx] = lazy(
-                lambda ii, c, a: plan._call_calc(ii, new_calctup, c, a),
-                new_inputtup, # new_calctup, # <-- here ^
+                lambda c,a: plan._call_calc(new_inputtup, new_calctup, c, a),
                 calc,
                 calcdata.args[cidx])
-            output_updates.update(calc.outputs)
         new_calctup = tuple(new_calctup)
         outputs = self.outputs
         for k in output_updates:
             if k not in outputs:  # Skip the internal/translated outputs.
                 continue
             src = self.valsources[k]
-            items[k] = lazy(plan._source_lookup, new_inputtup, new_calctup, src)
-        return (inputtup, calctup, items.persistent())
+            items[k] = lazy(srcget, new_inputtup, new_calctup, src)
+        return (new_inputtup, new_calctup, items.persistent())
     @staticmethod
     def _make_srcs_args(names, calcs, params):
         args = []
@@ -1290,7 +1292,11 @@ class plandict(ldict):
         plan = pd.plan
         calcdata = plan.calcdata
         if len(args) == 0 and len(kwargs) == 0:
-            return pd
+            if isinstance(pd, plandict):
+                return pd
+            else:
+                return cls._new_plandict(
+                    pd, plan, pd.inputs, pd._calcdata, pd._inputdata)
         # First, merge from left-to-right, respecting laziness.
         param_updates = merge(*args, **kwargs)
         # There must only be parameters here.
@@ -1299,12 +1305,17 @@ class plandict(ldict):
             extras = set(params_updates.keys()) - plan.inputs
             raise ValueError(f"unrecognized inputs: {tuple(extras)}")
         # Make a new inputtup, calctup, and updates to the items dict.
-        (inputtup, calctup, items) = plan._update_dictdata(
-            pd._inputdata,
-            pd._calcdata,
-            param_updates)
+        if len(param_updates) == 0:
+            items = pd
+            inputtup = pd._inputdata
+            calctup = pd._calcdata
+        else:
+            (inputtup, calctup, items) = plan._update_dictdata(
+                pd._inputdata,
+                pd._calcdata,
+                param_updates)
+            items = merge(pd, items)
         inputs = merge(pd.inputs, param_updates)
-        items = merge(pd, items)
         return cls._new_plandict(items, plan, inputs, calctup, inputtup)
     def set(self, k, v):
         return plandict(self, {k:v})
@@ -1316,6 +1327,8 @@ class plandict(ldict):
         raise TypeError("cannot delete from a plandict")
     def transient(self):
         return tplandict(self)
+    def __hash__(self):
+        return hash(self.inputs) + hash(self.plan)
 
 class tplandict(tldict):
     """A transient dict type that follows an `immlib` plan.

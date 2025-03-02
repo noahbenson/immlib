@@ -178,7 +178,6 @@ class TestWorkflowCore(TestCase):
         # The calculations are given names (keys) and put together in a plan.
         nwm = plan(weights_step=normal_pdf,
                    mean_step=weighted_mean,
-                   # filters must be named filter_<filtered-param>
                    filter_x=filter_x)
         # This creates a plan object, which stores these computations.
         self.assertIsInstance(nwm, plan)
@@ -212,6 +211,34 @@ class TestWorkflowCore(TestCase):
         self.assertEqual(pd['mu'], 1.5)
         self.assertEqual(pd['std'], 1)
         self.assertAlmostEqual(pd['mean'], 1.4392777559)
+        # We can update the plandict by making a new one.
+        pd2 = plandict(pd, x=[0, 1, 2, 8.5])
+        self.assertIsInstance(pd2['x'], np.ndarray)
+        self.assertTrue(np.array_equal(pd2['x'], [0, 1, 2, 8.5]))
+        self.assertEqual(pd2['mu'], 1.5)
+        self.assertEqual(pd2['std'], 1)
+        self.assertAlmostEqual(pd2['mean'], 1.266956394834)
+        pd2 = plandict(pd, mu=2.5)
+        self.assertIsInstance(pd2['x'], np.ndarray)
+        self.assertTrue(np.array_equal(pd2['x'], [-1, 1, 2, 8.5]))
+        self.assertEqual(pd2['mu'], 2.5)
+        self.assertEqual(pd2['std'], 1)
+        self.assertAlmostEqual(pd2['mean'], 1.726118628968)
+        # We can also make a transient plandict...
+        tpd = pd.transient()
+        tpd['x'] = [0, 1, 2, 8.5]
+        self.assertIsInstance(tpd['x'], np.ndarray)
+        self.assertTrue(np.array_equal(tpd['x'], [0, 1, 2, 8.5]))
+        self.assertEqual(tpd['mu'], 1.5)
+        self.assertEqual(tpd['std'], 1)
+        self.assertAlmostEqual(tpd['mean'], 1.266956394834)
+        tpd = pd.transient()
+        tpd['mu'] = 2.5
+        self.assertIsInstance(tpd['x'], np.ndarray)
+        self.assertTrue(np.array_equal(tpd['x'], [-1, 1, 2, 8.5]))
+        self.assertEqual(tpd['mu'], 2.5)
+        self.assertEqual(tpd['std'], 1)
+        self.assertAlmostEqual(tpd['mean'], 1.726118628968)
         # Since we marked the filter as non-lazy, it should raise errors when
         # the plan is fulfilled.
         with self.assertRaises(RuntimeError): nwm(x=10)
@@ -342,4 +369,6 @@ class TestWorkflowCore(TestCase):
             self.assertEqual(d['outputval2'], 1)
             self.assertEqual(d['out_cpath'], tmpdir)
             self.assertEqual(self.pc_runcount, 3)
-
+    def test_tplandict(self):
+        "Tests the tplandict type."
+        
