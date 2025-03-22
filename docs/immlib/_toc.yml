@@ -1,0 +1,28 @@
+###############################################################################
+# Table of Contents
+
+format: jb-book
+root: intro
+parts:
+  - caption: Introduction
+    chapters:
+      - file: intro/about
+      - file: intro/getting-started
+      - file: license
+  - caption: User Guide
+    chapters:
+      - file: user-guide/design
+      - file: user-guide/workflows
+        sections:
+          - file: user-guide/workflows/plans
+          - file: user-guide/workflows/planobjects
+      - file: user-guide/io
+      - file: user-guide/paths
+      - file: user-guide/utils
+        sections:
+          - file: user-guide/utils/numerical
+          - file: user-guide/utils/units
+          - file: user-guide/utils/strings
+          - file: user-guide/utils/functional
+          - file: user-guide/utils/predicates
+          - file: user-guide/utils/other

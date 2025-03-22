@@ -1,6 +1,8 @@
 ################################################################################
 # deploy.yml
+#
 # GitHub Actions Workflow for deploying immlib to PyPI.
+#
 # by Noah C. Benson
 
 name: Deploy to PyPI
