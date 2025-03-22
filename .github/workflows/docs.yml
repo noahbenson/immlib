@@ -16,7 +16,7 @@ on:
     paths:
       - docs/**
   workflow_dispatch:
-
+    
 jobs:
   deploy-book:
     runs-on: ubuntu-latest
