@@ -32,7 +32,7 @@ jobs:
           python-version: '3.11'
           cache: pip # Implicitly uses requirements.txt for cache key
       - name: Install immlib and Dependencies
-        run: pip install -e .
+        run: pip install -e . && pip install jupyter-book numpy matplotlib
       # Build the book
       - name: Build Documentation
         run: |
