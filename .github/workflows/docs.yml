@@ -32,16 +32,16 @@ jobs:
           python-version: '3.11'
           cache: pip # Implicitly uses requirements.txt for cache key
       - name: Install immlib and Dependencies
-        run: pip install -e . && pip install jupyter-book numpy matplotlib
+        run: pip install -e .[docs]
       # Build the book
       - name: Build Documentation
         run: |
-          jupyter-book build docs/
+          jupyter-book build docs/immlib/
       # Upload the book's HTML as an artifact
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: "docs/_build/html"
+          path: "docs/immlib/_build/html"
       # Deploy the book's HTML to GitHub Pages
       - name: Deploy to GitHub Pages
         id: deployment

@@ -40,6 +40,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["torch >= 2.2.0"]
 test = ["torch >= 2.2.0"]
+docs = ["torch >= 2.2.0", "jupyter-book >= 1.0.0", "matplotlib >= 3.4.0"]
 
 [project.urls]
 homepage = "https://github.com/noahbenson/immlib"
