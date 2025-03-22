@@ -7,7 +7,7 @@
 #
 # by Noah C. Benson
 
-name: Build & Deploy Documentation
+name: Build and Deploy Documentation
 
 on:
   push:
@@ -15,6 +15,7 @@ on:
       - main
     paths:
       - docs/**
+  workflow_dispatch:
 
 jobs:
   deploy-book:
