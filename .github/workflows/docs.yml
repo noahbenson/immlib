@@ -33,15 +33,6 @@ jobs:
           cache: pip # Implicitly uses requirements.txt for cache key
       - name: Install immlib and Dependencies
         run: pip install -e .
-      # (optional) Cache your executed notebooks between runs
-      # if you have config:
-      # execute:
-      #   execute_notebooks: cache
-      - name: cache executed notebooks
-        uses: actions/cache@v4
-        with:
-          path: _build/.jupyter_cache
-          key: jupyter-book-cache-${{ hashFiles('requirements.txt') }}
       # Build the book
       - name: Build Documentation
         run: |
