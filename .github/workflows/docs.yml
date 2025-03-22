@@ -18,7 +18,7 @@ on:
   workflow_dispatch:
     
 jobs:
-  deploy-book:
+  deploy-docs:
     runs-on: ubuntu-latest
     permissions:
       pages: write
@@ -31,8 +31,8 @@ jobs:
         with:
           python-version: '3.11'
           cache: pip # Implicitly uses requirements.txt for cache key
-      - name: Install Dependencies
-        run: pip install -r requirements.txt
+      - name: Install immlib and Dependencies
+        run: pip install -e .
       # (optional) Cache your executed notebooks between runs
       # if you have config:
       # execute:
