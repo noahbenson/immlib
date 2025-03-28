@@ -69,13 +69,19 @@ jobs:
           python-version: ${{ matrix.version }}
       - name: Install Numpy, Scipy, and PyTorch
         shell: bash -el {0}
+        #run: |
+        #  conda install \
+        #      -cpytorch \
+        #      -cconda-forge \
+        #      'numpy >= 1.24' \
+        #      'scipy >= 1.7' \
+        #      'pytorch >= 2.2' \
+        #      coverage
         run: |
-          conda install \
-              -cpytorch \
-              -cconda-forge \
+          python -m pip install \
               'numpy >= 1.24' \
               'scipy >= 1.7' \
-              'pytorch >= 2.2' \
+              'torch >= 2.2' \
               coverage
       # Log the Python Version
       - name: Display Python version
