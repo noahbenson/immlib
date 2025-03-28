@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-################################################################################
+###############################################################################
 # immlib/util/_numeric.py
 
 
-# Dependencies #################################################################
+# Dependencies ################################################################
 
 import inspect
 from functools import (partial, wraps, update_wrapper)
@@ -25,7 +25,7 @@ from ._core import (
 
 
 
-# PyTorch Configuration ########################################################
+# PyTorch Configuration #######################################################
 
 # If torch isn't imported or configured, that's fine, we just write our methods
 # to generate errors. We want these errors to explain the problem, so we create
@@ -61,60 +61,66 @@ class FakeTorchPackage:
 try:
     import torch
     torch_found = True
-    @docwrap(indent=8)
+    @docwrap('immlib.util.checktorch', indent=8)
     def checktorch(f):
-        """Decorator, ensures that PyTorch functions throw an error when torch
-        isn't found.
+        """Decorator, ensures that PyTorch functions throw an informative error
+        when PyTorch isn't found.
         
-        A function that is wrapped with the `@checktorch` decorator will always
-        throw a descriptive error message when PyTorch isn't found on the system
-        rather than raising a complex exception. Any `immlib` function that uses
-        the `torch` library should use this decorator.
+        A function that is wrapped with the ``@checktorch`` decorator will
+        always throw a descriptive error message when PyTorch isn't found on
+        the system rather than raising a complex exception. Any ``immlib``
+        function that uses the ``torch`` library should use this decorator.
 
-        The `torch` library was found on this system, so `checktorch(f)` always
-        returns `f`.
+        The ``torch`` library was found on this system, so ``checktorch(f)``
+        always returns ``f``.
         """
         return f
-    @docwrap(indent=8)
+    @docwrap('immlib.util.alttorch', indent=8)
     def alttorch(f_alt):
-        """Decorator that runs an alternate function when PyTorch isn't found.
+        """Decorator that runs an alternative function when PyTorch isn't
+        found on the system.
         
-        A function `f` that is wrapped with the `@alttorch(f_alt)` decorator
-        will always run `f_alt` instead of `f` when called if PyTorch is not
-        found on the system and will always run `f` when `PyTorch` is found.
+        A function ``f`` that is wrapped with the ``@alttorch(f_alt)``
+        decorator will always run `f_alt` instead of ``f`` when called if
+        PyTorch is not found on the system and will always run ``f`` when
+        `PyTorch` is found.
 
-        The `torch` library was found on this system, so `alttorch(f)(f_alt)`
-        always returns `f`.
+        The ``torch`` library was found on this system, so
+        ``alttorch(f)(f_alt)`` always returns ``f``.
         """
         return (lambda f: f)
 except (ModuleNotFoundError, ImportError) as e:
     torch = FakeTorchPackage()
     torch_found = False
+    @docwrap('immlib.util.checktorch', indent=8)
     def checktorch(f):
-        """Decorator, ensures that PyTorch functions throw an error when torch
-        isn't found.
+        """Decorator that ensures that PyTorch functions throw an informative
+        error when PyTorch isn't found.
         
-        A function that is wrapped with the `@checktorch` decorator will always
-        throw a descriptive error message when PyTorch isn't found on the system
-        rather than raising a complex exception. Any `immlib` function that uses
-        the `torch` library should use this decorator.
+        A function that is wrapped with the ``@checktorch`` decorator will
+        always throw a descriptive error message when PyTorch isn't found on
+        the system rather than raising a complex exception. Any ``immlib``
+        function that uses the ``torch`` library should use this decorator.
 
-        The `torch` library was not found on this system, so `checktorch(f)`
-        always returns a function with the same docstring as `f` but which
-        raises a `TorchNotFound` exception.
+        The ``torch`` library was not found on this system, so
+        ``checktorch(f)`` always returns a function with the same docstring as
+        `f` but which raises a ``TorchNotFound`` exception.
         """
         from functools import wraps
         return wraps(f)(TorchNotFound.raise_self)
+    @docwrap('immlib.util.alttorch', indent=8)
     def alttorch(f_alt):
-        """Decorator that runs an alternate function when PyTorch isn't found.
+        """Decorator that runs an alternative function when PyTorch isn't
+        found on the system.
         
-        A function `f` that is wrapped with the `@alttorch(f_alt)` decorator
-        will always run `f_alt` instead of `f` when called if PyTorch is not
-        found on the system and will always run `f` when `PyTorch` is found.
+        A function ``f`` that is wrapped with the ``@alttorch(f_alt)``
+        decorator will always run `f_alt` instead of ``f`` when called if
+        PyTorch is not found on the system and will always run ``f`` when
+        PyTorch is found.
 
-        The `torch` library was not found on this system, so
-        `alttorch(f)(f_alt)` always returns `f_alt`, or rather a version of
-        `f_alt` wrapped to `f`.
+        The ``torch`` library was not found on this system, so
+        ``alttorch(f)(f_alt)`` always returns `f_alt`, or rather a version of
+        `f_alt` wrapped to ``f``.
         """
         from functools import wraps
         return (lambda f: wraps(f)(f_alt))
@@ -134,7 +140,7 @@ except Exception:
         _torch_version[2])
 
 
-# Numerical Types ##############################################################
+# Numerical Types #############################################################
 
 from numpy import ndarray
 def _is_numtype(obj, numtype, dtypes):
@@ -148,128 +154,150 @@ def _is_numtype(obj, numtype, dtypes):
         return False
 from numbers import Number
 _number_dtypes = (np.number, np.bool_)
-@docwrap
-def is_numberdata(obj):
-    """Returns `True` if an object is a Python number, otherwise `False`.
+@docwrap('immlib.is_numberdata')
+def is_numberdata(obj, /):
+    """Returns ``True`` if an object is a Python number, otherwise ``False``.
 
-    `is_numberdata(obj)` returns `True` if the given object `obj` is an instance
-    of the `numbers.Number` type or if it is an instance of a numeric NumPy
-    array or PyTorch tensor.
+    ``is_numberdata(obj)`` returns ``True`` if the given object ``obj`` is an
+    instance of the ``numbers.Number`` type or if it is an instance of a
+    numeric NumPy array or PyTorch tensor.
 
-    Except in special cases, `is_numberdata(x)` is equivalent to
-    `is_complex(x)`.
+    Except in special cases, ``is_numberdata(x)`` is equivalent to
+    ``is_complexdata(x)``.
 
-    `is_numberdata` is a more general version of the function `is_numeric` in
-    that any value for which `is_numeric` returns true, `is_numberdata` will
-    also return true. `is_numberdata` also returns true for individual numbers
-    like `10`, however, whereas `is_numeric` is designed for querying the
-    properties of numpy arrays and pytorch tensors specifically.
+    ``is_numberdata`` is related to the function ``is_numeric``: if
+    ``is_numeric(x)`` is ``True`` then ``is_numberdata(x)`` is also
+    ``True``. However, ``is_numberdata(10)`` is ``True`` while
+    ``is_numeric(10)`` is not. ``is_numberdata`` is designed for determining
+    whether an object represents numbers, whereas ``is_numeric`` is designed
+    for querying the properties of NumPy arrays and PyTorch tensors such as
+    their shapes and data types.
 
     Parameters
     ----------
     obj : object
-        The object whose quality as a `Number` object or numerical array or
+        The object whose quality as a ``Number`` object or numerical array or
         tensor is to be assessed.
 
     Returns
     -------
     boolean
-        `True` if `obj` is an instance of `Number` or is a numerical array or
-        tensor, otherwise `False`.
+        ``True`` if `obj` is an instance of ``Number`` or is a numerical
+        array or tensor, otherwise ``False``.
+
+    See Also
+    --------
+    is_booldata, is_intdata, is_realdata, is_complexdata
     """
     return _is_numtype(obj, Number, _number_dtypes)
 _bool_dtypes = (np.bool_,)
-@docwrap
-def is_booldata(obj):
-    """Returns `True` if an object is a Python number, otherwise `False`.
+@docwrap('immlib.is_booldata')
+def is_booldata(obj, /):
+    """Returns ``True`` if an object is a boolean, otherwise ``False``.
 
-    `is_booldata(obj)` returns `True` if the given object `obj` is an instance
-    of the `bool` type or if it is an instance of a boolean NumPy array or
+    ``is_booldata(obj)`` returns ``True`` if the given object `obj` is an
+    instance of the ``bool`` type or if it is an instance of a boolean NumPy
+    array or PyTorch tensor.
+
+    Parameters
+    ----------
+    obj : object
+        The object whose quality as a ``bool`` object or boolean array or
+        tensor is to be assessed.
+
+    Returns
+    -------
+    boolean
+        ``True`` if `obj` is an instance of ``bool`` or is a boolean array or
+        tensor, otherwise ``False``.
+
+    See Also
+    --------
+    is_intdata, is_realdata, is_complexdata, is_numberdata
+    """
+    return _is_numtype(obj, bool, _bool_dtypes)
+from numbers import Integral
+_integer_dtypes = (np.integer, np.bool_)
+@docwrap('immlib.is_intdata')
+def is_intdata(obj, /):
+    """Returns ``True`` if an object is a Python integer, otherwise ``False``.
+
+    ``is_intdata(obj)`` returns ``True`` if the given object `obj` is an
+    instance of the ``numbers.Integral`` type or if it is an instance of a
+    numeric NumPy array or PyTorch tensor whose dtype is an integer type.
+
+    Parameters
+    ----------
+    obj : object
+        The object whose quality as a ``Integral`` object or integer-valued
+        array or tensor is to be assessed.
+
+    Returns
+    -------
+    boolean
+        ``True`` if `obj` is an instance of ``Integral`` or is an integer numpy
+        array, otherwise ``False``.
+
+    See Also
+    --------
+    is_booldata, is_realdata, is_complexdata, is_numberdata
+    """
+    return _is_numtype(obj, Integral, _integer_dtypes)
+from numbers import Real
+_real_dtypes = (np.floating, np.integer, np.bool_)
+@docwrap('immlib.is_intdata')
+def is_realdata(obj, /):
+    """Returns ``True`` if an object is a Python number, otherwise ``False``.
+
+    ``is_realdata(obj)`` returns ``True`` if the given object `obj` is an
+    instance of the ``numbers.Real`` type or of a real-valued NumPy array or
     PyTorch tensor.
 
     Parameters
     ----------
     obj : object
-        The object whose quality as a `bool` object or boolean array or tensor
-        is to be assessed.
+        The object whose quality as a ``Real`` object or real-values NumPy
+        array ot PyTorch tensor is to be assessed.
 
     Returns
     -------
-    boolean
-        `True` if `obj` is an instance of `bool` or is a boolean array or
-        tensor, otherwise `False`.
-    """
-    return _is_numtype(obj, bool, _bool_dtypes)
-from numbers import Integral
-_integer_dtypes = (np.integer, np.bool_)
-@docwrap
-def is_intdata(obj):
-    """Returns `True` if an object is a Python integer, otherwise `False`.
+    bool
+        ``True`` if `obj` is an instance of ``Real`` or is a real-valued array
+        or tensor, otherwise ``False``.
 
-    `is_intdata(obj)` returns `True` if the given object `obj` is an instance
-    of the `numbers.Integral` type or if it is an instance of a numeric NumPy
-    array or PyTorch tensor whose dtype is an integer type.
-
-    Parameters
-    ----------
-    obj : object
-        The object whose quality as a `Integral` object or integer-valued array
-        or tensoris to be assessed.
-
-    Returns
-    -------
-    boolean
-        `True` if `obj` is an instance of `Integral` or is an integer numpy
-        array, otherwise `False`.
-    """
-    return _is_numtype(obj, Integral, _integer_dtypes)
-from numbers import Real
-_real_dtypes = (np.floating, np.integer, np.bool_)
-@docwrap
-def is_realdata(obj):
-    """Returns `True` if an object is a Python number, otherwise `False`.
-
-    `is_realdata(obj)` returns `True` if the given object `obj` is an instance
-    of the `numbers.Real` type or of a real-valued NumPy array or PyTorch
-    tensor.
-
-    Parameters
-    ----------
-    obj : object
-        The object whose quality as a `Real` object or real-values numpy array
-        ot PyTorch tensor is to be assessed.
-
-    Returns
-    -------
-    boolean
-        `True` if `obj` is an instance of `Real` or is a real-valued array or
-        tensor, otherwise `False`.
+    See Also
+    --------
+    is_booldata, is_intdata, is_complexdata, is_numberdata
     """
     return _is_numtype(obj, Real, _real_dtypes)
 from numbers import Complex
 _complex_dtypes = (np.number, np.bool_)
-@docwrap
+@docwrap('immlib.is_complexdata')
 def is_complexdata(obj):
-    """Returns `True` if an object is a complex number, otherwise `False`.
+    """Returns ``True`` if an object is a complex number, otherwise ``False``.
 
-    `is_complexdata(obj)` returns `True` if the given object `obj` is an
-    instance of the `numbers.Complex` type or an instance of a complex-valued
+    ``is_complexdata(obj)`` returns ``True`` if the given object `obj` is an
+    instance of the ``numbers.Complex`` type or an instance of a complex-valued
     NumPy array or PyTorch tensor.
 
     Parameters
     ----------
     obj : object
-        The object whose quality as a `Complex` object is to be assessed.
+        The object whose quality as a ``Complex`` object is to be assessed.
 
     Returns
     -------
     boolean
-        `True` if `obj` is an instance of `Complex`, otherwise `False`.
+        ``True`` if `obj` is an instance of ``Complex``, otherwise ``False``.
+
+    See Also
+    --------
+    is_booldata, is_intdata, is_realdata, is_numberdata
     """
     return _is_numtype(obj, Complex, _complex_dtypes)
 
 
-# Scalar Utilities #############################################################
+# Scalar Utilities ############################################################
 
 def _is_scalar(obj, numtype):
     if isinstance(obj, np.ndarray) or torch.is_tensor(obj):
@@ -277,30 +305,35 @@ def _is_scalar(obj, numtype):
             return False
         obj = obj.item()
     return isinstance(obj, numtype)
-@docwrap
+@docwrap('immlib.is_number')
 def is_number(obj, /, dtype=None):
     """Determines whether the argument is a scalar number or not.
 
-    `is_number(x)` returns `True` if `x` is a scalar number and `False`
-    otherwise. The following are considered scalar numbers:
-     * Any instances of `numbers.Number`,
-     * Any numpy array `x` whose shape is `()` such that `x.item()` is a scalar.
-
-    See also: `like_number`
+    ``is_number(obj)`` returns ``True`` if `obj` is a scalar number and
+    ``False`` otherwise. The following are considered scalar numbers:
+    
+      - Any instances of ``numbers.Number``,
+      - Any numpy array ``x`` whose shape is ``()`` such that ``x.item()`` is a
+        scalar.
 
     Parameters
     ----------
     obj : object
         The object whose quality as a scalar number is to be tested.
     dtype : bool, int, float, complex, or None, optional
-        The type of the scalar. If this is `None` (the default)`, then the type
-        of the scalar must be a number but it needn't be any particular number.
-        Otherwise, it must match the given type.
+        The type of the scalar. If this is ``None`` (the default)``, then the
+        type of the scalar must be a number but it needn't be any particular
+        number.  Otherwise, it must match the given type.
     
     Returns
     -------
     bool
-        `True` if `obj` is a scalar number value and `False` otherwise.
+        ``True`` if `obj` is a scalar number value and ``False`` otherwise.
+
+    See Also
+    --------
+    like_number, is_numberdata, is_numeric, is_bool, is_integer, is_real,
+    is_complex
     """
     if dtype is None:
         return _is_scalar(obj, Number)
@@ -314,54 +347,71 @@ def is_number(obj, /, dtype=None):
         return _is_scalar(obj, Complex)
     else:
         raise ValueError(f"invalid dtype: {dtype}")
-def is_bool(obj):
+@docwrap('immlib.is_bool')
+def is_bool(obj, /):
     """Determines whether the argument is a scalar boolean or not.
 
-    `is_bool(x)` returns `True` if `x` is a scalar boolean and `False`
-    otherwise.
+    ``is_bool(obj)`` returns ``True`` if `obj` is a scalar boolean and
+    ``False`` otherwise.
 
-    See also: `is_scalar`
+    See Also
+    --------
+    is_scalar, is_booldata
     """
     return _is_scalar(obj, bool)
-def is_integer(obj):
+@docwrap('immlib.is_integer')
+def is_integer(obj, /):
     """Determines whether the argument is a scalar integer or not.
 
-    `is_integer(x)` returns `True` if `x` is a scalar integer and `False`
-    otherwise. Note that booleans are considered integers.
+    ``is_integer(obj)`` returns ``True`` if `obj` is a scalar integer and
+    ``False`` otherwise. Note that booleans are considered integers.
 
-    See also: `is_scalar`, `is_intdata`
+    See Also
+    --------
+    is_scalar, is_intdata
     """
     return _is_scalar(obj, Integral)
-def is_real(obj):
+@docwrap('immlib.is_real')
+def is_real(obj, /):
     """Determines whether the argument is a scalar real number or not.
 
-    `is_real(x)` returns `True` if `x` is a scalar real number and `False`
-    otherwise. Note that booleans and integers are considered real numbers.
+    ``is_real(obj)`` returns ``True`` if `obj` is a scalar real number and
+    ``False`` otherwise. Note that booleans and integers are considered real
+    numbers.
 
-    See also: `is_scalar`, `is_realdata`
+    See Also
+    --------
+    is_scalar, is_realdata
     """
     return _is_scalar(obj, Real)
-def is_complex(obj):
+@docwrap('immlib.is_complex')
+def is_complex(obj, /):
     """Determines whether the argument is a scalar complex number or not.
 
-    `is_complex(x)` returns `True` if `x` is a scalar complex number and `False`
-    otherwise. Note that booleans, integers, and real numbers are all considered
-    valid complex numbers.
+    ``is_complex(obj)`` returns ``True`` if `obj` is a scalar complex number
+    and ``False`` otherwise. Note that booleans, integers, and real numbers are
+    all considered valid complex numbers.
 
-    See also: `is_number`, `is_complexdata`
+    See Also
+    --------
+    is_number, is_complexdata
     """
     return _is_scalar(obj, Complex)
-def like_number(obj):
+@docwrap('immlib.like_number')
+def like_number(obj, /):
     """Determines whether the argument holds a scalar number value or not.
 
-    `like_number(x)` returns `True` if `x` is already a scalar number, if `x` is
-    a single-element numpy array or tensor, or if `x` is a sequence or set that
-    has only one numerical element; otherwise, it returns `False`.
+    ``like_number(x)`` returns ``True`` if ``x`` is already a scalar number, if
+    ``x`` is a single-element numpy array or tensor, or if ``x`` is a sequence
+    or set that has only one numerical element; otherwise, it returns
+    ``False``.
 
-    If `like_number(x)` returns `True`, then `to_number(x)` will always return a
-    valid Python number (i.e., an object of type `numbers.Number`).
+    If ``like_number(x)`` returns ``True``, then ``to_number(x)`` will always
+    return a valid Python number (i.e., an object of type ``numbers.Number``).
 
-    See also: `is_number`, `to_number`
+    See Also
+    --------
+    is_number, to_number
     """
     if isinstance(obj, Number):
         return True
@@ -373,32 +423,66 @@ def like_number(obj):
         except (TypeError, ValueError):
             return False
     return obj.size == 1 and is_numberdata(obj)
-@docwrap
-def to_number(obj):
+@docwrap('immlib.to_number')
+def to_number(obj, /, unit=Ellipsis, *, ureg=None):
     """Converts the argument into a simple Python number.
 
-    `to_number(x)` returns a simple Python number representation of `x` (in
-    other words, `x` will be a subtype of Python's `numbers.Number` type). Any
-    number, any NumPy array with only one element, and any PyTorch tensor with
-    only one element can be converted into a scalar.
+    ``to_number(obj)`` returns a simple Python number representation of `obj`
+    (in other words, `obj` will be a subtype of Python's ``numbers.Number``
+    type). Any number, any NumPy array with only one element, and any PyTorch
+    tensor with only one element can be converted into a scalar. If `obj` is a
+    ``pint.Quantity`` then the return value is a quantity with the same unit as
+    `obj` and whose magnitude is ``to_number(obj.m)``.
 
     Parameters
     ----------
     obj : object
         The object that is to be converted into a scalar number.
+    unit : unit-like, bool, or None, optional
+        If `obj` is a ``pint.Quantity`` object, the `unit` parameter determines
+        how it is handled by ``to_number``. If `unit` is ``None`` and `obj` is
+        a quantity, then an error will be raised. If `unit` is a valid
+        ``pint.Unit`` or the an object that can be converted into a unit vis
+        that ``immlib.unit`` function. then an error is raised if `obj` is not
+        a quantity with alike units. If `unit` is ``Ellipsis`` (the default
+        value), then the behavior depends on whether `obj` is a quantity: if
+        `obj` is a quantity, the ``to_number`` function is run on its magnitude
+        and a quantity with the same unit is returned; if `obj` is not a
+        quantity, then the a non-quantity is returned.
+    ureg : pint.UnitRegistry, None, or Ellipsis, optional
+        The ``pint.UnitRegistry`` object to use for units. If `ureg` is
+        ``Ellipsis``, then ``immlib.units`` is used. If `ureg` is ``None`` (the
+        default), then the registry of `obj` is used if `obj` is a quantity,
+        and ``immlib.units`` is used if not.
+
 
     Returns
     -------
-    number
+    number or pint.Quantity
         A scalar number that is an object whose class is a subtype of
-        `numbers.Number`.
+        ``numbers.Number`` or a ``pint.Quantity`` object whose magnitude is
+        such a number.
 
     Raises
     ------
     TypeError
         If the argument is not like a scalar number.
     """
-    if isinstance(obj, Number):
+    if ureg is Ellipsis:
+        from immlib import units as ureg
+    # If obj is a quantity, we handle things differently.
+    if isinstance(obj, pint.Quantity):
+        if ureg is None:
+            from ._quantity import unitregistry
+            ureg = unitregistry(obj)
+        if unit is None:
+            raise ValueError("to_number: unit is None but Quantity given")
+        q = ureg.Quantity(to_number(obj.m, unit=None), obj.u)
+        if unit is not Ellipsis:
+            from ._quantity import unit as to_unit
+            q = q.to(to_unit(unit))
+        return q
+    elif isinstance(obj, Number):
         return obj
     elif torch.is_tensor(obj):
         if torch.numel(obj) == 1:
@@ -410,7 +494,7 @@ def to_number(obj):
     raise TypeError(f"given object is not scalar-like: {obj}")
 
 
-# Numerical Collection Suport ##################################################
+# Numerical Collection Suport #################################################
 
 # Numerical collections include numpy arrays and torch tensors. These objects
 # are handled similarly due to their overall functional similarity, and certain
@@ -500,94 +584,96 @@ def _numcoll_match(numcoll_shape, numcoll_dtype, ndim, shape, numel, dtype):
     return True
 
 
-# Numpy Arrays #################################################################
+# Numpy Arrays ################################################################
 
 # For testing whether numpy arrays or pytorch tensors have the appropriate
 # dimensionality, shape, and dtype, we use some helper functions.
 from numpy import dtype as numpy_dtype
-@docwrap
-def is_numpydtype(dt):
-    """Returns `True` for a NumPy dtype object and `False` otherwise.
+@docwrap('immlib.util.is_numpydype')
+def is_numpydtype(obj, /):
+    """Returns ``True`` for a ``numpy.dtype`` object and ``False`` otherwise.
 
-    `is_numpydtype(obj)` returns `True` if the given object `obj` is an instance
-    of the `numpy.dtype` class.
-
-    Parameters
-    ----------
-    obj : object
-        The object whose quality as a NumPy `dtype` object is to be assessed.
-
-    Returns
-    -------
-    boolean
-        `True` if `obj` is a valid `numpy.dtype`, otherwise `False`.
-    """
-    return isinstance(dt, numpy_dtype)
-@docwrap
-def like_numpydtype(dt):
-    """Returns `True` for any object that can be converted into a numpy `dtype`.
-
-    `like_numpydtype(obj)` returns `True` if the given object `obj` is an
-    instance of the `numpy.dtype` class, is a string that can be used to
-    construct a `numpy.dtype` object, or is a `torch.dtype` object.
+    ``is_numpydtype(obj)`` returns ``True`` if the given object `obj` is an
+    instance of the ``numpy.dtype`` class.
 
     Parameters
     ----------
     obj : object
-        The object whose quality as a NumPy `dtype` object is to be assessed.
+        The object whose quality as a NumPy ``dtype`` object is to be assessed.
 
     Returns
     -------
     boolean
-        `True` if `obj` can be converted into a valid numpy `dtype`, otherwise
-        `False`.
+        ``True`` if `obj` is a valid ``numpy.dtype``, otherwise ``False``.
     """
-    if is_numpydtype(dt) or is_torchdtype(dt):
+    return isinstance(obj, numpy_dtype)
+@docwrap('immlib.util.like_numydtype')
+def like_numpydtype(obj, /):
+    """Returns ``True`` for any object that can be converted into a
+    ``numpy.dtype`` object.
+
+    ``like_numpydtype(obj)`` returns ``True`` if the given object `obj` is an
+    instance of the ``numpy.dtype`` class, is a string that can be used to
+    construct a ``numpy.dtype`` object, or is a ``torch.dtype`` object.
+
+    Parameters
+    ----------
+    obj : object
+        The object whose quality as a NumPy ``dtype`` object is to be assessed.
+
+    Returns
+    -------
+    bool
+        ``True`` if `obj` can be converted into a valid numpy ``dtype``,
+        otherwise ``False``.
+    """
+    if is_numpydtype(obj) or is_torchdtype(obj):
         return True
     else:
         try:
-            return is_numpydtype(np.dtype(dt))
+            return is_numpydtype(np.dtype(obj))
         except TypeError:
             return False
-@docwrap
-def to_numpydtype(dt):
-    """Returns a `numpy.dtype` object equivalent to the given argument `dt`.
+@docwrap('immlib.util.to_numpydtype')
+def to_numpydtype(obj, /):
+    """Returns a ``numpy.dtype`` object equivalent to the given argument.
 
-    `to_numpydtype(obj)` attempts to coerce the given `obj` into a `numpy.dtype`
-    object. If `obj` is already a `numpy.dtype` object, then `obj` itself is
-    returned. If the object cannot be converted into a `numpy.dtype` object,
-    then an error is raised.
+    ``to_numpydtype(obj)`` attempts to coerce the given `obj` into a
+    ``numpy.dtype`` object. If `obj` is already a ``numpy.dtype`` object, then
+    `obj` itself is returned. If the object cannot be converted into a
+    ``numpy.dtype`` object, then an error is raised.
 
-    The following kinds of objects can be converted into a `numpy.dtype` (see
-    also `like_numpydtype()`):
-     * `numpy.dtype` objects;
-     * `torch.dtype` objects;
-     * `None` (the default `numpy.dtype`);
-     * strings that name `numpy.dtype` objects; or
-     * any object that can be passed to `numpy.dtype()`, such as `numpy.int32`.
+    The following kinds of objects can be converted into a ``numpy.dtype`` (see
+    also ``like_numpydtype()``):
+     - ``numpy.dtype`` objects;
+     - ``torch.dtype`` objects;
+     - ``None`` (the default ``numpy.dtype``);
+     - strings that name ``numpy.dtype`` objects; or
+     - any object that can be passed to ``numpy.dtype()``, such as
+       ``numpy.int32``.
 
     Parameters
     ----------
     obj : object
-        The object whose quality as a NumPy `dtype` object is to be assessed.
+        The object whose quality as a NumPy ``dtype`` object is to be assessed.
 
     Returns
     -------
     numpy.dtype
-        The `numpy.dtype` object that is equivalent to the argument `dt`.
+        The ``numpy.dtype`` object that is equivalent to the argument `obj`.
 
     Raises
     ------
     TypeError
-        If the given argument `dt` cannot be converted into a `numpy.dtype`
+        If the given argument `obj` cannot be converted into a ``numpy.dtype``
         object.
     """
-    if is_numpydtype(dt):
-        return dt
-    elif is_torchdtype(dt):
-        return torch.as_tensor((), dtype=dt).numpy().dtype
+    if is_numpydtype(obj):
+        return obj
+    elif is_torchdtype(obj):
+        return torch.as_tensor((), dtype=obj).numpy().dtype
     else:
-        return np.dtype(dt)
+        return np.dtype(obj)
 # Sparse Array/Tensor stuff.
 def sparray_isfrozen(obj):
     return not obj.data.flags['WRITEABLE']
@@ -678,37 +764,39 @@ def torch__is_sparse(obj):
     if not torch.is_tensor(obj):
         return False
     return obj.layout in _sparse_torch_layouts
-@docwrap
-def sparse_layout(obj):
+@docwrap('immlib.util.sparse_layout')
+def sparse_layout(obj, /):
     """Returns a tuple containing data about a sparse array layout.
 
-    `sparse_layout(name)` returns the `SparseLayout` tuple for the sparse array
-    layout with the given name. The name must be one of the following (see
-    `scipy.sparse` for more information about layouts):
-      * `'bsr'`
-      * `'bsc'`
-      * `'coo'`
-      * `'csr'`
-      * `'csc'`
-      * `'dia'`
-      * `'dok'`
-      * `'lil'`
+    ``sparse_layout(name)`` returns the ``SparseLayout`` tuple for the sparse
+    array layout with the given ``name``. The ``name`` must be one of the
+    following (see ``scipy.sparse`` for more information about layouts):
+      - ``'bsr'``
+      - ``'bsc'``
+      - ``'coo'``
+      - ``'csr'``
+      - ``'csc'``
+      - ``'dia'``
+      - ``'dok'``
+      - ``'lil'``
 
-    Alternatively, `sparse_layout(obj)` returns the sparse layout information
+    Alternatively, ``sparse_layout(obj)`` returns the sparse layout information
     for the given sparse array or sparse tensor `obj`.
 
-    Whether the argument is a string or another type, the value `None` is
+    Whether the argument is a string or another type, the value ``None`` is
     returned if the object does not correspond to a sparse layout.
 
-    The `SparseLayout` namedtuple that is returned has the following elements:
-     * `scipy_type`: the scipy type (e.g., `scipy.sparse.csr_array`).
-     * `scipy_matrix_type`: the matrix type (e.g., `scipy.sparse.csr_matrix`).
-     * `scipy_tomethod`: the scipy casting method name (e.g., `'tocsr'`).
-     * `torch_constructor`: The torch constructor function (e.g.,
-       `torch.sparse_csr_tensor`).
-     * `torch_layout`: The torch layout object (e.g., `torch.sparse_csr`).
-     * `torch_tomethod`: The name of the torch `Tensor` method for casting
-       (e.g., `'to_sparse_csr'`).
+    The ``SparseLayout`` namedtuple that is returned has the following
+    elements:
+     - ``scipy_type``: the scipy type (e.g., ``scipy.sparse.csr_array``).
+     - ``scipy_matrix_type``: the matrix type (e.g.,
+       ``scipy.sparse.csr_matrix``).
+     - ``scipy_tomethod``: the scipy casting method name (e.g., ``'tocsr'``).
+     - ``torch_constructor``: The torch constructor function (e.g.,
+       ``torch.sparse_csr_tensor``).
+     - ``torch_layout``: The torch layout object (e.g., ``torch.sparse_csr``).
+     - ``torch_tomethod``: The name of the torch ``Tensor`` method for casting
+       (e.g., ``'to_sparse_csr'``).
     """
     if isinstance(obj, SparseLayout):
         return obj
@@ -723,15 +811,17 @@ def sparse_layout(obj):
         return _sparse_index.get(type(obj), None)
     else:
         return _sparse_index.get(obj, None)
+@docwrap('immlib.util.sparse_haslayout')
 def sparse_haslayout(arr, layout):
-    """Returns true if the given sparse array or tensor has the given layout.
+    """Returns ``True`` if the given sparse array or tensor has the given
+    layout.
 
-    If the first argument `arr` is not a sparse array nor a sparse tensor, then
-    the return value is `False` (i.e., no, the object does not have the given
-    sparse array or sparse tensor layout).
+    If the first argument ``arr`` is not a sparse array nor a sparse tensor,
+    then the return value is ``False`` (i.e., no, the object does not have the
+    given sparse array or sparse tensor layout).
 
-    The second argument `layout` may be any valid argument to the
-    `sparse_haslayout` function.
+    The second argument ``layout`` may be any valid argument to the
+    ``sparse_layout`` function.
     """
     if isinstance(arr, pint.Quantity):
         return sparse_haslayout(arr.m, layout)
@@ -742,23 +832,30 @@ def sparse_haslayout(arr, layout):
         return False
     srclay = sparse_layout(arr)
     return srclay.name == dstlay.name
-@docwrap
-def sparse_find(arr):
+@docwrap('immlib.sparse_find')
+def sparse_find(arr, /):
     """Returns the indices and values of nonzero elements of a sparse object.
     
-    `sparse_find(sp_array)` is equivalent to `scipy.sparse.find(sp_array)` for a
-    sparse array `sp_array`.
+    ``sparse_find(sp_array)`` is equivalent to ``scipy.sparse.find(sp_array)``
+    for a sparse array ``sp_array``.
     
-    `sparse_find(sp_tensor)` is equivalent to `spc.indices() + (spc.values(),)`
-    for a sparse PyTorch tensor `sp_tensor` and version of it that has been
-    coalesced, `spc = sp_tensor.coalesce()`. Note that the `spc.values()` tensor
-    is cloned and detached (see also `sparse_data`).
+    ``sparse_find(sp_tensor)`` is equivalent to ``s.indices() + (s.values(),)``
+    for a sparse PyTorch tensor ``sp_tensor`` and a version of it that has been
+    coalesced, ``s = sp_tensor.coalesce()``. Note that the ``s.values()``
+    tensor is cloned and detached before being returned.
 
-    `sparse_find(q)` for a quantity `q` returns the equivalent of
-    `sparse_find(q.m)` except that the returned value array will have the same
-    magnitude as `q`.
+    ``sparse_find(q)`` for a quantity ``q`` returns the equivalent of
+    ``sparse_find(q.m)`` except that the returned value array will have the
+    same magnitude as ``q``.
 
-    For any non-sparse input, a `TypeError` is raised.
+    Raises
+    ------
+    TypeError
+        If `arr` is not a sparse array or sparse tensor.
+
+    See Also
+    --------
+    sparse_data, sparse_indices
     """
     if isinstance(arr, pint.Quantity):
         from ._quantity import quant
@@ -771,13 +868,17 @@ def sparse_find(arr):
         return tuple(arr.indices()) + (arr.values().clone().detach(),)
     else:
         raise TypeError(f"sparse_find requires a sparse array or sparse tensor")
-@docwrap
-def sparse_indices(arr):
+@docwrap('immlib.util.sparse_indices')
+def sparse_indices(arr, /):
     """Returns the indices of the nonzero values in the given sparse object.
 
-    `sparse_indices(arr)` is roughly equivalent to the expression
-    `stack(sparse_find(arr)[:-1])`---i.e., it returns a numpy array or a pytorch
-    tensor of the index matrix of the nonzero values in `arr`.
+    ``sparse_indices(arr)`` is roughly equivalent to the expression
+    ``stack(sparse_find(arr)[:-1])``---i.e., it returns a numpy array or a
+    pytorch tensor of the index matrix of the nonzero values in `arr`.
+
+    See Also
+    --------
+    sparse_find, sparse_data
     """
     if isinstance(arr, pint.Quantity):
         return sparse_indices(arr.m)
@@ -788,15 +889,19 @@ def sparse_indices(arr):
         return arr.indices()
     else:
         raise TypeError(f"sparse_data requires a sparse array or sparse tensor")
-@docwrap
-def sparse_data(arr):
+@docwrap('immlib.util.sparse_data')
+def sparse_data(arr, /):
     """Returns the data vector for the given sparse array or sparse tensor.
 
-    `sparse_data(arr)` is equivalent to `sparse_find(arr)[-1]`---i.e., it
+    ``sparse_data(arr)`` is equivalent to ``sparse_find(arr)[-1]``---i.e., it
     returns a vector of non-zero values in the sparse array or sparse tensor
-    `arr`---with the exception that it returns the actual vector itself and not
-    a copy of the data vector. Changes to the return value of this function will
-    be reflected in `arr`.
+    `arr`---with the exception that it returns the actual vector itself and
+    not a copy of the data vector. Changes to the return value of this function
+    will be reflected in `arr`.
+
+    See Also
+    --------
+    sparse_find, sparse_indices
     """
     if isinstance(arr, pint.Quantity):
         from ._quantity import quant
@@ -808,15 +913,19 @@ def sparse_data(arr):
         return arr.values()
     else:
         raise TypeError(f"sparse_data requires a sparse array or sparse tensor")
-@docwrap
+@docwrap('immlib.util.sparse_tolayout')
 def sparse_tolayout(obj, layout):
     """Copies a sparse object into another sparse object with a given layout.
 
-    `sparse_tolayout(sparr, layout)` copies the given sparse SciPy array or
-    sparse PyTorch tensor `sparray` into an equivalent array or tensor that uses
-    the sparse layout given by the `layout` argument, which must be compatible
-    with the `sparse_layout` function. The backend (PyTorch or SciPy) will not
-    be changed.
+    ``sparse_tolayout(sparr, layout)`` copies the given sparse SciPy array or
+    sparse PyTorch tensor ``sparr`` into an equivalent array or tensor that
+    uses the sparse layout given by the ``layout`` argument, which must be
+    compatible with the ``sparse_layout`` function. The backend (PyTorch or
+    SciPy) will not be changed.
+
+    See Also
+    --------
+    sparse_layout
     """
     if isinstance(obj, pint.Quantity):
         from ._quantity import quant
@@ -842,92 +951,102 @@ def sparse_tolayout(obj, layout):
         raise TypeError(
             "sparse_tolayout requires a sparse scipy array or"
             " a sparse pytorch tensor")
-@docwrap
-def is_array(obj,
+@docwrap('immlib.is_array')
+def is_array(obj, /, *,
              dtype=None, shape=None, ndim=None, numel=None, frozen=None,
              sparse=None, quant=None, unit=Ellipsis, ureg=None):
-    """Returns `True` if an object is a `numpy.ndarray` object, else `False`.
+    """Returns ``True`` if an object is a ``numpy.ndarray`` object, otherwise
+    returns ``False``.
 
-    `is_array(obj)` returns `True` if the given object `obj` is an instance of
-    the `numpy.ndarray` class or is a `scipy.sparse` matrix or if `obj` is a
-    `pint.Quantity` object whose magnitude is one of these. Additional
+    ``is_array(obj)`` returns ``True`` if the given object `obj` is an instance
+    of the ``numpy.ndarray`` class or is a ``scipy.sparse`` array, or if `obj`
+    is a ``pint.Quantity`` object whose magnitude is one of these. Additional
     constraints may be placed on the object via the optional argments.
 
-    Note that to `immlib`, both `numpy.ndarray` arrays and `scipy.sparse`
-    matrices are considered "arrays". This behavior can be changed with the
-    `sparse` parameter.
+    Note that to ``immlib``, both ``numpy.ndarray`` arrays and ``scipy.sparse``
+    arrays are considered "arrays". This behavior can be changed with the
+    ``sparse`` parameter.
 
     Parameters
     ----------
     obj : object
         The object whose quality as a NumPy array object is to be assessed.
-    dtype : NumPy dtype-like or None, optional
+    dtype : dtype-like or None, optional
         The NumPy `dtype` that is required of the `obj` in order to be
-        considered a valid `ndarray`. The `obj.dtype` matches the given `dtype`
-        parameter if either `dtype` is `None` (the default) or if `obj.dtype` is
-        a sub-dtype of `dtype` according to `numpy.issubdtype`. Alternately,
-        `dtype` can be a tuple, in which case, `obj` is considered valid if its
-        dtype is any of the dtypes in `dtype`. Note that in the case of a tuple,
-        the dtype of `obj` must appear exactly in the tuple rather than be a
-        subtype of one of the objects in the tuple.
-    ndim : int or tuple or ints or None, optional
+        considered a valid ``ndarray``. The ``obj.dtype`` matches the given
+        `dtype` parameter if either `dtype` is ``None`` (the default) or if
+        ``obj.dtype`` is a sub-dtype of `dtype` according to
+        ``numpy.issubdtype``. Alternately, `dtype` can be a tuple, in which
+        case, `obj` is considered valid if its dtype is any of the dtypes in
+        `dtype`. Note that in the case of a tuple, the dtype of `obj` must
+        appear exactly in the tuple rather than be a subtype of one of the
+        objects in the tuple.
+    ndim : int, tuple or ints, or None, optional
         The number of dimensions that the object must have in order to be
-        considered a valid numpy array. If `None`, then any number of dimensions
-        is acceptable (this is the default). If this is an integer, then the
-        number of dimensions must be exactly that integer. If this is a list or
-        tuple of integers, then the dimensionality must be one of these numbers.
-    shape : int or tuple of ints or None, optional
-        If the `shape` parameter is not `None`, then the given `obj` must have a
-        shape shape that matches the parameter value `sh`. The value `sh` must
+        considered a valid numpy array. If ``None``, then any number of
+        dimensions is acceptable (this is the default). If this is an integer,
+        then the number of dimensions must be exactly that integer. If this is
+        a list or tuple of integers, then the dimensionality must be one of
+        these numbers.
+    shape : int, tuple of ints, or None, optional
+        If the ``shape`` parameter is not ``None``, then the given `obj` must
+        have a shape that matches the parameter value. The value `shape` must
         be a tuple that is equal to the `obj`'s shape tuple with the following
-        additional rules: a `-1` value in the `sh` tuple will match any value in
-        the `obj`'s shape tuple, and a single `Ellipsis` may appear in `sh`,
-        which matches any number of values in the `obj`'s shape tuple. The
-        default value of `None` indicates that no restriction should be applied
-        to the `obj`'s shape.
-    numel : int or tuple of ints or None, optional
-        If the `numel` parameter is not `None`, then the given `obj` must have
-        the same number of elements as given by `numel`. If `numel` is a tuple,
-        then the number of elements in `obj` must be in the `numel` tuple. The
-        number of elements is the product of its shape.
-    frozen : boolean or None, optional
-        If `None`, then no restrictions are placed on the `'WRITEABLE'` flag of
-        `obj`. If `True`, then the data in `obj` must be read-only in order for
-        `obj` to be considered a valid array. If `False`, then the data in `obj`
-        must not be read-only.
+        additional rules: a ``-1`` value in the ``shape`` tuple will match any
+        value in the `obj`'s shape tuple, and a single ``Ellipsis`` may appear
+        in `shape`, which matches any number of values in the `obj`'s shape
+        tuple. The default value of ``None`` indicates that no restriction
+        should be applied to the `obj`'s shape.
+    numel : int, tuple of ints, or None, optional
+        If the `numel` parameter is not ``None``, then the given `obj` must
+        have the same number of elements as given by `numel`. If `numel` is a
+        tuple, then the number of elements in `obj` must be in the `numel`
+        tuple. The number of elements is the product of its shape.
+    frozen : bool or None, optional
+        If ``None``, then no restrictions are placed on the ``'WRITEABLE'``
+        flag of `obj`. If ``True``, then the data in `obj` must be read-only in
+        order for `obj` to be considered a valid array. If ``False``, then the
+        data in `obj` must not be read-only.
     sparse : boolean or False, optional
-        If the `sparse` parameter is `None`, then no requirements are placed on
-        the sparsity of `obj` for it to be considered a valid array. If `sparse`
-        is `True` or `False`, then `obj` must either be sparse or not be sparse,
-        respectively, for `obj` to be considered valid. If `sparse` is a string,
-        then it must be either `'coo'`, `'lil'`, `'csr'`, or `'csr'`, indicating
-        the required sparse array type. Only `scipy.sparse` matrices are
-        considered valid sparse arrays.
-    quant : boolean, optional
-        Whether `Quantity` objects should be considered valid arrays or not.  If
-        `quant=True` then `obj` is considered a valid array only when `obj` is a
-        quantity object with a `numpy` array as the magnitude. If `False`, then
-        `obj` must be a `numpy` array itself and not a `Quantity` to be
-        considered valid. If `None` (the default), then either quantities or
-        `numpy` arrays are considered valid arrays.
-    unit : unit-like or Ellipsis or None, optional
-        A unit with which the object obj's unit must be compatible in order for
-        `obj` to be considered a valid array. An `obj` that is not a quantity is
-        considered to have a unit of `None`, which is not the same as being a
-        quantity with a dimensionless unit. In other words, `is_array(array,
-        quant=None)` will return `True` for a numpy array while `is_array(arary,
-        quant='dimensionless')` will return `False`. If `unit=Ellipsis` (the
-        default), then the object's unit is ignored.
-    ureg : UnitRegistry or None or Ellipsis, optional
-        The `pint` `UnitRegistry` object to use for units. If `ureg` is
-        `Ellipsis`, then `immlib.units` is used. If `ureg` is `None` (the
-        default), then the registry of `obj` is used if `obj` is a quantity, and
-        `immlib.units` is used if not.
+        If the `sparse`` parameter is ``None``, then no requirements are placed
+        on the sparsity of `obj` for it to be considered a valid array. If
+        `sparse` is ``True`` or ``False``, then `obj` must either be sparse or
+        not be sparse, respectively, for `obj` to be considered valid. If
+        ``sparse`` is a string, then it must be either ``'coo'``, ``'lil'``,
+        ``'csr'``, or ``'csr'``, indicating the required sparse array
+        type. Only ``scipy.sparse`` matrices are considered valid sparse
+        arrays.
+    quant : bool, optional
+        Whether ``Quantity`` objects should be considered valid arrays or not.
+        If ``quant=True`` then `obj` is considered a valid array only when
+        ``obj`` is a quantity object with a ``numpy`` array as the
+        magnitude. If ``False``, then `obj` must be a ``numpy`` array itself
+        and not a ``Quantity`` to be considered valid. If ``None`` (the
+        default), then either quantities or ``numpy`` arrays are considered
+        valid arrays.
+    unit : unit-like, Ellipsis, or None, optional
+        A unit with which the object `obj`'s unit must be compatible in order
+        for `obj` to be considered a valid array. An `obj` that is not a
+        quantity is considered to have a unit of ``None``, which is not the
+        same as being a quantity with a dimensionless unit. In other words,
+        ``is_array(array, quant=None)`` will return ``True`` for a numpy array
+        while ``is_array(arary, quant='dimensionless')`` will return
+        ``False``. If ``unit=Ellipsis`` (the default), then the object's unit
+        is ignored.
+    ureg : pint.UnitRegistry, None, or Ellipsis, optional
+        The ``pint.UnitRegistry`` object to use for units. If `ureg` is
+        ``Ellipsis``, then ``immlib.units`` is used. If `ureg` is ``None`` (the
+        default), then the registry of `obj` is used if `obj` is a quantity,
+        and ``immlib.units`` is used if not.
 
     Returns
     -------
-    boolean
-        `True` if `obj` is a valid numpy array, otherwise `False`.
+    bool
+        ``True`` if `obj` is a valid numpy array, otherwise ``False``.
+
+    See Also
+    --------
+    is_tensor, is_numeric
     """
     if ureg is Ellipsis:
         from immlib import units as ureg
@@ -1012,89 +1131,93 @@ def is_array(obj,
     if dtype is None and shape is None and ndim is None and numel is None:
         return True
     return _numcoll_match(obj.shape, obj.dtype, ndim, shape, numel, dtype)
-def to_array(obj,
-             dtype=None, order=None, copy=False, sparse=None, frozen=None,
+def to_array(obj, /, dtype=None, *,
+             order=None, copy=False, sparse=None, frozen=None,
              quant=None, ureg=None, unit=Ellipsis, detach=True):
     """Reinterprets `obj` as a NumPy array or quantity with an array magnitude.
 
-    `immlib.to_array` is roughly equivalent to the `numpy.asarray` function with
-    a few exceptions:
-      * `to_array(obj)` allows quantities for `obj` and, in such a case, will
+    ``immlib.to_array`` is roughly equivalent to the ``numpy.asarray`` function
+    with a few exceptions:
+    
+      - ``to_array(obj)`` allows quantities for `obj` and, in such a case, will
         return a quantity whose magnitude has been reinterpreted as an array,
         though this behavior can be altered with the `quant` parameter;
-      * `to_array(obj)` can extract the `numpy` array from `torch` tensor
-         objects.
+      - ``to_array(obj)`` can extract the ``numpy`` array from ``torch`` tensor
+        objects.
 
     Parameters
     ----------
     obj : object
-        The object that is to be reinterpreted as, or if necessary covnerted to,
-        a NumPy array object.
+        The object that is to be reinterpreted as, or if necessary covnerted
+        to, a NumPy array object.
     dtype : data-type, optional
-        The dtype that is passed to `numpy.asarray()`.
+        The `dtype` that is passed to ``numpy.asarray()``.
     order : {'C', 'F'}, optional
-        The array order that is passed to `numpy.asarray()`.
+        The array order that is passed to ``numpy.asarray()``.
     copy : boolean, optional
-        Whether to copy the data in `obj` or not. If `False`, then `obj` is only
-        copied if doing so is required by the optional parameters. If `True`,
-        then `obj` is always copied if possible.
-    sparse : boolean or {'csr','coo'} or None, optional
-        If `None`, then the sparsity of `obj` is the same as the sparsity of the
-        array that is returned. Otherwise, the return value will always be
-        either a `scipy.spase` matrix (`sparse=True`) or a `numpy.ndarray`
-        (`sparse=False`) based on the given value of `sparse`. The `sparse`
-        parameter may also be set to `'bsr'`, `'coo'`, `'csc'`, `'csr'`,
-        `'dia'`, or `'dok'` to return specific sparse matrix types.
-    frozen : boolean or None, optional
-        Whether the return value should be read-only or not. If `None`, then no
-        changes are made to the return value; if a new array is allocated in the
-        `to_array()` function call, then it is returned in a writeable form. If
-        `frozen=True`, then the return value is always a read-only array; if
-        `obj` is not already read-only, then a copy of `obj` is always returned
-        in this case. If `frozen=False`, then the return-value is never
-        read-only. Note that `scipy.sparse` arrays do not support read-only
-        mode, and thus a `ValueError` is raised if a sparse matrix is requested
-        in read-only format.
-    quant : boolean or None, optional
-        Whether the return value should be a `Quantity` object wrapping the
-        array (`quant=True`) or the array itself (`quant=False`). If `quant` is
-        `None` (the default) then the return value is a quantity if either `obj`
-        is a quantity or an explicit `unit` parameter is given and is not a
-        quantity if `obj` is not a quantity.
+        Whether to copy the data in `obj` or not. If ``False``, then `obj` is
+        only copied if doing so is required by the optional parameters. If
+        ``True``, then `obj` is always copied if possible.
+    sparse : bool, 'csr', 'coo', or None, optional
+        If ``None``, then the sparsity of `obj` is the same as the sparsity of
+        the array that is returned. Otherwise, the return value will always be
+        either a ``scipy.spase`` matrix (``sparse=True``) or a
+        ``numpy.ndarray`` (``sparse=False``) based on the given value of
+        `sparse`. The `sparse` parameter may also be set to ``'bsr'``,
+        ``'coo'``, ``'csc'``, ``'csr'``, ``'dia'``, or ``'dok'`` to return
+        specific sparse matrix types.
+    frozen : bool or None, optional
+        Whether the return value should be read-only or not. If ``None``, then
+        no changes are made to the return value; if a new array is allocated in
+        the ``to_array()`` function call, then it is returned in a writeable
+        form. If ``frozen=True``, then the return value is always a read-only
+        array; if `obj` is not already read-only, then a copy of `obj` is
+        always returned in this case. If ``frozen=False``, then the
+        return-value is never read-only.
+    quant : bool or None, optional
+        Whether the return value should be a ``Quantity`` object wrapping the
+        array (``quant=True``) or the array itself (``quant=False``). If
+        `quant` is ``None`` (the default) then the return value is a quantity
+        if either `obj` is a quantity or an explicit `unit` parameter is given
+        and is not a quantity if `obj` is not a quantity.
     ureg : pint.UnitRegistry or None, optional
-        The `pint` `UnitRegistry` object to use for units. If `ureg` is
-        `Ellipsis`, then `immlib.units` is used. If `ureg` is `None` (the
-        default), then no specific coersion to a `UnitRegistry` is performed
+        The ``pint.UnitRegistry`` object to use for units. If `ureg` is
+        ``Ellipsis``, then ``immlib.units`` is used. If `ureg` is ``None`` (the
+        default), then no specific coersion to a ``UnitRegistry`` is performed
         (i.e., the same quantity class is returned).
-    unit : unit-like or boolean or Ellipsis, optional
+    unit : unit-like, bool, or Ellipsis, optional
         The unit that should be used in the return value. When the return value
-        of this function is a `Quantity` (see the `quant` parameter), the
+        of this function is a ``Quantity`` (see the `quant` parameter), the
         returned quantity always has a unit matching the `unit` parameter; if
         the provided `obj` is not a quantity, then its unit is presumed to be
         that requested by `unit`. When the return value of this function is not
-        a `Quantity` object and is instead is a NumPy array object, then when
+        a ``Quantity`` object and is instead is a NumPy array object, then when
         `obj` is not a quantity the `unit` parameter is ignored, and when `obj`
         is a quantity, its magnitude is returned after conversion into
-        `unit`. The default value of `unit`, `Ellipsis`, indicates that, if
+        `unit`. The default value of `unit`, ``Ellipsis``, indicates that, if
         `obj` is a quantity, its unit should be used, and `unit` should be
         considered dimensionless otherwise.
-    detach : boolean, optional
+    detach : bool, optional
         If the argument is a PyTorch tensor that requires gradient tracking,
-        then it must be detached from the gradient tracking system before it can
-        be turned into an array. If `detach` is `True` (the default), then this
-        detachment is performed automatically. Otherwise, an error is raised
-        if a tensor would need to be detached.
+        then it must be detached from the gradient tracking system before it
+        can be turned into an array. If `detach` is ``True`` (the default),
+        then this detachment is performed automatically. Otherwise, an error is
+        raised if a tensor would need to be detached.
 
     Returns
     -------
-    NumPy array or Quantity
-        Either a NumPy array equivalent to `obj` or a `Quantity` whose magnitude
-        is a NumPy array equivalent to `obj`.
+    numpy.ndarray or pint.Quantity
+        Either a NumPy array equivalent to `obj` or a ``Quantity`` whose
+        magnitude is a NumPy array equivalent to `obj`.
 
     Raises
     ------
     ValueError
         If invalid parameter values are given or if the parameters conflict.
+    
+    See Also
+    --------
+    to_tensor, to_numeric
     """
     if ureg is Ellipsis:
         from immlib import units as ureg
@@ -1122,13 +1245,13 @@ def to_array(obj,
             obj = obj.detach()
         else:
             raise ValueError(
-                f"to_array: tensor requires grad but detach option is non-true")
+                f"to_array: tensor requires grad but detach is non-true")
     newarr = False # True means we own the memory of arr; False means we don't.
     if sparse is not False and (sparse is not None or obj_is_sparse):
         # That condition is rough to parse; essentially, in this then-clause:
         #  * the user isn't requesting a dense output explicitly, and
-        #  * the inputs tell us that we need a sparse output (because either the
-        #    user is requesting a sparse output explicitly or they have
+        #  * the inputs tell us that we need a sparse output (because either
+        #    the user is requesting a sparse output explicitly or they have
         #    requested no change in output sparsity and the input is sparse).
         if sparse is None or sparse is True:
             layout = sparse_layout(obj if obj_is_sparse else 'coo')
@@ -1142,7 +1265,7 @@ def to_array(obj,
             layout = sparse_layout(sparse)
             if layout is None:
                 raise ValueError(
-                    f"invalid scipy sparse array layout of type {type(sparse)}")
+                    f"invalid scipy sparse array layout type: {type(sparse)}")
         # We now have a layout that we are converting into.
         if obj_is_sparse:
             # We're creating a scipy sparse output from a sparse input.
@@ -1163,15 +1286,16 @@ def to_array(obj,
                     shape=arr.shape,
                     dtype=dtype)
             else:
-                # We're creating a scipy sparse output from another scipy sparse
-                # matrix. The scipy.sparse API (i.e., the find() function) does
-                # not let us get access to the data itself, and using obj.data
-                # along with the first two return values of sps.find (the
-                # indices) can cause problems because find doesn't always return
-                # the data in the same order as obj.data. So we must make a copy
-                # of the data in this case unless we know that the dtype and
-                # order have not been changed; since order doesn't apply to 1d
-                # vectors we can ignore it.
+                # We're creating a scipy sparse output from another scipy
+                # sparse matrix. The scipy.sparse API (i.e., the find()
+                # function) does not let us get access to the data itself, and
+                # using obj.data along with the first two return values of
+                # sps.find (the indices) can cause problems because find
+                # doesn't always return the data in the same order as
+                # obj.data. So we must make a copy of the data in this case
+                # unless we know that the dtype and order have not been
+                # changed; since order doesn't apply to 1d vectors we can
+                # ignore it.
                 if dtype is None or dtype == obj.dtype:
                     arr = obj
                 else:
@@ -1230,7 +1354,8 @@ def to_array(obj,
         # dense.
         sparse = False
     # If a read-only array is requested, we either return the object itself (if
-    # it is already a read-only array), or we make a copy and make it read-only.
+    # it is already a read-only array), or we make a copy and make it
+    # read-only.
     if frozen is True:
         if sparse:
             arr = sparray_frozen(arr)
@@ -1248,7 +1373,8 @@ def to_array(obj,
         frozen = sparray_isfrozen(arr) if sparse else ndarray_isfrozen(arr)
     else:
         raise ValueError(f"bad parameter value for frozen: {frozen}")
-    # Next, we switch on whether we are being asked to return a quantity or not.
+    # Next, we switch on whether we are being asked to return a quantity or
+    # not.
     if quant is None:
         quant = (q if unit is Ellipsis else unit) is not None
     if quant is True:
@@ -1294,189 +1420,208 @@ def to_array(obj,
             f" got object of type {type(quant)}")
 
 
-# PyTorch Tensors ##############################################################
+# PyTorch Tensors #############################################################
 
-# At this point, either torch has been imported or it hasn't, but either way, we
-# can use @checktorch to make sure that errors are thrown when torch isn't
+# At this point, either torch has been imported or it hasn't, but either way,
+# we can use @checktorch to make sure that errors are thrown when torch isn't
 # present. Otherwise, we can just write the functions assuming that torch is
 # imported.
-@docwrap
+@docwrap('immlib.unit.is_torchdtype')
 @alttorch(lambda dt: False)
-def is_torchdtype(dt):
-    """Returns `True` for a PyTroch `dtype` object and `False` otherwise.
+def is_torchdtype(obj, /):
+    """Returns ``True`` for a PyTroch ``dtype`` object and ``False`` otherwise.
     
-    `is_torchdtype(obj)` returns `True` if the given object `obj` is an instance
-    of the `torch.dtype` class.
-    
-    Parameters
-    ----------
-    obj : object
-        The object whose quality as a PyTorch `dtype` object is to be assessed.
-    
-    Returns
-    -------
-    boolean
-        `True` if `obj` is a valid `torch.dtype`, otherwise `False`.
-    """
-    return isinstance(dt, torch.dtype)
-@docwrap
-def like_torchdtype(dt):
-    """Returns `True` for any object that can be converted into a `torch.dtype`.
-    
-    `like_torchdtype(obj)` returns `True` if the given object `obj` is an
-    instance of the `torch.dtype` class, is a string that names a `torch.dtype`
-    object, or is a `numpy.dtype` object that is compatible with PyTorch. Note
-    that `None` is equivalent to `torch`'s default dtype.
+    ``is_torchdtype(obj)`` returns ``True`` if the given object `obj` is an
+    instance of the ``torch.dtype`` class.
     
     Parameters
     ----------
     obj : object
-        The object whose quality as a PyTorch `dtype` object is to be assessed.
+        The object whose quality as a PyTorch ``dtype`` object is to be
+        assessed.
     
     Returns
     -------
-    boolean
-        `True` if `obj` can be converted into a valid `torch.dtype`, otherwise
-        `False`.
+    bool
+        ``True`` if `obj` is a valid ``torch.dtype``, otherwise ``False``.
     """
-    if is_torchdtype(dt):
+    return isinstance(obj, torch.dtype)
+@docwrap('immlib.unit.like_torchdtype')
+def like_torchdtype(obj, /):
+    """Returns ``True`` for any object that can be converted into a
+    ``torch.dtype``.
+    
+    ``like_torchdtype(obj)`` returns ``True`` if the given object `obj` is an
+    instance of the ``torch.dtype`` class, is a string that names a
+    ``torch.dtype`` object, or is a ``numpy.dtype`` object that is compatible
+    with PyTorch. Note that ``None`` is equivalent to ``torch``'s default
+    ``dtype``.
+    
+    Parameters
+    ----------
+    obj : object
+        The object whose quality as a PyTorch ``dtype`` object is to be
+        assessed.
+    
+    Returns
+    -------
+    bool
+        ``True`` if `obj` can be converted into a valid ``torch.dtype``,
+        otherwise ``False``.
+    """
+    if is_torchdtype(obj):
         return True
-    elif is_numpydtype(dt):
-        try: return None is not torch.from_numpy(np.array([], dtype=dt))
-        except TypeError: return False
-    elif is_str(dt):
-        try: return is_torchdtype(getattr(torch, dt))
-        except AttributeError: return False
-    elif dt is None:
+    elif is_numpydtype(obj):
+        try:
+            return None is not torch.from_numpy(np.array((), dtype=obj))
+        except TypeError:
+            return False
+    elif is_str(obj):
+        try:
+            return is_torchdtype(getattr(torch, obj))
+        except AttributeError:
+            return False
+    elif obj is None:
         return True
     else:
-        try: return None is not torch.from_numpy(np.array([], dtype=dt))
-        except Exception: return False
-@docwrap
+        try:
+            return None is not torch.from_numpy(np.array((), dtype=obj))
+        except Exception:
+            return False
+@docwrap('immlib.unit.to_torchdtype')
 @checktorch
-def to_torchdtype(dt):
-    """Returns a `torch.dtype` object equivalent to the given argument `dt`.
+def to_torchdtype(obj, /):
+    """Returns a ``torch.dtype`` object equivalent to the given argument `obj`.
 
-    `to_torchdtype(obj)` attempts to coerce the given `obj` into a `torch.dtype`
-    object. If `obj` is already a `torch.dtype` object, then `obj` itself is
-    returned. If the object cannot be converted into a `torch.dtype` object,
-    then an error is raised.
+    ``to_torchdtype(obj)`` attempts to coerce the given `obj` into a
+    ``torch.dtype`` object. If `obj` is already a ``torch.dtype`` object,
+    then `obj` itself is returned. If the object cannot be converted into a
+    ``torch.dtype`` object, then an error is raised.
 
-    The following kinds of objects can be converted into a `torch.dtype` (see
-    also `like_numpydtype()`):
-     * `torch.dtype` objects;
-     * `numpy.dtype` objects with compatible (numeric) types;
-     * strings that name `torch.dtype` objects; or
-     * any object that can be passed to `numpy.dtype()`, such as `numpy.int32`,
-       that also creates a compatible (numeric) type.
+    The following kinds of objects can be converted into a ``torch.dtype`` (see
+    also ``like_numpydtype()``):
+     - ``torch.dtype`` objects;
+     - ``numpy.dtype`` objects with compatible (numeric) types;
+     - strings that name ``torch.dtype`` objects; or
+     - any object that can be passed to ``numpy.dtype()``, such as
+       ``numpy.int32``, that also creates a compatible (numeric) type.
 
     Parameters
     ----------
     obj : object
-        The object whose quality as a NumPy `dtype` object is to be assessed.
+        The object whose quality as a NumPy ``dtype`` object is to be assessed.
 
     Returns
     -------
     numpy.dtype
-        The `numpy.dtype` object that is equivalent to the argument `dt`.
+        The ``numpy.dtype`` object that is equivalent to the argument `obj`.
 
     Raises
     ------
     TypeError
-        If the given argument `dt` cannot be converted into a `numpy.dtype`
+        If the given argument `obj` cannot be converted into a ``numpy.dtype``
         object.
     """
-    if is_torchdtype(dt):
-        return dt
+    if is_torchdtype(obj):
+        return obj
     else:
-        return torch.as_tensor(np.array([], dtype=dt)).dtype
+        return torch.as_tensor(np.array([], dtype=obj)).dtype
 def _is_never_tensor(obj,
                      dtype=None, shape=None, ndim=None, numel=None,
                      device=None, requires_grad=None,
                      sparse=None, quant=None, unit=Ellipsis, ureg=None):
     return False
-@docwrap
+@docwrap('immlib.is_tensor')
 @alttorch(_is_never_tensor)
-def is_tensor(obj,
-              dtype=None, shape=None, ndim=None, numel=None,
+def is_tensor(obj, /, dtype=None, *,
+              shape=None, ndim=None, numel=None,
               device=None, requires_grad=None,
               sparse=None, quant=None, unit=Ellipsis, ureg=None):
-    """Returns `True` if an object is a `torch.tensor` object, else `False`.
+    """Returns ``True`` if the argument is a ``torch.tensor`` object, otherwise
+    returns ``False``.
 
-    `is_tensor(obj)` returns `True` if the given object `obj` is an instance of
-    the `torch.Tensor` class or is a `pint.Quantity` object whose magnitude is
-    an instance of `torch.Tensor`. Additional constraints may be placed on the
-    object via the optional argments.
+    ``is_tensor(obj)`` returns ``True`` if the given object `obj` is an
+    instance of the ``torch.Tensor`` class or is a ``pint.Quantity`` object
+    whose magnitude is an instance of ``torch.Tensor``. Additional constraints
+    may be placed on the object via the optional argments.
 
     Parameters
     ----------
     obj : object
         The object whose quality as a PyTorch tensor object is to be assessed.
     dtype : dtype-like or None, optional
-        The PyTorch `dtype` or dtype-like object that is required to match that
-        of the `obj` in order to be considered a valid tensor. The `obj.dtype`
-        matches the given `dtype` parameter if either `dtype` is `None` (the
-        default) or if `obj.dtype` is equal to the PyTorch equivalent ot
-        `dtype`. Alternately, `dtype` can be a tuple, in which case, `obj` is
-        considered valid if its dtype is any of the dtypes in `dtype`.
-    ndim : int or tuple or ints or None, optional
-        The number of dimensions that the object must have in order to be
-        considered a valid tensor. If `None`, then any number of dimensions is
-        acceptable (this is the default). If this is an integer, then the number
-        of dimensions must be exactly that integer. If this is a list or tuple
-        of integers, then the dimensionality must be one of these numbers.
-    shape : int or tuple of ints or None, optional
-        If the `shape` parameter is not `None`, then the given `obj` must have a
-        shape shape that matches the parameter value `sh`. The value `sh` must
-        be a tuple that is equal to the `obj`'s shape tuple with the following
-        additional rules: a `-1` value in the `sh` tuple will match any value in
-        the `obj`'s shape tuple, and a single `Ellipsis` may appear in `sh`,
-        which matches any number of values in the `obj`'s shape tuple. The
-        default value of `None` indicates that no restriction should be applied
-        to the `obj`'s shape.
-    numel : int or tuple of ints or None, optional
-        If the `numel` parameter is not `None`, then the given `obj` must have
-        the same number of elements as given by `numel`. If `numel` is a tuple,
-        then the number of elements in `obj` must be in the `numel` tuple. The
-        number of elements is the product of its shape.
+        The PyTorch `dtype` or a dtype-like object that is required to match
+        that of the `obj` in order to be considered a valid tensor. The
+        ``obj.dtype`` matches the given `dtype` parameter if either `dtype` is
+        ``None`` (the default) or if ``obj.dtype`` is equal to the PyTorch
+        equivalent ot `dtype`. Alternately, `dtype` can be a tuple, in which
+        case, `obj` is considered valid if its dtype is any of the dtypes in
+        `dtype`.  ndim : int or tuple or ints or None, optional The number of
+        dimensions that the object must have in order to be considered a valid
+        tensor. If ``None``, then any number of dimensions is acceptable (this
+        is the default). If this is an integer, then the number of dimensions
+        must be exactly that integer. If this is a list or tuple of integers,
+        then the dimensionality must be one of these numbers.
+    shape : int, tuple of ints, None, optional
+        If the `shape` parameter is not ``None``, then the given `obj` must
+        have a shape shape that matches the parameter value. The value of
+        `shape` must be a tuple that is equal to `obj`'s shape tuple with the
+        following additional rules: a ``-1`` value in the `shape` tuple will
+        match any value in the `obj`'s shape tuple, and a single ``Ellipsis``
+        may appear in `shape`, which matches any number of values in the
+        `obj`'s shape tuple. The default value of ``None`` indicates that no
+        restriction should be applied to the `obj`'s shape.
+    numel : int, tuple of ints, or None, optional
+        If the `numel` parameter is not ``None``, then the given `obj` must
+        have the same number of elements as given by `numel`. If `numel` is a
+        tuple, then the number of elements in `obj` must be in the `numel`
+        tuple. The number of elements is the product of its shape.
     device : device-name or None, optional
-        If `None`, then a tensor with any `device` field is considered valid;
-        otherwise, the `device` parameter must equal `obj.device` for `obj` to
-        be considered a valid tensor. The default value is `None`.
-    requires_grad : boolean or None, optional
-        If `None`, then a tensor with any `requires_grad` field is considered
+        If `device` is ``None``, then a tensor with any `device` field is
+        considered valid; otherwise, the `device` parameter must equal
+        ``obj.device`` for `obj` to be considered a valid tensor. The default
+        value is ``None``.
+    requires_grad : bool or None, optional
+        If ``None``, then a tensor with any `requires_grad` field is considered
         valid; otherwise, the `requires_grad` parameter must equal
-        `obj.requires_grad` for `obj` to be considered a valid tensor. The
-        default value is `None`.
-    sparse : boolean or False, optional
-        If the `sparse` parameter is `None`, then no requirements are placed on
-        the sparsity of `obj` for it to be considered a valid tensor. If
-        `sparse` is `True` or `False`, then `obj` must either be sparse or not
-        be sparse, respectively, for `obj` to be considered valid. If `sparse`
-        is a string, then it must be either `'coo'` or `'csr'`, indicating the
-        required sparse array type.
-    quant : boolean, optional
-        Whether `Quantity` objects should be considered valid tensors or not.
-        If `quant=True` then `obj` is considered a valid array only when `obj`
-        is a quantity object with a `torch` tensor as the magnitude. If `False`,
-        then `obj` must be a `torch` tensor itself and not a `Quantity` to be
-        considered valid. If `None` (the default), then either quantities or
-        `torch` tensors are considered valid.
-    unit : unit-like or Ellipsis, optional
-        A unit with which the object obj's unit must be compatible in order
-        for `obj` to be considered a valid tensor. An `obj` that is not a
-        quantity is considered to have a unit of `None`. If `unit=Ellipsis`
-        (the default), then the object's unit is ignored.
-    ureg : UnitRegistry or None or Ellipsis, optional
-        The `pint` `UnitRegistry` object to use for units. If `ureg` is
-        `Ellipsis`, then `immlib.units` is used. If `ureg` is `None` (the
-        default), then the registry of `obj` is used if `obj` is a quantity, and
-        `immlib.units` is used if not.
+        ``obj.requires_grad`` for `obj` to be considered a valid tensor. The
+        default value is ``None``.
+    sparse : bool or None, optional
+        If the `sparse` parameter is ``None``, then no requirements are placed
+        on the sparsity of `obj` for it to be considered a valid tensor. If
+        `sparse` is ``True`` or ``False``, then `obj` must either be sparse or
+        not be sparse, respectively, for `obj` to be considered valid. If
+        `sparse` is a string, then it must be either ``'coo'`` or ``'csr'``,
+        indicating the required sparse array type.
+    quant : bool, optional
+        Whether ``pint.Quantity`` objects should be considered valid tensors or
+        not.  If `quant` is ``True`` then `obj` is considered a valid array
+        only when `obj` is a quantity object with a ``torch`` tensor as the
+        magnitude. If `quant` is ``False``, then `obj` must be a ``torch``
+        tensor itself and not a ``Quantity`` to be considered valid. If `quant`
+        is ``None`` (the default), then either quantities or ``torch`` tensors
+        are considered valid.
+    unit : unit-like, None, Ellipsis, optional
+        A unit with which the object obj's unit must be compatible in order for
+        `obj` to be considered a valid tensor. An `obj` that is not a quantity
+        is considered to have a unit of ``None``. If ``unit=Ellipsis`` (the
+        default), then the object's unit is ignored.
+    ureg : UnitRegistry, None, or Ellipsis, optional
+        The ``pint.UnitRegistry`` object to use for units. If `ureg` is
+        ``Ellipsis``, then ``immlib.units`` is used. If `ureg` is ``None`` (the
+        default), then the registry of `obj` is used if `obj` is a quantity,
+        and ``immlib.units`` is used if not.
 
     Returns
     -------
     boolean
-        `True` if `obj` is a valid PyTorch tensor, otherwise `False`.
+        ``True`` if `obj` is a valid PyTorch tensor whose properties match the
+        requirements spelled out by the optional parameters, otherwise
+        ``False``.
+
+    See Also
+    --------
+    is_array, is_numeric
     """
     # If so, we can process the arguments.
     if ureg is Ellipsis:
@@ -1539,80 +1684,91 @@ def is_tensor(obj,
     if dtype is None and shape is None and ndim is None and numel is None:
         return True
     return _numcoll_match(obj.shape, obj.dtype, ndim, shape, numel, dtype)
-def to_tensor(obj,
-              dtype=None, device=None, requires_grad=None, copy=False,
+@docwrap('immlib.to_tensor')
+def to_tensor(obj, /, dtype=None, *,
+              device=None, requires_grad=None, copy=False,
               sparse=None, quant=None, ureg=None, unit=Ellipsis):
-    """Reinterprets `obj` as a PyTorch tensor or quantity with tensor magnitude.
+    """Reinterprets `obj` as a PyTorch tensor or as a ``pint`` quantity with
+    a tensor magnitude.
 
-    `immlib.to_tensor` is roughly equivalent to the `torch.as_tensor` function
-    with a few exceptions:
-      * `to_tensor(obj)` allows quantities for `obj` and, in such a case, will
-        return a quantity whose magnitude has been reinterpreted as a tensor,
-        though this behavior can be altered with the `quant` parameter;
-      * `to_tensor(obj)` can convet a SciPy sparse matrix into a sparrse tensor.
+    ``immlib.to_tensor`` is roughly equivalent to the ``torch.as_tensor``
+    function with a few exceptions:
+    
+      - ``to_tensor(obj)`` allows quantities for `obj` and, in such a case,
+        will return a quantity whose magnitude has been reinterpreted as a
+        tensor, though this behavior can be altered with the `quant`
+        parameter;
+      - ``to_tensor(obj)`` can convet a SciPy sparse matrix into a sparse
+        tensor.
 
     Parameters
     ----------
     obj : object
-        The object that is to be reinterpreted as, or if necessary covnerted to,
-        a PyTorch tensor object.
-    dtype : data-type, optional
-        The dtype that is passed to `torch.as_tensor(obj)`.
+        The object that is to be reinterpreted as or covnerted to, a PyTorch
+        tensor object.
+    dtype : dtype-like, optional
+        The `dtype` that is passed to ``torch.as_tensor(obj)``.
     device : device name or None, optional
-        The `device` parameter that is passed to `torch.as_tensor(obj)`, `None`
-        by default.
-    requires_grad : boolean or None, optional
-        Whether the returned tensor should require gradient calculations or not.
-        If `None` (the default), then the objecct `obj` is not changed from its
-        current gradient settings, if `obj` is a tensor, and `obj` is not made
-        to track its gradient if it is converted into a tensor. If the 
+        The `device` parameter that is passed to ``torch.as_tensor(obj)``,
+        ``None`` by default.
+    requires_grad : bool or None, optional
+        Whether the returned tensor should require gradient calculations or
+        not.  If ``None`` (the default), then the objecct `obj` is not changed
+        from its current gradient settings, if `obj` is a tensor, and `obj` is
+        not made to track its gradient if it is converted into a tensor. If the
         `requires_grad` parameter does not match the given tensor's
         `requires_grad` field, then a copy is always returned.
-    copy : boolean, optional
-        Whether to copy the data in `obj` or not. If `False`, then `obj` is only
-        copied if doing so is required by the optional parameters. If `True`,
-        then `obj` is always copied if possible.
-    sparse : boolean or {'csr','coo'} or None, optional
-        If `None`, then the sparsity of `obj` is the same as the sparsity of the
-        tensor that is returned. Otherwise, the return value will always be
-        either a spase tensor (`sparse=True`) or a dense tensor (`sparse=False`)
-        based on the given value of `sparse`. The `sparse` parameter may also be
-        set to `'coo'` or `'csr'` to return specific sparse layouts.
-    quant : boolean or None, optional
-        Whether the return value should be a `Quantity` object wrapping the
-        array (`quant=True`) or the tensor itself (`quant=False`). If `quant` is
-        `None` (the default) then the return value is a quantity if either `obj`
-        is a quantity or an explicit `unit` parameter is given and is not a
-        quantity if `obj` is not a quantity.
+    copy : bool, optional
+        Whether to copy the data in `obj` or not. If ``False``, then `obj` is
+        only copied if doing so is required by the optional parameters. If
+        ``True``, then `obj` is always copied if possible.
+    sparse : bool, {'csr','csc','bsr','bsc','coo'}, or None, optional
+        If ``None``, then the sparsity of `obj` is the same as the sparsity of
+        the tensor that is returned. Otherwise, the return value will always be
+        either a spase tensor (``sparse=True``) or a dense tensor
+        (``sparse=False``) based on the given value of ``sparse``. The
+        ``sparse`` parameter may also be set to the name of a sparse layout in
+        order to convert the object into that layout. Possible sparse layouts
+        include ``'coo'``, ``'csr'``, ``'csc'``, ``'bsr'``, and ``'bsc'``.
+    quant : bool or None, optional
+        Whether the return value should be a ``Quantity`` object wrapping the
+        array (``quant=True``) or the tensor itself (``quant=False``). If
+        `quant` is ``None`` (the default) then the return value is a quantity
+        if either `obj` is a quantity or an explicit `unit` parameter is given
+        and is not a quantity if `obj` is not a quantity.
     ureg : pint.UnitRegistry or None, optional
-        The `pint` `UnitRegistry` object to use for units. If `ureg` is
-        `Ellipsis`, then `immlib.units` is used. If `ureg` is `None` (the
-        default), then no specific coersion to a `UnitRegistry` is performed
-        (i.e., the same quantity class is returned).
-    unit : unit-like or boolean or Ellipsis, optional
+        The ``pint.UnitRegistry`` object to use for units. If `ureg` is
+        ``Ellipsis``, then ``immlib.units`` is used. If `ureg` is ``None`` (the
+        default), then no specific coersion to a ``pint.UnitRegistry`` is
+        performed (i.e., the specific subclass of ``pint.Quantity`` used by
+        `obj` is not changed).
+    unit : unit-like, bool, None, or Ellipsis, optional
         The unit that should be used in the return value. When the return value
-        of this function is a `Quantity` (see the `quant` parameter), the
-        returned quantity always has units matching the `unit` parameter; if
-        the provided `obj` is not a quantity, then its unit is presumed to be
-        that requested by `unit`. When the return value of this function is
-        not a `Quantity` object and is instead a PyTorch tensor object, then
-        when `obj` is not a quantity the `unit` parameter is ignored, and when
-        `obj` is a quantity, its magnitude is returned after conversion into
-        `unit`. The default value of `unit`, `Ellipsis`, indicates that, if
-        `obj` is a quantity, its unit should be used, and `unit` should be
+        of this function is a ``pint.Quantity`` (see the `quant` parameter),
+        the returned quantity always has units matching the `unit` parameter;
+        if the provided `obj` is not a quantity, then its unit is presumed to
+        be that requested by `unit`. When the return value of this function is
+        not a ``pint.Quantity`` object and is instead a PyTorch tensor object,
+        then when `obj` is not a quantity the `unit` parameter is ignored, and
+        when `obj` is a quantity, its magnitude is returned after conversion
+        into `unit`. The default value of `unit`, ``Ellipsis``, indicates that,
+        if `obj` is a quantity, its unit should be used, and `unit` should be
         considered dimensionless otherwise.
 
     Returns
     -------
-    NumPy array or Quantity
-        Either a PyTorch tensor equivalent to `obj` or a `Quantity` whose
-        magnitude is a PyTorch tensor equivalent to `obj`.
+    torch.Tensor or pint.Quantity
+        Either a PyTorch tensor equivalent to `obj` or a ``pint.Quantity``
+        whose magnitude is a PyTorch tensor equivalent to `obj`.
 
     Raises
     ------
     ValueError
         If invalid parameter values are given or if the parameters conflict.
 
+    See Also
+    --------
+    to_array, to_numeric
     """
     if ureg is Ellipsis:
         from immlib import units as ureg
@@ -1711,7 +1867,8 @@ def to_tensor(obj,
                     f"to_tensor: invalid sparse option of type {type(sparse)}")
         if arr.layout != layout.torch_layout:
             arr = layout.torch_tomethod(arr)
-    # Next, we switch on whether we are being asked to return a quantity or not.
+    # Next, we switch on whether we are being asked to return a quantity or
+    # not.
     if quant is None:
         quant = (q if unit is Ellipsis else unit) is not None
     if quant is True:
@@ -1722,8 +1879,9 @@ def to_tensor(obj,
         if q is None:
             if unit is Ellipsis:
                 raise ValueError(
-                    "to_tensor(x): cannot make a quantity (quant=True) with the"
-                    " same unit as x (unit=...) when the x is not a quantity")
+                    "to_tensor(x): cannot make a quantity (quant=True) with"
+                    " the same unit as x (unit=Ellipsis) when x is not a"
+                    " quantity")
             return ureg.Quantity(arr, unit)
         else:
             from ._quantity import unitregistry
@@ -1757,18 +1915,25 @@ def to_tensor(obj,
             f" got object of type {type(quant)}")
 
 
-# General Numeric Collection Functions #########################################
-@docwrap
-def is_numeric(obj,
-               dtype=None, shape=None, ndim=None, numel=None,
-               sparse=None, quant=None, unit=Ellipsis, ureg=None):
-    """Returns `True` if an object is a numeric type and `False` otherwise.
+# General Numeric Collection Functions ########################################
 
-    `is_numeric(obj)` returns `True` if the given object `obj` is an instance of
-    the `torch.Tensor` class, the `numpy.ndarray` class, one one of the
-    `scipy.sparse` matrix classes, or is a `pint.Quantity` object whose
-    magnitude is an instance of one of these types. Additional constraints may
-    be placed on the object via the optional argments.
+@docwrap('immlib.is_numeric')
+def is_numeric(obj, /, dtype=None, *,
+               shape=None, ndim=None, numel=None,
+               sparse=None, quant=None, unit=Ellipsis, ureg=None):
+    """Returns ``True`` if an object is a numerical collection type and
+    ``False`` otherwise.
+
+    ``is_numeric(obj)`` returns ``True`` if the given object `obj` is an
+    instance of the ``torch.Tensor`` class, the ``numpy.ndarray`` class, one
+    one of the ``scipy.sparse`` array classes, or is a ``pint.Quantity``
+    object whose magnitude is an instance of one of these types. Additional
+    constraints may be placed on the object via the optional argments.
+
+    .. Note:: The ``is_numeric`` function is similar to the ``is_array`` and
+        ``is_tensor`` functions butis agnostic about whether its argument is a
+        PyTorch tensor, a NumPy array, or an object that can be converted into
+        one of these types.
 
     Parameters
     ----------
@@ -1776,62 +1941,72 @@ def is_numeric(obj,
         The object whose quality as a numeric object is to be assessed.
     dtype : dtype-like or None, optional
         The NumPy or PyTorch `dtype` or dtype-like object that is required to
-        match that of the `obj` in order to be considered valid. The `obj.dtype`
-        matches the given `dtype` parameter if either `dtype` is `None` (the
-        default) or if `obj.dtype` is equivalent to `dtype`. Alternately,
-        `dtype` can be a tuple, in which case, `obj` is considered valid if its
-        dtype is any of the dtypes in `dtype`.
-    ndim : int or tuple or ints or None, optional
+        match that of the `obj` in order to be considered valid. The
+        ``obj.dtype`` matches the given `dtype` parameter if either `dtype` is
+        ``None`` (the default) or if ``obj.dtype`` is equivalent to
+        `dtype`. Alternately, `dtype` can be a tuple, in which case, `obj` is
+        considered valid if its dtype is any of the dtypes in `dtype`.
+    ndim : int, tuple or ints, or None, optional
         The number of dimensions that the object must have in order to be
-        considered valid. If `None`, then any number of dimensions is acceptable
-        (this is the default). If this is an integer, then the number of
-        dimensions must be exactly that integer. If this is a list or tuple of
-        integers, then the dimensionality must be one of these numbers.
-    shape : int or tuple of ints or None, optional
-        If the `shape` parameter is not `None`, then the given `obj` must have a
-        shape that matches the parameter value `sh`. The value `sh` must be a
-        tuple that is equal to the `obj`'s shape tuple with the following
-        additional rules: a `-1` value in the `sh` tuple will match any value in
-        the `obj`'s shape tuple, and a single `Ellipsis` may appear in `sh`,
-        which matches any number of values in the `obj`'s shape tuple. The
-        default value of `None` indicates that no restriction should be applied
-        to the `obj`'s shape.
-    sparse : boolean or False, optional
-        If the `sparse` parameter is `None`, then no requirements are placed on
-        the sparsity of `obj` for it to be considered valid. If `sparse` is
-        `True` or `False`, then `obj` must either be sparse or not be sparse,
-        respectively, for `obj` to be considered valid. If `sparse` is a string,
-        then it must be a valid sparse matrix type that matches the type of
-        `obj` for `obj` to be considered valid.
-    numel : int or tuple of ints or None, optional
-        If the `numel` parameter is not `None`, then the given `obj` must have
-        the same number of elements as given by `numel`. If `numel` is a tuple,
-        then the number of elements in `obj` must be in the `numel` tuple. The
-        number of elements is the product of its shape.
-    quant : boolean, optional
-        Whether `Quantity` objects should be considered valid or not.  If
-        `quant=True` then `obj` is considered a valid numerical object only when
-        `obj` is a quantity object with a valid numerical object as the
-        magnitude. If `False`, then `obj` must be a numerical object itself and
-        not a `Quantity` to be considered valid. If `None` (the default), then
-        either quantities or numerical objects are considered valid.
+        considered valid. If `ndim` is ``None``, then any number of dimensions
+        is acceptable (this is the default). If it is an integer, then the
+        number of dimensions must be exactly that integer. If this is a list or
+        tuple of integers, then the dimensionality must be one of the listedn
+        numbers.
+    shape : int, tuple of ints, or None, optional
+        If the `shape` parameter is not ``None``, then the given `obj` must
+        have a shape that matches the parameter value. The value of `shape`
+        must be a tuple that is equal to the shape of `obj` with the following
+        additional rules: a ``-1`` value in the `shape` tuple will match any
+        value in the shape of `obj`, and a single ``Ellipsis`` may appear in
+        `shape`, which matches any number of values in the shape tuple of
+        `obj`. The default value of ``None`` indicates that no restriction
+        should be applied to the shape of `obj`.
+    sparse : bool or False, optional
+        If the ``sparse`` parameter is ``None``, then no requirements are
+        placed on the sparsity of `obj` for it to be considered valid. If
+        `sparse` is ``True`` or ``False``, then `obj` must either be sparse or
+        not be sparse, respectively, for `obj` to be considered valid. If
+        `sparse` is a string, then it must be a valid sparse array type that
+        matches the type of `obj` for `obj` to be considered valid.
+    numel : int, tuple of ints, or None, optional
+        If the `numel` parameter is not ``None``, then the given `obj` must
+        have the same number of elements as given by `numel`. If `numel` is a
+        tuple, then the number of elements in `obj` must be in the `numel`
+        tuple. The number of elements is the product of its shape.
+    quant : bool, optional
+        Whether ``pint.Quantity`` objects should be considered valid or not.
+        If ``quant=True`` then `obj` is considered a valid numerical object
+        only when `obj` is a quantity object with a valid numerical object as
+        the magnitude. If ``quant=False``, then `obj` must be a numerical
+        object itself and not a ``pint.Quantity`` to be considered valid. If
+        ``quant=None`` (the default), then either quantities or numerical
+        objects are considered valid.
     unit : unit-like or Ellipsis, optional
-        A unit with which the object obj's unit must be compatible in order for
+        A unit with which the unit of `obj` must be compatible in order for
         `obj` to be considered a valid numerical object. An `obj` that is not a
-        quantity is considered to have dimensionless units. If `unit=Ellipsis`
-        (the default), then the object's unit is ignored.
-    ureg : UnitRegistry or None or Ellipsis, optional
-        The `pint` `UnitRegistry` object to use for units. If `ureg` is
-        `Ellipsis`, then `immlib.units` is used. If `ureg` is `None` (the
-        default), then the registry of `obj` is used if `obj` is a quantity, and
-        `immlib.units` is used if not.
+        quantity is considered to have dimensionless units. If
+        ``unit=Ellipsis`` (the default), then the object's unit is ignored.
+    ureg : UnitRegistry, None, or Ellipsis, optional
+        The ``pint.UnitRegistry`` object to use for units. If `ureg` is
+        ``Ellipsis``, then ``immlib.units`` is used. If `ureg` is ``None`` (the
+        default), then the registry of `obj` is used if `obj` is a quantity,
+        and ``immlib.units`` is used if not.
 
     Returns
     -------
-    boolean
-        `True` if `obj` is a valid numerical object, otherwise `False`.
+    bool
+        ``True`` if `obj` is a valid numerical object, otherwise ``False``.
+
+    See Also
+    --------
+    is_array, is_tensor
     """
-    if torch.is_tensor(obj):
+    if isinstance(obj, pint.Quantity):
+        istns = torch.is_tensor(obj.m)
+    else:
+        istns = torch.is_tensor(obj)
+    if istns:
         return is_tensor(obj,
                          dtype=dtype, shape=shape, ndim=ndim, numel=numel,
                          sparse=sparse, quant=quant, unit=unit, ureg=ureg)
@@ -1839,76 +2014,84 @@ def is_numeric(obj,
         return is_array(obj,
                         dtype=dtype, shape=shape, ndim=ndim, numel=numel,
                         sparse=sparse, quant=quant, unit=unit, ureg=ureg)
-@docwrap
-def to_numeric(obj,
-               dtype=None, copy=False,
-               sparse=None, quant=None, ureg=None, unit=Ellipsis):
+@docwrap('immlib.to_numeric')
+def to_numeric(obj, /, dtype=None, *,
+               copy=False, sparse=None, quant=None, ureg=None, unit=Ellipsis):
     """Reinterprets `obj` as a numeric type or quantity with such a magnitude.
 
-    `immlib.to_numeric` is roughly equivalent to the `torch.as_tensor` or
-    `numpy.asarray` function with a few exceptions:
-      * `to_numeric(obj)` allows quantities for `obj` and, in such a case, will
-        return a quantity whose magnitude has been reinterpreted as a numeric,
-        object, though this behavior can be altered with the `quant` parameter;
-      * `to_numeric(obj)` correctly handles SciPy sparse matrices, NumPy arrays,
-        and PyTorch tensors.
+    ``immlib.to_numeric`` is roughly equivalent to the ``torch.as_tensor`` or
+    ``numpy.asarray`` function with a few exceptions:
 
-    If the object `obj` passed to `immlib.to_numeric(obj)` is a PyTorch tensor,
-    then a PyTorch tensor or a quantity with a PyTorch tensor magnitude is
+      - ``to_numeric(obj)`` allows quantities for `obj` and, in such a case,
+        will return a quantity whose magnitude has been reinterpreted as a
+        numeric object, though this behavior can be altered with the ``quant``
+        parameter;
+      - ``to_numeric(obj)`` correctly handles SciPy sparse matrices, NumPy
+        arrays, and PyTorch tensors.
+
+    If the object `obj` passed to ``immlib.to_numeric(obj)`` is a PyTorch
+    tensor or a quantity whose magnitude is a PyTorch tensor, then a PyTorch
+    tensor or a quantity with a PyTorch tensor magnitude is
     returned. Otherwise, a NumPy array, SciPy sparse matrix, or quantity with a
     magnitude matching one of these types is returned.
 
     Parameters
     ----------
     obj : object
-        The object that is to be reinterpreted as, or if necessary covnerted to,
-        a numeric object.
-    dtype : data-type, optional
-        The dtype that is passed to `torch.as_tensor(obj)` or `np.asarray(obj)`.
-    copy : boolean, optional
-        Whether to copy the data in `obj` or not. If `False`, then `obj` is only
-        copied if doing so is required by the optional parameters. If `True`,
-        then `obj` is always copied if possible.
-    sparse : boolean or {'csr','coo'} or None, optional
-        If `None`, then the sparsity of `obj` is the same as the sparsity of the
-        object that is returned. Otherwise, the return value will always be
-        either a spase object (`sparse=True`) or a dense object (`sparse=False`)
-        based on the given value of `sparse`. The `sparse` parameter may also be
-        set to `'coo'`, `'csr'`, or other sparse matrix names to return specific
-        sparse layouts.
-    quant : boolean or None, optional
-        Whether the return value should be a `Quantity` object wrapping the
-        object (`quant=True`) or the object itself (`quant=False`). If `quant`
-        is `None` (the default) then the return value is a quantity if `obj` is
-        a quantity and is not a quantity if `obj` is not a quantity.
+        The object that is to be reinterpreted as, or if necessary covnerted
+        to, a numeric object.
+    dtype : dtype-like or None, optional
+        The dtype that is passed to ``torch.as_tensor(obj)`` or
+        ``np.asarray(obj)``.
+    copy : bool, optional
+        Whether to copy the data in `obj` or not. If ``False``, then `obj` is
+        only copied if doing so is required by the optional parameters. If
+        ``True``, then `obj` is always copied if possible.
+    sparse : bool, {'csr','csc','bsr','bsc','coo'}, or None, optional
+        If ``None``, then the sparsity of `obj` is the same as the sparsity of
+        the object that is returned. Otherwise, the return value will always be
+        either a spase object (``sparse=True``) or a dense object
+        (``sparse=False``) based on the given value of `sparse`. The `sparse`
+        parameter may also be set to ``'coo'``, ``'csr'``, or other sparse
+        matrix names to return specific sparse layouts.
+    quant : bool or None, optional
+        Whether the return value should be a ``pint.Quantity`` object wrapping
+        wrapping the object (``quant=True``) or the object itself
+        (``quant=False``). If `quant` is ``None`` (the default) then the return
+        value is a quantity if `obj` is a quantity and is not a quantity if
+        `obj` is not a quantity.
     ureg : pint.UnitRegistry or None, optional
-        The `pint` `UnitRegistry` object to use for units. If `ureg` is
-        `Ellipsis`, then `immlib.units` is used. If `ureg` is `None` (the
-        default), then no specific coersion to a `UnitRegistry` is performed
-        (i.e., the same quantity class is returned).
-    unit : unit-like or boolean or Ellipsis, optional
+        The ``pint.UnitRegistry`` object to use for units. If `ureg` is
+        ``Ellipsis``, then ``immlib.units`` is used. If `ureg` is ``None`` (the
+        default), then no specific coersion to a ``pint.UnitRegistry`` is
+        performed (i.e., the same quantity class is returned).
+    unit : unit-like, bool, None, or Ellipsis, optional
         The unit that should be used in the return value. When the return value
-        of this function is a `Quantity` (see the `quant` parameter), the
-        returned quantity always has a unit matching the `unit` parameter; if
-        the provided `obj` is not a quantity, then its unit is presumed to be
-        those requested by `unit`. When the return value of this function is
-        not a `Quantity` object and is instead a numeric object, then
+        of this function is a ``pint.Quantity`` (see the `quant` parameter),
+        the returned quantity always has a unit matching the `unit` parameter;
+        if the provided `obj` is not a quantity, then its unit is presumed to
+        be those requested by `unit`. When the return value of this function is
+        not a ``pint.Quantity`` object and is instead a numeric object, then
         when `obj` is not a quantity the `unit` parameter is ignored, and when
         `obj` is a quantity, its magnitude is returned after conversion into
-        `unit`. The default value of `unit`, `Ellipsis`, indicates that, if
+        `unit`. The default value of `unit`, ``Ellipsis``, indicates that, if
         `obj` is a quantity, its unit should be used, and `unit` should be
-        considered dimensionless otherwise.
+        considered to be ``None`` otherwise.
 
     Returns
     -------
     NumPy array or PyTorch tensor or Quantity
         Either a NumPy array or PyTorch tensor equivalent to `obj` or a 
-       `Quantity` whose magnitude is such an object.
+        ``pint.Quantity`` whose magnitude is such an object.
 
     Raises
     ------
     ValueError
         If invalid parameter values are given or if the parameters conflict.
+
+    See Also
+    --------
+    to_array, to_tensor
     """
     if torch.is_tensor(obj):
         return to_tensor(obj,
@@ -1920,50 +2103,54 @@ def to_numeric(obj,
                         quant=quant, unit=unit, ureg=ureg)
 
 
-# Sparse Matrices and Dense Collections ########################################
-@docwrap
-def is_sparse(obj,
-              dtype=None, shape=None, ndim=None, numel=None,
-              quant=None, ureg=None, unit=Ellipsis):
-    """Returns `True` if an object is a sparse SciPy matrix or PyTorch tensor.
+# Sparse Matrices and Dense Collections #######################################
 
-    `is_sparse(obj)` returns `True` if the given object `obj` is an instance of
-    one of the SciPy sprase matrix classes, is a sparse PyTorch tensor, or is a
-    quantity whose magnintude is one of theese. Additional constraints may be
-    placed on the object via the optional argments.
+@docwrap('immlib.is_sparse')
+def is_sparse(obj, /, dtype=None, *,
+              shape=None, ndim=None, numel=None,
+              quant=None, ureg=None, unit=Ellipsis):
+    """Returns ``True`` if an object is a sparse SciPy array or a sparse
+    PyTorch tensor.
+
+    ``is_sparse(obj)`` returns ``True`` if the given object `obj` is an
+    instance of one of the SciPy sparse array classes, is a sparse PyTorch
+    tensor, or is a ``pint.Quantity`` whose magnintude is one of
+    theese. Additional constraints may be placed on the object via the optional
+    argments.
 
     Parameters
     ----------
     obj : object
-        The object whose quality as a sparse numerical object is to be assessed.
-    %(immlib.util._numeric.is_numeric.parameters.dtype)s
-    %(immlib.util._numeric.is_numeric.parameters.ndim)s
-    %(immlib.util._numeric.is_numeric.parameters.shape)s
-    %(immlib.util._numeric.is_numeric.parameters.numel)s
-    %(immlib.util._numeric.is_numeric.parameters.quant)s
-    %(immlib.util._numeric.is_numeric.parameters.ureg)s
-    %(immlib.util._numeric.is_numeric.parameters.unit)s
-    sparsetype : 'matrix' or 'array' or None, optional
-        The kind of sparse array to accept: either `'matrix'` for the scipy
-        sparse matrix types (e.g., `scipy.sparse.csr_matrix`) or `'array'` for
-        the sparse array types (e.g., `scipy.sparse.csr_array`). If the value is
-        `None` (the default) then either is accepted.
+        The object whose quality as a sparse numerical object is to be
+        assessed.
+    %(immlib.is_numeric.parameters.dtype)s
+    %(immlib.is_numeric.parameters.ndim)s
+    %(immlib.is_numeric.parameters.shape)s
+    %(immlib.is_numeric.parameters.numel)s
+    %(immlib.is_numeric.parameters.quant)s
+    %(immlib.is_numeric.parameters.ureg)s
+    %(immlib.is_numeric.parameters.unit)s
+    sparsetype : 'matrix', 'array', or None, optional
+        The kind of sparse array to accept: either ``'matrix'`` for the scipy
+        sparse matrix types (e.g., ``scipy.sparse.csr_matrix``) or ``'array'``
+        for the sparse array types (e.g., ``scipy.sparse.csr_array``). If the
+        value is ``None`` (the default) then either is accepted.
 
     Returns
     -------
-    boolean
-        `True` if `obj` is a valid sparse numerical object, otherwise `False`.
+    bool
+        ``True`` if `obj` is a valid sparse numerical object, otherwise
+        ``False``.
     """
     return is_numeric(obj, sparse=True,
                       dtype=dtype, shape=shape, ndim=ndim, numel=numel,
                       quant=quant, ureg=ureg, unit=unit)
-@docwrap
-def to_sparse(obj,
-              dtype=None, quant=None, ureg=None, unit=Ellipsis):
+@docwrap('immlib.to_sparse')
+def to_sparse(obj, /, dtype=None, *, quant=None, ureg=None, unit=Ellipsis):
     """Returns a sparse version of the numerical object `obj`.
 
-    `to_sparse(obj)` returns `obj` if it is already a PyTorch sparse tensor or a
-    SciPy sparse matrix or a quantity whose magnitude is one of these.
+    ``to_sparse(obj)`` returns `obj` if it is already a PyTorch sparse tensor
+    or a SciPy sparse matrix or a quantity whose magnitude is one of these.
     Otherwise, it converts `obj` into a sparse representation and returns
     this. Additional requirements on the output format of the return value can
     be added using the optional parameters.
@@ -1972,27 +2159,27 @@ def to_sparse(obj,
     ----------
     obj : object
         The object that is to be converted into a sparse representation.
-    %(immlib.util._numeric.to_numeric.parameters.dtype)s
-    %(immlib.util._numeric.to_numeric.parameters.quant)s
-    %(immlib.util._numeric.to_numeric.parameters.ureg)s
-    %(immlib.util._numeric.to_numeric.parameters.unit)s
+    %(immlib.to_numeric.parameters.dtype)s
+    %(immlib.to_numeric.parameters.quant)s
+    %(immlib.to_numeric.parameters.ureg)s
+    %(immlib.to_numeric.parameters.unit)s
 
     Returns
     -------
-    sparse tensor or sparse matrix or quantity with a sparse magnitude
+    sparse tensor, sparse array, or quantity with a sparse magnitude
         A sparse version of the argument `obj`.
     """
     return to_numeric(obj, sparse=True,
                       dtype=dtype, quant=quant,
                       ureg=ureg, unit=unit)
-@docwrap
-def is_dense(obj,
-             dtype=None, shape=None, ndim=None, numel=None,
+@docwrap('immlib.is_dense')
+def is_dense(obj, /, dtype=None, *,
+             shape=None, ndim=None, numel=None,
              quant=None, ureg=None, unit=Ellipsis):
-    """Returns `True` if an object is a dense NumPy array or PyTorch tensor.
+    """Returns ``True`` if an object is a dense NumPy array or PyTorch tensor.
 
-    `is_dense(obj)` returns `True` if the given object `obj` is an instance of
-    one of the NumPy `ndarray` classes, is a dense PyTorch tensor, or is a
+    ``is_dense(obj)`` returns ``True`` if the given object `obj` is an instance
+    of one of the NumPy ``ndarray`` classes, is a dense PyTorch tensor, or is a
     quantity whose magnintude is one of theese. Additional constraints may be
     placed on the object via the optional argments.
 
@@ -2000,71 +2187,74 @@ def is_dense(obj,
     ----------
     obj : object
         The object whose quality as a dense numerical object is to be assessed.
-    %(immlib.util._numeric.is_numeric.parameters.dtype)s
-    %(immlib.util._numeric.is_numeric.parameters.ndim)s
-    %(immlib.util._numeric.is_numeric.parameters.shape)s
-    %(immlib.util._numeric.is_numeric.parameters.numel)s
-    %(immlib.util._numeric.is_numeric.parameters.quant)s
-    %(immlib.util._numeric.is_numeric.parameters.ureg)s
-    %(immlib.util._numeric.is_numeric.parameters.unit)s
+    %(immlib.is_numeric.parameters.dtype)s
+    %(immlib.is_numeric.parameters.ndim)s
+    %(immlib.is_numeric.parameters.shape)s
+    %(immlib.is_numeric.parameters.numel)s
+    %(immlib.is_numeric.parameters.quant)s
+    %(immlib.is_numeric.parameters.ureg)s
+    %(immlib.is_numeric.parameters.unit)s
 
     Returns
     -------
-    boolean
-        `True` if `obj` is a valid dense numerical object, otherwise `False`.
+    bool
+        ``True`` if `obj` is a valid dense numerical object, otherwise
+        ``False``.
     """
     return is_numeric(obj, sparse=False,
                       dtype=dtype, shape=shape, ndim=ndim, numel=numel,
                       quant=quant, ureg=ureg, unit=unit)
-@docwrap
-def to_dense(obj,
-             dtype=None, quant=None, ureg=None, unit=Ellipsis):
+@docwrap('immlib.to_dense')
+def to_dense(obj, /, dtype=None, *, quant=None, ureg=None, unit=Ellipsis):
     """Returns a dense version of the numerical object `obj`.
 
-    `to_dense(obj)` returns `obj` if it is already a PyTorch dense tensor or a
-    NumPy `ndarray` or a quantity whose magnitude is one of these.  Otherwise,
-    it converts `obj` into a dense representation and returns this. Additional
-    requirements on the output format of the return value can be added using the
-    optional parameters.
+    ``to_dense(obj)`` returns `obj` if it is already a PyTorch dense tensor or
+    a NumPy ``ndarray`` or a quantity whose magnitude is one of these.
+    Otherwise, it converts `obj` into a dense representation and returns
+    this. Additional requirements on the output format of the return value can
+    be added using the optional parameters.
 
     Parameters
     ----------
     obj : object
         The object that is to be converted into a dense representation.
-    %(immlib.util._numeric.to_numeric.parameters.dtype)s
-    %(immlib.util._numeric.to_numeric.parameters.quant)s
-    %(immlib.util._numeric.to_numeric.parameters.ureg)s
-    %(immlib.util._numeric.to_numeric.parameters.unit)s
+    %(immlib.to_numeric.parameters.dtype)s
+    %(immlib.to_numeric.parameters.quant)s
+    %(immlib.to_numeric.parameters.ureg)s
+    %(immlib.to_numeric.parameters.unit)s
 
     Returns
     -------
-    dense tensor or dense ndarray or quantity with a dense magnitude
+    dense tensor, dense array, or quantity with a dense magnitude
         A dense version of the argument `obj`.
     """
     return to_numeric(obj, sparse=False,
                       dtype=dtype, quant=quant, ureg=ureg, unit=unit)
 
 
-# Numeric Decorators ###########################################################
+# Numeric Decorators ##########################################################
 
+@docwrap('immlib.numapi')
 class numapi:
     """An interface for defining functions that expect all arguments to be
     either numpy arrays or pytorch tensors.
 
-    A function decorated with `@numapi` is a placeholder for two subfunctions:
-    one that is called when any of the arguments are pytorch tensors (all of
-    whose arguments, when possible, are pytorch tensors), and a version called
-    otherwise, all of whose arguments are numpy arrays. The body of the
-    decorated function is usually `pass`, but if desired, it can return either
-    the pytorch or the numpy modules to indicate that a particular version of
-    the function should be called (if necessary, tensors are converted into
-    numpy arrays for this).
+    A function decorated with ``@numapi`` is a placeholder for two
+    subfunctions: one that is called when any of the arguments are pytorch
+    tensors (all of whose arguments, when possible, are converted into pytorch
+    tensors), and a version called otherwise, all of whose arguments are
+    converted into numpy arrays when possible. The body of the decorated
+    function is usually ``pass``, but, if desired, it can return either the
+    pytorch or the numpy modules to indicate that a particular version of the
+    function should be called (if necessary, tensors are converted into numpy
+    arrays for this).
 
-    Once a function has been decorated with `@numapi`, that function should be
-    used to decorate two other functions. If, for example, the function `f` is
-    decorated with `@numapi`, then `@f.array` should be used to decorate the
-    version of the function that accepts numpy arrays and `@f.tensor` should be
-    used to decorate the version of the function that accepts pytorch tensors.
+    Once a function has been decorated with ``@numapi``, that function should
+    be used to decorate two other functions. If, for example, the function
+    ``f`` is decorated with ``@numapi``, then ``@f.array`` should be used to
+    decorate the version of the function that accepts numpy arrays and
+    ``@f.tensor`` should be used to decorate the version of the function that
+    accepts pytorch tensors.
 
     Examples
     --------
@@ -2072,20 +2262,25 @@ class numapi:
     ... def l2_distance(pt1, pt2):
     ...     "Calculates the L2 distance between two points."
     ...     pass
+    
     >>> @l2_distance.array
     ... def _(pt1, pt2):
     ...     return np.sqrt(np.sum((pt1 - pt2)**2, axis=0))
+    
     >>> @l2_distance.tensor
     ... def _(pt1, pt2):
     ...     return torch.sqrt(torch.sum((pt1 - pt2)**2, axis=0))
+    
     >>> l2_distance(torch.tensor([0,0]), [0,1])
     tensor(1.)
+    
     >>> l2_distance([0,0], torch.tensor([0,1]))
     tensor(1.)
+    
     >>> l2_distance([0,0], [0,1])
     1.0
     """
-    # Static Methods -----------------------------------------------------------
+    # Static Methods ----------------------------------------------------------
     @staticmethod
     def _as_array(arg):
         argmod = type(arg).__module__
@@ -2118,7 +2313,7 @@ class numapi:
             if tns is None:
                 return None
         return tns.device
-    # Constructor --------------------------------------------------------------
+    # Constructor -------------------------------------------------------------
     __slots__ = (
         'base_func', 'wrap_func', 'array_func', 'tensor_func', 'signature')
     def __new__(cls, fn):
@@ -2134,7 +2329,7 @@ class numapi:
         self.wrap_func = wrap_fn
         self.signature = inspect.signature(fn)
         return wraps(fn)(wrap_fn)
-    # Methods ------------------------------------------------------------------
+    # Methods -----------------------------------------------------------------
     def array(self, f):
         self.array_func = wraps(self.base_func)(f)
     def tensor(self, f):

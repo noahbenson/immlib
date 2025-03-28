@@ -17,7 +17,8 @@ class TestDocCore(TestCase):
     the `docwrap` decorator.
     """
     def test_make_docproc(self):
-        from immlib.doc._core import (make_docproc, docproc)
+        from immlib.doc._core import make_docproc
+        from immlib import docproc
         from docrep import DocstringProcessor
         # make_docproc() takes no arguments.
         new_docproc = make_docproc()

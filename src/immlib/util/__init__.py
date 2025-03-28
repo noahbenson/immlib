@@ -5,10 +5,10 @@
 """Utilites managed by immlib.
 
 The `immlib.util` module contains numerous utility functions that are intended
-to be useful when writing APIs for scientific libraries. These include functions
-that test for particular types or common object features, functions for coercing
-types into other types, and functions for querying numpy arrays and pytorch
-tensors.
+to be useful when writing APIs for scientific libraries. These include
+functions that test for particular types or common object features, functions
+for coercing types into other types, and functions for querying numpy arrays
+and pytorch tensors.
 """
 
 # The _init module provides useful utilities for use during import, but these
@@ -94,6 +94,8 @@ from ._core import (
     unitregistry)
 
 from ._numeric import (
+    checktorch,
+    alttorch,
     is_numberdata,
     is_booldata,
     is_intdata,
@@ -148,6 +150,8 @@ from ._url import (
     url_download)
 
 __all__ = (
+    #"checktorch",
+    #"alttorch",
     #"is_numpydtype",
     #"like_numpydtype",
     #"to_numpydtype",
@@ -258,5 +262,6 @@ __all__ = (
     "reclaim")
 
 # Mark all the imported functions as belonging to this module instead of the
-# hidden submodules:
+# hidden submodules. Most of these will later get claimed by the immlib primary
+# module, but any that aren't belong here in immlib.util.
 reclaim(__name__, __all__, del_reclaim=False, skip_externs=False)

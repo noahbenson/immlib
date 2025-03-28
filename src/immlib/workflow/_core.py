@@ -19,7 +19,7 @@ from pcollections import (
     pset, tset,
     plist)
 
-from ..doc import (docwrap, docproc, make_docproc)
+from ..doc import (docwrap, make_docproc)
 from ..util import (
     is_pdict, is_str, is_number, is_tuple, is_dict, is_ldict,
     is_array, is_integer, strisvar, is_amap, merge, rmerge, valmap)
