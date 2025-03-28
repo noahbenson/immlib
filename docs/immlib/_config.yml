@@ -20,8 +20,17 @@ latex:
   latex_documents:
     targetname: immlib-docs.tex
 
-bibtex_bibfiles:
-  - references.bib
+sphinx:
+  extra_extensions:
+    - 'sphinx.ext.autodoc'
+    - 'sphinx.ext.napoleon'
+    - 'sphinx.ext.viewcode'
+    - 'sphinx.ext.autosummary'
+  config:
+    add_module_names: False
+    autosummary_generate: True
+#bibtex_bibfiles:
+#  - references.bib
 
 repository:
   url: https://github.com/noahbenson/immlib

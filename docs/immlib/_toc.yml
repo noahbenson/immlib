@@ -26,3 +26,4 @@ parts:
           - file: user-guide/utils/functional
           - file: user-guide/utils/predicates
           - file: user-guide/utils/other
+      - file: api
