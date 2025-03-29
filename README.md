@@ -4,7 +4,7 @@
 [![codecov](https://codecov.io/gh/noahbenson/immlib/graph/badge.svg?token=8KO3K6DUX4)](https://codecov.io/gh/noahbenson/immlib)
 [![PyPI version](https://badge.fury.io/py/immlib.svg)](https://badge.fury.io/py/immlib)
 
-![immlib logo](https://noahbenson.github.io/immlib/logo.svg "immlib")
+![immlib logo](https://noahbenson.github.io/immlib/_static/logo.svg "immlib")
 
 ---
 

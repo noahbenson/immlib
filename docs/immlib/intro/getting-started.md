@@ -34,10 +34,6 @@ be able to import and use it freely:
 ```{code-cell}
 import immlib as il
 
-# Make a path object for the Natural Scenes Dataset (uses CloudPathLib):
-nsd_path = il.path('s3://natural-scenes-dataset/', no_sign_request=True)
-
-# Load the lines of a text file and print the first one.
-lines = il.load(nsd_path / 'nsddata' / 'information' / 'knowndataproblems.txt')
-print(lines[0])
+# Test immlib using the to_array function:
+il.to_array([[1,0], [0,1]], dtype=int, sparse=True, unit='s')
 ```
