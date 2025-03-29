@@ -1,4 +1,4 @@
-# About `immlib`
+# About
 
 `immlib` is heavily based on the library
 [`pimms`](https://github.com/noahbenson/pimms), which effectively served as a

@@ -1,4 +1,4 @@
-# `immlib` License
+# License
 
 The `immlib` library has been released under the [MIT
 license](https://opensource.org/license/mit).
