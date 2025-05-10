@@ -31,3 +31,6 @@ from ._core import (docwrap, make_docproc, default_docproc)
 make_docproc.__module__ = __name__
 
 __all__ = ("docwrap", "default_docproc")
+
+from .._init import reclaim
+reclaim(__name__)

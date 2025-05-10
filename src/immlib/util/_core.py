@@ -7,7 +7,9 @@
 
 import operator as op
 from inspect import (signature, getfullargspec)
-from functools import (wraps, partial)
+from functools import (wraps, partial, lru_cache)
+from joblib import Memory
+from pathlib import Path
 
 import pint
 import numpy as np
@@ -1198,6 +1200,8 @@ def to_pcoll(obj):
     TypeError
         If `obj` cannot be converted into a persistent collection.
     """
+    if is_pcoll(obj):
+        return obj
     if isinstance(obj, Sequence):
         return plist(obj)
     elif isinstance(obj, Set):
@@ -1316,7 +1320,7 @@ def freezearray(arr):
     ``freezearray(q)`` is equivalent to ``freezearray(q.m)`` if ``q`` is a
     ``pint.Quantity`` object.
 
-    .. Warning:: This object mutates its argument in-place.
+    .. Warning:: This function mutates its argument in-place.
 
     See Also
     --------
@@ -1349,10 +1353,10 @@ def frozenarray(obj, /, dtype=None, *, copy=False, **kwargs):
       - SciPy sparse arrays are also handled by setting the write flag on the
         ``obj.data`` member.
       - If ``obj`` is a ``pint.Quantity`` object, then an equivalent quantity
-        with the magnitude made writeable is returned.
+        with the magnitude made read-only is returned.
 
     If a PyTorch tensor is passed to ``frozenarray``, it will be converted into
-    a frozen NumPy array.
+    a frozen NumPy array; PyTorch tensors themselves cannot be frozen, however.
 
     See Also
     --------
@@ -2208,6 +2212,7 @@ class args(argstuple):
     If ``a`` is an instance of ``args`` and ``f`` is a function, then the
     arguments in ``a`` can be applied to ``f`` using either of the following
     methods:
+    
      - ``f @ a``
      - ``a.passto(f)``
 
@@ -2408,3 +2413,112 @@ def unitregistry(obj, /, *args):
         if default is Ellipsis:
             from immlib import units as default
         return default
+
+
+# Caching #####################################################################
+
+@docwrap('immlib.util.to_pathcache')
+def to_pathcache(obj):
+    """Returns a ``joblib.Memory`` object that corresponds to the given path
+    object.
+
+    ``to_pathcache(obj)`` converts the given object `obj` into a
+    ``joblib.Memory`` cache manager. The object may be any of the following:
+    
+     - a ``joblib.Memory`` object;
+     - a filename or pathlib object pointing to a directory; or
+     - a tuple containing a filename or pathlib object followed by a dict-like
+       object of options to ``joblib.Memory``.
+
+    If the `obj` is ``None``, then ``None`` is returned. However, a
+    ``joblib.Memory`` object whose location parameter is ``None`` can be
+    created by using the object ``(None, opts)`` where ``opts`` may be ``None``
+    or an empty dictionary.
+
+    The ``joblib.Memory`` constructor takes certain arguments; this function
+    makes one change to those arguments: the ``verbose`` option is by default 0
+    when filtered through this function, meaning that no output will be printed
+    unless a ``verbose`` argument of greater than 0 is explicitly given.
+
+    See Also
+    --------
+    joblib.Memory, to_lrucache
+    """
+    # If we have been given a Memory object, just return it; otherwise, we
+    # check to parse the object into path or path + options.
+    if isinstance(obj, Memory):
+        return obj
+    elif is_tuple(obj):
+        n = len(obj)
+        if n == 1:
+            (obj,opts) = (obj[0], {})
+        elif n == 2:
+            (obj,opts) = obj
+        else:
+            raise ValueError("only 1- or 2-tuples can become pathcaches")
+        if opts is None:
+            opts = {}
+    elif isinstance(obj, args):
+        (obj,opts) = (obj.args, obj.kwargs)
+        if len(obj) == 1:
+            obj = obj[0]
+        else:
+            raise TypeError(
+                f"to_pathcache() takes exactly one argument ({len(obj)} given")
+    else:
+        opts = {}
+    # We change the default argument of verbose into 0 in this function because
+    # we don't want unintentional logging.
+    if 'verbose' not in opts:
+        opts['verbose'] = 0
+    # Whether there were or were not any options, then we now have either a
+    # string or pathlib path that we want to pass to the memory constructor.
+    if isinstance(obj, Path) or isinstance(obj, str) or obj is None:
+        return Memory(obj, **opts)
+    else:
+        raise TypeError(
+            f"to_pathcache: arg must be path, str, or None; not {type(obj)}")
+@docwrap('immlib.util.to_lrucache')
+def to_lrucache(obj):
+    """Returns an ``lru_cache`` function appropriate for the given object.
+
+    ``to_lrucache(obj)`` converts the given object `obj` into either
+    ``None``, the ``lru_cache`` function, or a function returned by
+    ``lru_cache``. The object may be any of the following:
+    
+     - ``lru_cache`` itself, in which case it is just returned;
+     - ``None`` or 0, indicating that no caching should be used (``None`` is
+        returned in these cases);
+     - ``inf``, indicating that an infinite cache should be returned; or
+     - a positive integer indicating the number of most recently used items
+       to keep in the cache.
+
+    See Also
+    --------
+    functools.lru_cache
+    """
+    from ._numeric import (is_number, is_integer)
+    if obj is lru_cache:
+        return obj
+    elif obj is None:
+        return None
+    elif is_number(obj):
+        if obj == 0:
+            return None
+        elif obj == np.inf:
+            return lru_cache(maxsize=None)
+        elif not is_integer(obj):
+            raise TypeError("to_lrucache size must be an int")
+        elif obj < 1:
+            raise ValueError("to_lrucache size must be > 0")
+        else:
+            return lru_cache(maxsize=int(obj))
+    else:
+        raise TypeError(f"bad type for to_lrucache: {type(obj)}")
+
+
+# Other #######################################################################
+    
+def identfn(x):
+    "The identify function; ``identfn(x)`` returns `x`."
+    return x

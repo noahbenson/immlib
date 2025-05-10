@@ -10,6 +10,7 @@ from ._core import (
     to_lrucache,
     calc,
     is_calc,
+    is_calcfn,
     plan,
     is_plan,
     plandict,
@@ -26,7 +27,10 @@ __all__ = (
     #"to_pathcache",
     #"to_lrucache",
     "calc",
-    "is_calc",
+    # We don't export is_calc because its presence in the library outside of
+    # this subpackage is likely to lead to people using it when the function
+    # really want is is_calcfn.
+    "is_calcfn",
     "plan",
     "is_plan",
     "plandict",
@@ -40,4 +44,4 @@ __all__ = (
 # Mark all the imported functions as belonging to this module instead of the
 # hidden submodules:
 from .._init import reclaim
-reclaim(__name__, __all__)
+reclaim(__name__)

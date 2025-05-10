@@ -13,7 +13,7 @@ from unittest import TestCase
 class TestWorkflowCore(TestCase):
     """Tests the immlib.workflow._core module."""
     def test_calc(self):
-        from immlib.workflow import calc
+        from immlib.workflow import (calc, is_calc, is_calcfn)
         from pcollections import (ldict, pdict)
         # The calc decorator creates calculation objects.
         @calc
@@ -36,64 +36,67 @@ class TestWorkflowCore(TestCase):
                 A list of `input_1` occurrences of `input_2`.
             """
             return ([input_2] * input_1,)
-        self.assertIsInstance(result, calc)
+        self.assertTrue(is_calcfn(result))
+        self.assertTrue(is_calc(result.calc))
         # Calculation objects have a number of members that keep track of the
         # meta-data of the calculation.
-        # Firs is the name of the calculation--this is the name of the function.
-        self.assertEqual(result.name, 'immlib.test.workflow.test_core.result')
+        # First is the name of the calculation--this is the name of the
+        # function.
+        c = result.calc
+        self.assertEqual(c.name, 'immlib.test.workflow.test_core.result')
         # The inputs of the calculation are a set of the inputs of the function.
-        self.assertEqual(result.inputs, set(['input_1', 'input_2']))
+        self.assertEqual(c.inputs, set(['input_1', 'input_2']))
         # The default values of the inputs are stored in the defaults member.
-        self.assertEqual(result.defaults, {'input_2': None})
+        self.assertEqual(c.defaults, {'input_2': None})
         # The outputs are a tuple of the output names. For a calc without
         # explicitly listed outputs has only one output, its name.
-        self.assertEqual(result.outputs, ('result',))
+        self.assertEqual(c.outputs, ('result',))
         # The input documentation is stored in the input_docs member.
-        self.assertIn('input_1', result.input_docs)
-        self.assertIn('input_2', result.input_docs)
-        self.assertEqual(len(result.input_docs), 2)
+        self.assertIn('input_1', c.input_docs)
+        self.assertIn('input_2', c.input_docs)
+        self.assertEqual(len(c.input_docs), 2)
         self.assertIn('The number of elements to include in the result.',
-                      result.input_docs['input_1'])
+                      c.input_docs['input_1'])
         self.assertIn('The object to put in the list.',
-                      result.input_docs['input_2'])
+                      c.input_docs['input_2'])
         # The output documentation is stored in the output_docs member.
-        self.assertIn('result', result.output_docs)
+        self.assertIn('result', c.output_docs)
         self.assertIn('A list of `input_1` occurrences of `input_2`.',
-                      result.output_docs['result'])
-        self.assertEqual(len(result.output_docs), 1)
+                      c.output_docs['result'])
+        self.assertEqual(len(c.output_docs), 1)
         # The calculation can be called using its normal signature.
-        self.assertEqual(result(1), {'result': [None]})
-        self.assertEqual(result(2, 0), {'result': [0, 0]})
+        self.assertEqual(c(1), {'result': [None]})
+        self.assertEqual(c(2, 0), {'result': [0, 0]})
         # The call method is basically an alias for the __call__ method.
-        self.assertEqual(result.call(1), {'result': [None]})
-        self.assertEqual(result.call(2, 0), {'result': [0, 0]})
+        self.assertEqual(c.call(1), {'result': [None]})
+        self.assertEqual(c.call(2, 0), {'result': [0, 0]})
         # The call can also be forced to be either eager or lazy--when lazy,
         # the return value is a lazy dict, and the calc isn't actually run until
         # the values are requested; when eager, the call is run right away, and
         # the return value is an frozendict instead of a lazydict.
-        self.assertIsInstance(result.eager_call(1), pdict)
-        self.assertEqual(result.eager_call(1), {'result': [None]})
-        self.assertEqual(result.eager_call(2, 0), {'result': [0, 0]})
-        self.assertIsInstance(result.lazy_call(1), ldict)
-        self.assertEqual(result.lazy_call(1), {'result': [None]})
-        self.assertEqual(result.lazy_call(2, 0), {'result': [0, 0]})
+        self.assertIsInstance(c.eager_call(1), pdict)
+        self.assertEqual(c.eager_call(1), {'result': [None]})
+        self.assertEqual(c.eager_call(2, 0), {'result': [0, 0]})
+        self.assertIsInstance(c.lazy_call(1), ldict)
+        self.assertEqual(c.lazy_call(1), {'result': [None]})
+        self.assertEqual(c.lazy_call(2, 0), {'result': [0, 0]})
         # It can also be called using the mapcall method.
         m1 = dict(input_1=1)
         m2 = dict(input_1=2, input_2=0)
-        self.assertEqual(result.mapcall(m1), {'result': [None]})
-        self.assertEqual(result.mapcall(m2), {'result': [0,0]})
+        self.assertEqual(c.mapcall(m1), {'result': [None]})
+        self.assertEqual(c.mapcall(m2), {'result': [0,0]})
         # These can also be lazy or eager.
-        self.assertIsInstance(result.eager_mapcall(m1), pdict)
-        self.assertEqual(result.eager_mapcall(m1), {'result': [None]})
-        self.assertEqual(result.eager_mapcall(m2), {'result': [0, 0]})
-        self.assertIsInstance(result.lazy_mapcall(m1), ldict)
-        self.assertEqual(result.lazy_mapcall(m1), {'result': [None]})
-        self.assertEqual(result.lazy_mapcall(m2), {'result': [0, 0]})
+        self.assertIsInstance(c.eager_mapcall(m1), pdict)
+        self.assertEqual(c.eager_mapcall(m1), {'result': [None]})
+        self.assertEqual(c.eager_mapcall(m2), {'result': [0, 0]})
+        self.assertIsInstance(c.lazy_mapcall(m1), ldict)
+        self.assertEqual(c.lazy_mapcall(m1), {'result': [None]})
+        self.assertEqual(c.lazy_mapcall(m2), {'result': [0, 0]})
         # Calculations can have multiple outputs as well as multiple inputs.
         @calc('out1', 'out2', 'out3')
         def sample_calc(in1, in2, in3):
             return (in1 + 1, in2 + 2, in3 + 3)
-        res = sample_calc(1, 2, 3)
+        res = sample_calc.calc(1, 2, 3)
         self.assertIsInstance(res, ldict)
         self.assertEqual(len(res), 3)
         self.assertEqual(res['out1'], 2)
@@ -101,7 +104,7 @@ class TestWorkflowCore(TestCase):
         self.assertEqual(res['out3'], 6)
         # New calcs can be made that change the names of the calculation
         # variables (the inputs and outputs) using the tr (translate) method.
-        sample_tr = sample_calc.tr(out1='x', out2='y', in3='z')
+        sample_tr = sample_calc.calc.rename_keys(out1='x', out2='y', in3='z')
         self.assertEqual(sample_tr.outputs, ('x', 'y', 'out3'))
         self.assertEqual(len(sample_tr.inputs), 3)
         self.assertIn('in1', sample_tr.inputs)
@@ -114,14 +117,14 @@ class TestWorkflowCore(TestCase):
         self.assertEqual(res['y'], 4)
         self.assertEqual(res['out3'], 6)
     def test_is_calc(self):
-        from immlib.workflow import (calc, is_calc)
+        from immlib.workflow import (calc, is_calcfn)
         @calc
         def result(input_1, input_2=None):
             return ([input_2] * input_1,)
         # is_calc(x) is just an alias for isinstance(x, calc).
-        self.assertTrue(is_calc(result))
-        self.assertFalse(is_calc(lambda x:x))
-        self.assertEqual(result(2,0)['result'], [0, 0])
+        self.assertTrue(is_calcfn(result))
+        self.assertFalse(is_calcfn(lambda x:x))
+        self.assertEqual(result.calc(2,0)['result'], [0, 0])
     def test_plan(self):
         import numpy as np
         from immlib.workflow import (calc, plan, plandict)
@@ -296,19 +299,19 @@ class TestWorkflowCore(TestCase):
             def test_cache1(inputval1, inputval2):
                 self.pc_runcount = self.pc_runcount + 1
                 return (inputval1 // inputval2, inputval1 % inputval2)
-            d = test_cache1(10, 3)
+            d = test_cache1.calc(10, 3)
             self.assertEqual(d['outputval1'], 3)
             self.assertEqual(d['outputval2'], 1)
             self.assertEqual(self.pc_runcount, 1)
-            d = test_cache1(10, 3)
+            d = test_cache1.calc(10, 3)
             self.assertEqual(d['outputval1'], 3)
             self.assertEqual(d['outputval2'], 1)
             self.assertEqual(self.pc_runcount, 1)
-            d = test_cache1(10, 5)
+            d = test_cache1.calc(10, 5)
             self.assertEqual(d['outputval1'], 2)
             self.assertEqual(d['outputval2'], 0)
             self.assertEqual(self.pc_runcount, 2)
-            d = test_cache1(10, 5)
+            d = test_cache1.calc(10, 5)
             self.assertEqual(d['outputval1'], 2)
             self.assertEqual(d['outputval2'], 0)
             self.assertEqual(self.pc_runcount, 2)
@@ -371,4 +374,4 @@ class TestWorkflowCore(TestCase):
             self.assertEqual(self.pc_runcount, 3)
     def test_tplandict(self):
         "Tests the tplandict type."
-        
+        pass

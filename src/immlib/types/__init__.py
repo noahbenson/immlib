@@ -26,4 +26,4 @@ __all__ = (
 # Mark all the imported functions as belonging to this module instead of the
 # hidden submodules:
 from .._init import reclaim
-reclaim(__name__, __all__)
+reclaim(__name__)

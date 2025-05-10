@@ -129,13 +129,13 @@ class TestWorkflowPlanType(TestCase):
         # plan's values:
         d = dir(tri)
         for k in ('a', 'b', 'c', 'base', 'height', 'area', '__class__',
-                  '__plandict__', '__new__'):
+                  '_plandict_', '__new__'):
             self.assertIn(k, d)
         # Trying to initialize an object after it has been initialized should
         # raise an error.
         with self.assertRaises(RuntimeError):
             tri.__init__((0,0), (1,0), (0,1))
-        # Init methods can be called in parent classes without causing problems.
+        # Init methods can be called in parent classes without problems.
         class ChildTri(TriangleData):
             def __init__(self, a, b, c):
                 super().__init__(a, b, c)
@@ -155,7 +155,7 @@ class TestWorkflowPlanType(TestCase):
                 self.base = 10
         with self.assertRaises(ValueError):
             tri = BadTriData((0,0), (1,0), (0,1))
-        # There is an automatically defined init function if we don't define it.
+        # There is an automatically defined init function.
         class AutoInit(planobject):
             @calc('x')
             def filter_x(x):

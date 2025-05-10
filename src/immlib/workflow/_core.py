@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
-################################################################################
+###############################################################################
 # immlib/workflow/_core.py
 
 
-# Dependencies #################################################################
+# Dependencies ################################################################
 
 import copy
-from collections.abc import Callable
+from collections.abc import (Callable, Mapping)
 from collections import (defaultdict, namedtuple)
-from functools import (reduce, lru_cache, wraps, partial)
+from functools import (reduce, wraps, partial, update_wrapper)
 from inspect import getfullargspec, signature
 
 import numpy as np
@@ -22,189 +22,104 @@ from pcollections import (
 from ..doc import (docwrap, make_docproc)
 from ..util import (
     is_pdict, is_str, is_number, is_tuple, is_dict, is_ldict,
-    is_array, is_integer, strisvar, is_amap, merge, rmerge, valmap)
+    is_array, is_integer, strisvar, is_amap, is_pcoll, to_pcoll,
+    to_pathcache, to_lrucache, identfn,
+    merge, rmerge, valmap)
 
 
-# Utility Functions ############################################################
-
-@docwrap
-def to_pathcache(obj):
-    """Returns a joblib.Memory object that corresponds to the given path object.
-
-    `to_pathcache(obj)` converts the given object `obj` into a `joblib.Memory`
-    cache manager. The object may be any of the following:
-     * a `joblib.Memory` object;
-     * a filename or pathlib object pointing to a directory; or
-     * a tuple containing a filename or pathlib object followed by a dict-like
-       object of options to `joblib.Memory`.
-
-    If the `obj` is `None`, then `None` is returned. However, a `joblib.Memory`
-    object whose location parameter is `None` can be created by using the
-    object `(None, opts)` where `opts` may be `None` or an empty dict.
-
-    The `joblib.Memory` constructor takes certain arguments; this function makes
-    one change to those arguments: the `verbose` option is by default 0 when
-    filtered through this function, meaning that no output will be printed
-    unless a `verbose` argument of greater than 0 is explicitly given.
-    """
-    from joblib import Memory
-    from pathlib import Path
-    from ..util import args
-    # If we have been given a Memory object, just return it; otherwise, we check
-    # to parse the object into path or path + options.
-    if isinstance(obj, Memory):
-        return obj
-    elif is_tuple(obj):
-        n = len(obj)
-        if n == 1:
-            (obj,opts) = (obj[0], {})
-        elif n == 2:
-            (obj,opts) = obj
-        else:
-            raise ValueError("only 1- or 2-tuples can become pathcaches")
-        if opts is None:
-            opts = {}
-    elif isinstance(obj, args):
-        (obj,opts) = (obj.args, obj.kwargs)
-        if len(obj) == 1:
-            obj = obj[0]
-        else:
-            raise TypeError(
-                f"to_pathcache() takes exactly one argument ({len(obj)} given")
-    else:
-        opts = {}
-    # We change the default argument of verbose into 0 in this function because
-    # we don't want unintentional logging.
-    if 'verbose' not in opts:
-        opts['verbose'] = 0
-    # Whether there were or were not any options, then we now have either a
-    # string or pathlib path that we want to pass to the memory constructor.
-    if isinstance(obj, Path) or isinstance(obj, str) or obj is None:
-        return Memory(obj, **opts)
-    else:
-        raise TypeError(
-            f"to_pathcache: arg must be path, str, or None; not {type(obj)}")
-@docwrap
-def to_lrucache(obj):
-    """Returns an lru_cache function appropriate for the given object.
-
-    `to_lrucache(obj)` converts the given object `obj` into either `None`, the
-    `lru_cache` function, or a function returned by `lru_cache`. The object may
-    be any of the following:
-     * `lru_cache` itself, in which case it is just returned;
-     * `None` or 0, indicating that no caching should be used (`None` is
-        returned in these cases);
-     * `inf`, indicating that an infinite cache should be returned; or
-     * a positive integer indicating the number of most recently used items
-       to keep in the cache.
-    """
-    if obj is lru_cache:
-        return obj
-    elif obj is None:
-        return None
-    elif is_number(obj):
-        if obj == 0:
-            return None
-        elif obj == np.inf:
-            return lru_cache(maxsize=None)
-        elif not is_integer(obj):
-            raise TypeError("to_lrucache size must be an int")
-        elif obj < 1:
-            raise ValueError("to_lrucache size must be > 0")
-        else:
-            return lru_cache(maxsize=int(obj))
-    else:
-        raise TypeError(f"bad type for to_lrucache: {type(obj)}")
-def identfn(x):
-    "The identify function; `identfn(x)` returns `x`."
-    return x
-
-
-# calc #########################################################################
+# calc ########################################################################
 
 class calc:
     '''Decorator type that represents a single calculation in a calc-plan.
     
-    The `calc` class encapsulates data regarding the calculation of a single set
-    of output values from a separate set of input values: a calculation
+    The ``calc`` class encapsulates data regarding the calculation of a single
+    set of output values from a separate set of input values: a calculation
     component that can be fit together with other such components to make a
     calculation plan.
 
-    `@calc` by itself can be used as a decorator to indicate that the function
-    that follows is a calculation component; calculation components can be
-    combined to form `plan` objects, which can encapsulate a flexible workflow
-    of Python computations. When `@calc` is used as a decorator by itself, then
-    the calc is considered to have a single output value whose name is the same
-    as that of the function it decorates.
+    ``@calc`` by itself can be used as a decorator to indicate that the
+    function that follows is a calculation component; calculation components
+    can be combined to form ``plan`` objects, which can encapsulate a flexible
+    workflow of Python computations. When ``@calc`` is used as a decorator by
+    itself, then the calc is considered to have a single output value whose
+    name is the same as that of the function it decorates.
     
-    `@calc(names...)` accepts a string or strings that name the output values of
-    the calc function. In this case, the decorated function must return either a
-    tuple of thes values in the order they are given or a dictionary in which
-    the keys are the same as the given names.
+    ``@calc(names...)`` accepts a string or strings that name the output values
+    of the calc function. In this case, the decorated function must return
+    either a tuple of thes values in the order they are given or a dictionary
+    in which the keys are the same as the given names.
     
-    `@calc(None)` is a special instance which indicates that the lazy argument
-    is to be ignored (it is forced to be `False`), no output values are to be
-    produced by the function, and the calculation must always run when the input
-    parameters are updated.
+    ``@calc(None)`` is a special instance which indicates that the lazy
+    argument is to be ignored (it is forced to be ``False``), no output values
+    are to be produced by the function, and the calculation must always run
+    when the input parameters are updated.
     
-    The `calc` class parses its inputs and outputs through the `immlib.docwrap`
-    function in order to collect documentation (see the `input_docs` and
-    `output_docs` attributes, below). The `'Inputs'` and `'Outputs'` sections
-    are tracked as the documentation of the parameters, and are required to be
-    formatted using numpy's documentation syntax. Users of calculation objects
-    should decorate their functions using `docwrap` manually themselves, however
-    (if desired), because the docwrap used by `calc` does not put function
-    documentation in the `immlib` namespace.
+    The ``calc`` class parses its inputs and outputs through the
+    ``immlib.docwrap`` function in order to collect documentation (see the
+    ``input_docs`` and ``output_docs`` attributes, below). The ``'Inputs'`` and
+    ``'Outputs'`` sections are tracked as the documentation of the parameters,
+    and are required to be formatted using [NumPy's documentation
+    style](https://numpydoc.readthedocs.io/en/latest/format.html) in order for
+    the parameter documentation to be properly extracted. Users of calculation
+    objects should decorate their functions using ``docwrap`` manually
+    themselves, however (if desired), because decorating a function with
+    ``calc`` alone does not cause the function's documentation to be available
+    to other functions that use ``@docwrap`` to format their docstrings.
 
-    Caching for calculations requires some care. First, `immlib`'s `calc`- and
-    `plan`-based workflow system is designed to work best with `calc` objects
-    that are pure functions. A function `f(*args, **kw)` is pure if it has no
-    side-effects and if `f(*args1, **kw1) == f(*args2, **kw2)` is true whenever
-    `args1 == args2 and kw1 == kw2`. That is, `f` always produces the same
-    outputs when given the same inputs. Plans that contain unpure functions can
-    work fine in many contexts, but unpure calc objects will break caching
-    because the return value of a cached unpure calculation will always be the
-    same value, i.e. the value that is calculated and cached by the function the
-    first time it is called.
+    Caching for calculations requires some care. First, the ``calc``- and
+    ``plan``-based workflow system in ``immlib`` is designed to work best with
+    ``calc`` objects that are pure functions. A function ``f(*args, **kw)`` is
+    pure if it has no side-effects and if ``f(*args1, **kw1) == f(*args2,
+    **kw2)`` is true whenever ``args1 == args2 and kw1 == kw2``. That is, ``f``
+    always produces the same outputs when given the same inputs. Plans that
+    contain unpure functions can work fine in many contexts, but unpure
+    ``calc`` objects will break caching because the return value of a cached
+    unpure calculation will always be the same value. (In other words, the
+    value that is calculated and cached by the function the first time it is
+    called.)
 
-    Second, the `calc` type has an option, `pathcache`, which can be set to an
-    explicit path to which all calculations run by the created `calc` object
-    will be saved, cached, and later uncached if re-requested. This is
+    Second, the ``calc`` type has an option, ``pathcache``, which can be set to
+    an explicit path to which all calculations run by the created ``calc``
+    object will be cached and later uncached if re-requested. This is
     occasionally appropriate for a particular compute environment, but a better
     approach is typically to grant control of caching and cache paths to the
-    user who creates the `plandict` object downstream of the creation of the
-    `calc` objects. To enable this behavior, one should instead use the option
-    `pathcache=True`, which enables caching of calculations to a specific cache
-    path when provided by the user during the creation of the `plandict` (the
-    default is `False`, which disables path caching for the calculation).
+    user who creates the ``plandict`` object downstream of the creation of the
+    ``calc`` objects. To enable this behavior, one should instead use the
+    option ``pathcache=True``, which enables caching of calculations to a
+    specific cache path when provided by the user during the creation of the
+    ``plandict`` (the default is ``False``, which disables path caching for the
+    calculation).
 
     Parameters
     ----------
-    fn : callable
-        The function that performs the calculation.
-    outputs : tuple-like of strings
-        A list or tuple or the names of the output variables. The names must all
-        be valid variable names (see `strisvar`).
+    outputs : strings
+        The positional arguments to ``@calc()`` provide the names of the output
+        variables. The names must all be valid variable names (see
+        ``immlib.strisvar``).
     name : None or str, optional
-        The name of the function. The default, `None`, uses `fn.__name__`.
-    lazy : boolean, optional
-        Whether the calculation unit should be calculated lazily (`True`) or
-        eagerly (`False`) when a plandict is created. The default is `True`.
+        The name of the function. The default, ``None``, uses ``fn.__name__``.
+    lazy : bool, optional
+        Whether the calculation unit should be calculated lazily (``True``) or
+        eagerly (``False``) when a plandict is created. The default is
+        ``True``.
     lrucache : int, optional
         The number of recently calculated results to cache. If this value is 0,
-        then no memoization is done (the default). If `lrucache` is an
-        integer greater than 0, then an LRU cache is used with a maxsize of
-        `lrucache`. If `lrucache` is `inf`, then all values are cached
+        then no memoization is done (the default). If ``lrucache`` is an
+        integer greater than 0, then an LRU cache is used with a maximum size
+        of `lrucache`. If ``lrucache`` is ``inf``, then all values are cached
         indefinitely. Note that this cache is performed at the level of the
-        calculation using Python's `functools` caching decorators.
-    pathcache : None or directory-name, optional
-        If `pathcache` is not `None` (the default), then cached results are
-        also cached to the given directory when possible. The `pathcache`
-        option may also be either a `pathlib.Path` object or a 2-tuple
-        containing a path followed by options to the `joblib.Memory`
-        constructor; see `to_pathcache` for more information.
-    indent : int, optional
-        The indentation level of the function's docstring. The default is 4.
+        calculation using Python's ``functools`` caching decorators.
+    pathcache : None, bool, or path-like, optional
+        If ``pathcache`` is a path-like object (typically a ``pathlib.Path``
+        orstring) that references a directory, then the results are cached in
+        files in the given directory whenever possible. The ``pathcache``
+        option may also a 2-tuple containing a path followed by options to the
+        ``joblib.Memory`` constructor; see ``immlib.util.to_pathcache`` for
+        more information.
+    indent : int or None, optional
+        The indentation level of the function's docstring. The default is
+        ``None``, which indicates that the indentation level should be deduced
+        from the docstring itself.
 
     Attributes
     ----------
@@ -213,48 +128,52 @@ class calc:
     base_function : callable
         The original function, prior to decoration for caching.
     lrucache : None or lrucache-like
-        Either `None`, indicating that no in-memory cache is being used by the
-        calculation directly, the number of least recently used objects to store
-        in the cache, or a function used to wrap the `base_function` of the calc
-        for caching. The `lrucache` parameter is filtered by the `to_lrucache`
-        function in order to convert it into a valid `functools.lru_cache` 
-        object.
+        The in-memory cache being used. If this value is ``None``then no
+        in-memory cache is being used. If it is an integer, this indicates the
+        number of least recently used objects being stored in the
+        cache. Otherwise, ``lrucache`` will be a function used to wrap the
+        ``base_function`` of the calculation for caching. The ``lrucache``
+        parameter is filtered by the ``immlib.util.to_lrucache`` function in
+        order to convert it into a valid ``functools.lru_cache`` object.
     pathcache : None or pathcache-like
-        Either `None`, indicating that no filesystem cache is being used by the
-        calculation directly (or equivalently `False`), a path to which this
-        calc unit should cache directly, a `joblib.Memory` object to handle the
-        caching for the calculation, or `True`, indicating that caching should
-        be performed automatically using the `cache_path` input to the calc. If
-        `cache_path` is not already one of the inputs, it is added as an input
-        with the default value `None`. When automatic caching is performed, the
-        `cache_path` is automatically converted into a `joblib.Memory` object
-        using the `to_pathcache` function.
+        The file-system-based cache being used. If this value is ``None`` or
+        ``False``, then no filesystem cache is being used by the calculation
+        directly. If this value is a path object, then that path is the
+        directory in which cache files are saved/loaded. If ``pathcache`` is a
+        ``joblib.Memory`` object, then this object handles the caching for the
+        calculation. Otherwise, the value will be ``True``, indicating that
+        caching should be performed automatically using the ``cache_path``
+        input to the calc. If ``cache_path`` was not already one of the inputs,
+        it is added as an input with the default value ``None``. When automatic
+        caching is performed, the ``cache_path`` is automatically converted
+        into a ``joblib.Memory`` object using the ``immlib.util.to_pathcache``
+        function.
     function : callable
         The function itself.
-    argspec : FullArgSpec
-        The argspec of `fn`, as returned from `inspect.getfullargspec(fn)`. This
-        may not precisely match the argspec of `function` at any given time, but
-        it remains correct as far as the calculation object requires (changes
-        are due to translation calls). The `argspec` also differs from a true
-        `argspec` object in that its members are all persistent objects such as
-        `tuple`s instead of `list`s.
-    inputs : pset of strs
+    argspec : inspect.FullArgSpec
+        The argspec of ``fn``, as returned from
+        ``inspect.getfullargspec(fn)``. This may not precisely match the
+        argspec of ``function`` at any given time, but it remains correct as
+        far as the calculation object requires (changes are due to translation
+        calls). The ``argspec`` also differs from a true ``argspec`` object in
+        that its members are all persistent objects such as tuples instead
+        of lists.
+    inputs : pcollections.pset of str
         The names of the input parameters for the calculation.
     outputs : tuple of str
         The names of the output values of the calculation.
-    defaults : mapping
+    defaults : pcollections.pdict
         A persistent dictionary whose keys are input parameter names and whose
         values are the default values for the associated parameters.
-    lazy : boolean
-        Whether the calculation is intended as a lazy (`True`) or eager
-        (`False`) calculation.
-    input_docs : mapping
-        A pdict object whose keys are input names and whose values are the
+    lazy : bool
+        Whether the calculation is intended as a lazy (``True``) or eager
+        (``False``) calculation.
+    input_docs : pcollections.pdict
+        A ``pdict`` object whose keys are input names and whose values are the
         documentation for the associated input parameters.
-    output_docs : mapping
-        A pdict object whose keys are output names and whose values are
+    output_docs : pcollections.pdict
+        A ``pdict`` object whose keys are output names and whose values are
         the documentation for the associated output values.
-
     '''
     __slots__ = (
         'name', 'base_function', 'lrucache', 'pathcache',
@@ -262,8 +181,7 @@ class calc:
         'input_docs', 'output_docs')
     @staticmethod
     def _dict_persist(arg):
-        if arg is None: return arg
-        else: return pdict(arg)
+        return None if arg is None else pdict(arg)
     @staticmethod
     def _argspec_persist(spec):
         from inspect import FullArgSpec
@@ -346,25 +264,23 @@ class calc:
             input_docs = pdict()
             output_docs = pdict()
             fndoc = None
-        # We make a new class that is a subtype of calc and that runs this
-        # specific function when called.
-        class LambdaClass(cls):
-            @wraps(fn)
-            def __call__(self, *args, **kw):
-                return cls.__call__(self, *args, **kw)
-        LambdaClass.__doc__ = fndoc
         # Go ahead and allocate the object we're creating.
-        self = object.__new__(LambdaClass)
+        self = object.__new__(cls)
+        # Setting function to Ellipsis is a signal to the setattr method that
+        # the object is being initialized; until we set function to something
+        # else at the end of this function, setattr is allowed (i.e., the calc
+        # becomes immutable once this function returns.)
+        object.__setattr__(self, 'function', Ellipsis)
         # Set some attributes.
-        object.__setattr__(self, 'name', name)
+        self.name = name
         # Save the base_function before we do anything to it.
-        object.__setattr__(self, 'base_function', fn)
+        self.base_function = fn
         # If there's a caching strategy here, use it.
         lrucache = to_lrucache(lrucache)
-        object.__setattr__(self, 'lrucache', lrucache)
+        self.lrucache = lrucache
         # If there's a cache path, note it.
         pathcache = self._interpret_pathcache(pathcache)
-        object.__setattr__(self, 'pathcache', pathcache)
+        self.pathcache = pathcache
         # Get the argspec for the calculation function.
         spec = getfullargspec(fn)
         if spec.varargs is not None:
@@ -373,10 +289,7 @@ class calc:
             raise ValueError("calculations do not support varkw")
         # Save this for future use.
         spec = calc._argspec_persist(spec)
-        object.__setattr__(self, 'argspec', spec)
-        # Now save the function.
-        cache_fn = self._apply_caching(fn, spec, lrucache, pathcache)
-        object.__setattr__(self, 'function', cache_fn)
+        self.argspec = spec
         # Figure out the inputs from the argspec; we set them below, after we
         # have checked the pathcache.
         inputs = pset(spec.args + spec.kwonlyargs)
@@ -385,7 +298,7 @@ class calc:
         for out in outputs:
             if not strisvar(out):
                 raise ValueError(f"calc output '{out}' is not a valid varname")
-        object.__setattr__(self, 'outputs', outputs)
+        self.outputs = outputs
         # We need to grab the defaults also.
         dflts = {}
         for (arglst,argdfs) in [(spec.args, spec.defaults),
@@ -400,14 +313,31 @@ class calc:
         if pathcache is True and 'cache_path' not in inputs:
             inputs = inputs.add('cache_path')
             dflts['cache_path'] = None
-        object.__setattr__(self, 'inputs', inputs)
-        object.__setattr__(self, 'defaults', pdict(dflts))
+        self.inputs = inputs
+        self.defaults = pdict(dflts)
         # Save the laziness status and the documentations.
-        object.__setattr__(self, 'lazy', bool(lazy))
-        object.__setattr__(self, 'input_docs', input_docs)
-        object.__setattr__(self, 'output_docs', output_docs)
-        # That is all for the constructor.
-        return self
+        self.lazy = bool(lazy)
+        self.input_docs = input_docs
+        self.output_docs = output_docs
+        # Last thing is to set the function, which signals that construction is
+        # done and the calc is now immutable.
+        cache_fn = self._apply_caching(fn, spec, lrucache, pathcache)
+        self.function = wraps(fn)(cache_fn)
+        # That is all for the constructor. However, what we actually return
+        # from a calc decorator/call is a function with a
+        # `calc` field.
+        try:
+            fn.calc = self
+        except Exception:
+            # If the above fails, it's probably because fn isn't a normal
+            # function and doesn't allow a field to be set. We can hack that.
+            func = fn
+            @wraps(fn)
+            def fn_wrapper(*args, **kwargs):
+                return func(*args, **kwargs)
+            fn_wrapper.calc = self
+            fn = fn_wrapper
+        return fn
     def __new__(cls, *args,
                 name=None, lazy=True,
                 lrucache=0, pathcache=None, indent=None):
@@ -438,22 +368,75 @@ class calc:
             def calc_outputs(f):
                 return cls._new(f, args, **kw)
             return calc_outputs
+    def update_function(self, fn):
+        """Updates the function used by the calc object.
+
+        On occasion, a function decorated with ``@calc`` is later decorated
+        with another feature, such as a decorator that causes its inputs to be
+        promoted. Such a decorator, when it comes after the ``@calc`` decorator
+        (i.e., on a line prior to the ``@calc``), will not update the
+        calculation object and thus the calculation object, when invoked, will
+        not call the fully decorated version of its function. To fix this, any
+        ``calc`` object whose ``base_function`` member variable is identical to
+        the function given to a ``plan`` object (i.e., ``f is not
+        to_calc(f).base_function``), then this method is called to return a
+        ``calc`` object whose ``base_function`` has been updated. If possible,
+        it also updates the `fn` argument to use the new ``calc`` object.
+
+        In general, this function should not be called directly by the user;
+        rather, it gets run automatically when a calc is added to a new
+        ``plan`` or ``planobject``.
+        """
+        # First, make sure the right calc was passed this function.
+        if to_calc(fn) is not self:
+            raise ValueError(
+                "calcobj.update_function(f) called, but to_calc(f) is not"
+                " calcobj")
+        # Next make sure we aren't already up-to-date.
+        if self.base_function is fn:
+            return self
+        # If fn.__wrapped__ doesn't exist or isn't the self.function, then the
+        # function was either poorly wrapped or it wasn't made from
+        # base_function and we need to raise an error.
+        wrapped = fn
+        wset = set([fn])
+        while wrapped is not None:
+            wrapped = getattr(fn, '__wrapped__', None)
+            if wrapped is self.base_function:
+                break
+            wid = id(wrapped)
+            if wid in wset:
+                raise ValueError("loop in __wrapped__ attributes")
+            wset.add(wid)
+        if wrapped is None:
+            raise ValueError(
+                "calcobj.update_function(f) called, but f is not made from"
+                " calcobj.base_function")
+        # At this point, we have verified that this is an appropriate update,
+        # so we can go ahead and make a duplicate calc with the new function.
+        newcalc = copy.copy(self)
+        object.__setattr__(newcalc, 'base_function', fn)
+        dec_fn = calc._apply_caching(
+            fn, self.argspec, self.lrucache, self.pathcache)
+        object.__setattr__(newcalc, 'function', dec_fn)
+        return newcalc
     def eager_call(self, *args, **kwargs):
         """Eagerly calls the given calculation using the arguments.
 
-        `c.eager_call(...)` returns the result of calling the calculation
-        `c(...)` directly. Using the `eager_call` method is different from
-        calling the `__call__` method only in that the `eager_call` method
-        ignored the `lazy` member and always returns the direct results of
-        calling the calculation; using the `__call__` method will result in
-        `eager_call` being run if the calculation is not lazy and in `lazy_call`
-        being run if the calculation is lazy.
+        ``c.eager_call(...)`` returns the result of calling the calculation
+        ``c(...)`` directly. Using the ``eager_call`` method is different from
+        calling the ``__call__`` method only in that the ``eager_call`` method
+        ignores the ``lazy`` member and always returns the direct results of
+        calling the calculation; using the ``__call__`` method will result in
+        ``eager_call`` being run if the calculation is not lazy and in
+        ``lazy_call`` being run if the calculation is lazy.
 
-        See also `calc.eager_mapcall`, `calc.lazy_call`, and
-        `calc.lazy_mapcall`.
+        See Also
+        --------
+        calc.eager_mapcall, calc.lazy_call, calc.lazy_mapcall
         """
-        # The function is being called; we just pass this along (the function
-        # itself has been given the caching code via decorators already).
+        # Now we just pass these arguments along (the function itself has been
+        # given the caching code via decorators already).
         res = self.function(*args, **kwargs)
         # Now interpret the result.
         outs = self.outputs
@@ -478,31 +461,38 @@ class calc:
     def lazy_call(self, *args, **kwargs):
         """Returns a lazy-dict of the results of calling the calculation.
 
-        `calc.lazy_call(...)` is equivalent to `calc(...)` except that the
-        `lazydict` that it returns encapsulates the running of the calculation
-        itself, so that `calc(...)` is not run until one of the lazy values is
-        requested.
+        ``calc.lazy_call(...)`` is equivalent to ``calc(...)`` except that the
+        ``lazydict`` that it returns encapsulates the running of the
+        calculation itself, so that ``calc(...)`` is not run until one of the
+        lazy values is requested.
 
-        See also `calc.mapcall` annd `calc.lazy_mapcall`.
+        See Also
+        --------
+        calc.mapcall, calc.lazy_mapcall
         """
         # First, create a lazy for the actual call:
-        calldel = lazy(self.eager_call, *args, **kwargs)
-        # Then make a lazy map of all the outputs, each of which pulls from this
-        # delay object to get its values.
-        return ldict({k: lazy(lambda k: calldel()[k], k)
-                      for k in self.outputs})
+        lazycall = lazy(self.eager_call, *args, **kwargs)
+        # Then make a lazy map of all the outputs, each of which pulls from
+        # this lazy object to get its values.
+        return ldict(
+            {k: lazy(lambda k: lazycall()[k], k)
+             for k in self.outputs})
     def __call__(self, *args, **kwargs):
-        if self.lazy: return self.lazy_call(*args, **kwargs)
-        else:         return self.eager_call(*args, **kwargs)
+        if self.lazy:
+            return self.lazy_call(*args, **kwargs)
+        else:
+            return self.eager_call(*args, **kwargs)
     def call(self, *args, **kwargs):
         """Calls the calculation and returns the results dictionary.
 
-        `c.call(...)` is an alias for `c(...)`.
+        ``c.call(...)`` is an alias for ``c(...)``.
 
-        See also `calc.mapcall`, `calc.eager_call`, and `calc.lazy_call`.
+        See also ``calc.mapcall``, ``calc.eager_call``, and ``calc.lazy_call``.
         """
-        if self.lazy: return self.lazy_call(*args, **kwargs)
-        else:         return self.eager_call(*args, **kwargs)
+        if self.lazy:
+            return self.lazy_call(*args, **kwargs)
+        else:
+            return self.eager_call(*args, **kwargs)
     def _maps_to_args(self, args, kwargs):
         opts = merge(self.defaults, *args, **kwargs)
         args = []
@@ -523,55 +513,63 @@ class calc:
     def eager_mapcall(self, *args, **kwargs):
         """Calls the given calculation using the parameters in mappings.
 
-        `c.eager_mapcall(map1, map2..., key1=val1, key2=val2...)` returns the
-        result of calling the calculation `c(...)` using the parameters found in
-        the provided mappings and key-value pairs. All arguments of `mapcall`
-        are merged left-to-right using `immlib.merge` then passed to
-        `c.function` as required by it.
+        ``c.eager_mapcall(map1, map2..., key1=val1, key2=val2...)`` returns the
+        result of calling the calculation ``c(...)`` using the parameters found
+        in the provided mappings and key-value pairs. All arguments of
+        ``mapcall`` are merged left-to-right using ``immlib.merge`` then passed
+        to ``c.function`` as required by it.
         """
         (args, kwargs) = self._maps_to_args(args, kwargs)
         return self.eager_call(*args, **kwargs)
     def lazy_mapcall(self, *args, **kwargs):
         """Calls the given calculation lazily using the parameters in mappings.
 
-        `c.lazy_mapcall(map1, map2..., key1=val1, key2=val2...)` returns the
-        result of calling the calculation `c(...)` using the parameters found in
-        the provided mappings and key-value pairs. All arguments of `mapcall`
-        are merged left-to-right using `immlib.merge` then passed to
-        `c.function` as required by it.
+        ``c.lazy_mapcall(map1, map2..., key1=val1, key2=val2...)`` returns the
+        result of calling the calculation ``c(...)`` using the parameters found
+        in the provided mappings and key-value pairs. All arguments of
+        ``mapcall`` are merged left-to-right using ``immlib.merge`` then passed
+        to ``c.function`` as required by it.
 
-        The only difference between `calc.mapcall` and `calc.lazy_mapcall` is
-        that the lazydict returned by the latter method encapsulates the calling
-        of the calculation itself, so no call to the calculation is made until
-        one of the values of the lazydict is requested.
+        The only difference between ``calc.mapcall`` and ``calc.lazy_mapcall``
+        is that the lazydict returned by the latter method encapsulates the
+        calling of the calculation itself, so no call to the calculation is
+        made until one of the values of the lazydict is requested.
 
-        See also `calc.eager_mapcall`, `calc.lazy_call`, and `calc.eager_call`.
+        See Also
+        --------
+        calc.eager_mapcall, calc.lazy_call, calc.eager_call
         """
-        # Note that all the args must be dictionaries, so we make copies of them
-        # if they're not persistent dictionaries. This prevents later
+        # Note that all the args must be dictionaries, so we make copies of
+        # them if they're not persistent dictionaries. This prevents later
         # modifications from affecting the results downstream.
         args = [d if is_pdict(d) else dict(d) for d in args]
         # First, create a lazy for the actual call:
         calldel = lazy(self.eager_mapcall, *args, **kwargs)
-        # Then make a lazy map of all the outputs, each of which pulls from this
-        # lazy object to get its values.
-        return ldict({k: lazy(lambda k: calldel()[k], k)
-                      for k in self.outputs})
+        # Then make a lazy map of all the outputs, each of which pulls from
+        # this lazy object to get its values.
+        fn = lambda k: calldel()[k]
+        return ldict({k: lazy(fn, k) for k in self.outputs})
     def mapcall(self, *args, **kwargs):
         """Calls the calculation and returns the results dictionary.
 
-        `c.mapcall(map1, map2..., key1=val1, key2=val2...)` returns the result
-        of calling the calculation `c(...)` using the parameters found in the
-        provided mappings and key-value pairs. All arguments of `mapcall` are
-        merged left-to-right using `immlib.merge` then passed to `c.function` as
-        required by it.
+        ``c.mapcall(map1, map2..., key1=val1, key2=val2...)`` returns the
+        result of calling the calculation ``c(...)`` using the parameters found
+        in the provided mappings and key-value pairs. All arguments of
+        ``mapcall`` are merged left-to-right using ``immlib.merge`` then passed
+        to ``c.function`` as required by it.
 
-        See also `calc.lazy_mapcall`, `calc.eager_mapcall`, and `calc.call`.
+        See Also
+        --------
+        calc.lazy_mapcall, calc.eager_mapcall, calc.call
         """
         if self.lazy: return self.lazy_mapcall(*args, **kwargs)
         else:         return self.eager_mapcall(*args, **kwargs)
     def __setattr__(self, k, v):
-        raise TypeError('calc objects are immutable')
+        if self.function is Ellipsis:
+            # We're still initializing, so setattr is allowed.
+            return object.__setattr__(self, k, v)
+        else:
+            raise TypeError('calc objects are immutable')
     def __delattr__(self, k):
         raise TypeError('calc objects are immutable')
     @staticmethod
@@ -612,35 +610,37 @@ class calc:
                 k = k[tup_ii]
             res.add(k)
         return res.persistent()
-    def tr(self, *args, **kwargs):
-        """Returns a copy of the calculation with translated inputs and outputs.
+    def rename_keys(self, *args, **kwargs):
+        """Returns a copy of the calculation with inputs and outputs renamed.
         
-        `calc.tr(...)` returns a copy of `calc` in which the input and output
-        values of the function have been translated. The translation is found
-        from merging the list of 0 or more dict-like arguments given
+        ``calc.rename_keys(...)`` returns a copy of ``calc`` in which the input
+        and output values of the function have been translated. The translation
+        is found from merging the list of 0 or more dict-like arguments given
         left-to-right followed by the keyword arguments into a single
         dictionary. The keys of this dictionary are translated into their
         associated values in the returned dictionary.
 
         If any of the values of the merged dictionary are 2-tuples, then they
-        are interpreted as `(input_tr, output_tr)`. In this case, then the key
-        must be associated with a name that appears in both the calculation's
-        input list and its output list, and the two names are translated
-        differently.
+        are interpreted as ``(input_tr, output_tr)``. In this case, then the
+        key must be associated with a name that appears in both the
+        calculation's input list and its output list, and the two names are
+        translated differently.
         """
         d = merge(*args, **kwargs)
         # Make a copy.
         tr = object.__new__(calc)
         # Simple changes first.
-        object.__setattr__(tr, 'name', self.name + f'.tr{hex(id(tr))}')
+        trhash = np.sum(np.fromiter(map(hash, d.items()), dtype=int))
+        object.__setattr__(tr, 'name', self.name + f'.rename{hex(trhash)}')
         object.__setattr__(tr, 'base_function', self.base_function)
         object.__setattr__(tr, 'lrucache', self.lrucache)
         object.__setattr__(tr, 'pathcache', self.pathcache)
         object.__setattr__(tr, 'argspec', self.argspec)
+        object.__setattr__(tr, 'lazy', self.lazy)
         object.__setattr__(tr, 'inputs', calc._tr_set(d, self.inputs, True))
         object.__setattr__(tr, 'outputs', calc._tr_tup(d, self.outputs, False))
-        object.__setattr__(tr, 'defaults', calc._tr_map(d, self.defaults, True))
-        object.__setattr__(tr, 'lazy', self.lazy)
+        object.__setattr__(
+            tr, 'defaults', calc._tr_map(d, self.defaults, True))
         object.__setattr__(
             tr, 'input_docs', calc._tr_map(d, self.input_docs, True))
         object.__setattr__(
@@ -656,8 +656,6 @@ class calc:
             kwonlydefaults=calc._tr_map(d, spec.kwonlydefaults, True),
             annotations=calc._tr_map(d, spec.annotations, True))
         object.__setattr__(tr, 'argspec', spec)
-        # The function also needs a wrapper.
-        from functools import wraps
         # The reversed version of d (for inputs).
         r = {v:(k if isinstance(k, str) else k[0]) for (k,v) in d.items()}
         fn = self.function
@@ -669,7 +667,8 @@ class calc:
                 return calc._tr_map(d, res, False)
             else:
                 return res
-        object.__setattr__(tr, 'function', wraps(fn)(_tr_fn_wrapper))
+        wrapfn = wraps(self.base_function)(_tr_fn_wrapper)
+        object.__setattr__(tr, 'function', wrapfn)
         return tr
     def with_lrucache(self, new_cache):
         "Returns a copy of a calc with a different in-memory cache strategy."
@@ -695,50 +694,95 @@ class calc:
         if fn is not new_fn:
             object.__setattr__(new_calc, 'function', new_fn)
         return new_calc
-@docwrap
-def is_calc(arg):
-    """Determines if an object is a `calc` instance.
+@docwrap('immlib.is_calc')
+def is_calc(obj, /):
+    """Determines if an object is a ``calc`` instance.
 
-    `is_calc(x)` returns `True` if `x` is a function that was decorated with an
-    `@calc` directive and `Falseq otherwise.
+    ``is_calc(obj)`` returns ``True`` if `obj` is a ``calc`` object.
+
+    .. Warning:: ``is_calc(obj)`` returns ``False`` if `obj` is a function that
+        was decorated with the ``@calc`` decorator. This is because ``calc``
+        does not turn its decorated functions into ``calc`` objects; rather it
+        attaches a field ``calc`` to the decorated function. To see
+        whether a function is was decorated by ``calc``, use ``is_calcfn``.
+
+    See Also
+    --------
+    calc, to_calc, is_calcfn
     """
-    return isinstance(arg, calc)
+    return isinstance(obj, calc)
+@docwrap('immlib.is_calcfn')
+def is_calcfn(obj, /):
+    """Determines if an object is function that was decorated by ``@calc``.
+
+    ``is_calcfn(obj)`` returns ``True`` if `obj` is a function that was
+    decorated with an ``@calc`` decorator or if `obj` is a ``calc`` object, and
+    it returns ``False`` otherwise.
+
+    Functions decorated with ``@calc`` are not changed but rather are given
+    some metadata, which is stored in the member field ``calc``. For
+    such functions, this field contains an object of type ``calc``.
+
+    See Also
+    --------
+    calc, to_calc, is_calc
+    """
+    return isinstance(getattr(obj, 'calc', None), calc)
+@docwrap('immlib.to_calc')
+def to_calc(obj, /):
+    """Converts an object into a ``calc`` object or raises a ``TypeError``.
+
+    ``to_calc(obj)`` returns `obj` if `obj` is already a ``calc``
+    object. Otherwise, if `obj` has the attribute ``calc``, then that attribute
+    is returned.
+
+    .. Note:: When a function is decorated by ``@calc``, the calculation data
+        is stored in a ``calc`` object that is saved to the ``calc``
+        field of the function, which is why the above works.
+    """
+    if isinstance(obj, calc):
+        return obj
+    c = getattr(obj, 'calc', None)
+    if isinstance(c, calc):
+        return c
+    raise TypeError(f"to_calc received non-calc object of type {type(obj)}")
 
 
-# plan #########################################################################
+# plan ########################################################################
 
 class plan(pdict):
     '''Represents a directed acyclic graph of calculations.
     
-    The `plan` class encapsulates individual functions that require parameters
-    as inputs and produce outputs in the form of named values. Plan objects can
-    be called as functions with a dictionary and/or a keyword arguments
-    providing the plan's parameters; they always return a type of lazy
-    dictionary called a `plandict` of the values they calculate, even if they
-    calculate only a single value.
+    The ``plan`` class encapsulates individual functions that require
+    parameters as inputs and produce outputs in the form of named values. Plan
+    objects can be called as functions with a dictionary and/or a keyword
+    arguments providing the plan's parameters; they always return a type of
+    lazy dictionary called a ``plandict`` of the values they calculate, even if
+    they calculate only a single value.
 
-    Superficially, a `plan` is a `pdict` object whose values must all be `calc`
-    objects. However, under the hood, every `plan` object maintains a directed
-    acyclic graph of dependencies of the inputs and outputs of the calculation
-    objects such that it can create `plandict` objects that reify the outputs of
-    the various calculations lazily.
+    Superficially, a ``plan`` is a ``pdict`` object whose values must all be
+    ``calc`` objects. However, under the hood, every ``plan`` object maintains
+    a directed acyclic graph of dependencies of the inputs and outputs of the
+    calculation objects such that it can create ``plandict`` objects that reify
+    the outputs of the various calculations lazily.
 
     The keys that are used in a plan must be strings but are not otherwise
     restricted.
 
-    For a plan `p = plan(calc_key1=calc1, calc_key2=calc2, ...)`, a `plandict`
-    can be instantiated using the following syntax::
+    For a plan ``p = plan(calc_key1=calc1, calc_key2=calc2, ...)``, a
+    ``plandict`` can be instantiated using the following syntax::
 
         pd = p(param1=val1, param2=val2, ...)
 
-    This `plandict` is an enhanced `ldict` that evaluates components of the plan
-    as requested based on laziness requirements of the calculations in the plan
-    and on dictionary lookups of plan outputs.
+    This ``plandict`` is an enhanced ``ldict`` that evaluates components of the
+    plan as requested based on laziness requirements of the calculations in the
+    plan and on dictionary lookups of plan outputs. (``ldict`` is the lazy
+    dictionary type from the ``pcollections`` library.)
 
-    All plans implicitly contains the parameter `'cache_path'` with the default
-    value of `None`. This parameter is used by the plan's `plandict` objects, to
-    cache the outputs of calculations that were constructed with the option
-    `pathcache=True`.
+    All plans implicitly contains the parameter ``'cache_path'`` with the
+    default value of ``None``. This parameter is used by the plan's
+    ``plandict`` objects, to cache the outputs of calculations that were
+    constructed with the option ``pathcache=True``.
 
     Attributes
     ----------
@@ -767,17 +811,17 @@ class plan(pdict):
         combined documentation for the associated outputs across all
         calculations in the plan.
     requirements : pset
-        A `pset` of the names of the required calculations of the plan (i.e.,
-        those with option `lazy=False`).
+        A ``pset`` of the names of the required calculations of the plan (i.e.,
+        those with option ``lazy=False``).
     '''
-    # Subclasses ---------------------------------------------------------------
+    # Subclasses --------------------------------------------------------------
     CalcData = namedtuple(
         'CalcData',
         ('names', 'calcs', 'args', 'sources', 'index'))
     DepData = namedtuple(
         'DepData',
         ('inputs', 'calcs'))
-    # Static Methods -----------------------------------------------------------
+    # Static Methods ----------------------------------------------------------
     @staticmethod
     def _filter_sort(kv):
         return len(kv[1].inputs)
@@ -849,8 +893,8 @@ class plan(pdict):
         # We're outputting/building-up new_inputtup and new_calctup from the
         # inputtup and calctup values.
         # We use some sleight of hand in this function:
-        # The a = lazy(fn, arg) construct makes a closure over the value of arg.
-        # The b = lambda:fn(arg) construct makes a closure over the symbol arg.
+        # The a = lazy(f, arg) construct makes a closure over the value of arg.
+        # The b = lambda: f(arg) construct makes a closure over the symbol arg.
         # This means that if arg is updated after both of these lines, then
         # a() will return fn(original_value) and b() will return fn(new_value).
         # We can use this to change calctup as we go.
@@ -867,9 +911,9 @@ class plan(pdict):
             # Create a new plandict item for the new input value.
             src = valsources[k]
             if isinstance(src, tuple):
-                # This input gets filtered, so we need a lazy lookup using a 
-                # lambda that makes a closure over the new_calctup symbol, which
-                # will get updated as we go.
+                # This input gets filtered, so we need a lazy lookup using a
+                # lambda that makes a closure over the new_calctup symbol,
+                # which will get updated as we go.
                 lv = lazy(
                     lambda src: srcget(new_inputtup, new_calctup, src),
                     src)
@@ -931,27 +975,49 @@ class plan(pdict):
         for (u,v) in clos:
             res[u].add(v)
         return res
-    # Construction -------------------------------------------------------------
+    # Construction ------------------------------------------------------------
     __slots__ = (
         'inputs', 'outputs', 'defaults', 'requirements',
         'input_docs', 'output_docs'
         'calcdata', 'valsources', 'dependants')
+    def __new__(cls, *args, **kwargs):
+        # We overload new just to parse the input arguments and convert any
+        # values into calc objects. We then pass these down to pdict.
+        calcs = {}
+        nargs = len(args)
+        if nargs == 1:
+            inplan = args[0]
+            if isinstance(inplan, Mapping):  # (plan is a pdict/map of calcs)
+                calcs.update(inplan)
+            else:
+                raise TypeError(
+                    f"x in plan(x) must be a Mapping; found {type(inplan)}")
+        elif nargs > 1:
+            raise ValueError(
+                f"plan expects 0 or 1 positional arguments; found {nargs}")
+        calcs.update(kwargs)
+        for (k,v) in kwargs.items():
+            if is_calc(v):
+                calcs[k] = v
+            else:
+                calcs[k] = to_calc(v).update_function(v)
+        return pdict.__new__(cls, calcs)
     def __init__(self, *args, **kwargs):
-        # We ignore the arguments because they are handled by pdict's __new__
-        # method.
+        # We ignore the arguments because they are handled by __new__.
         # We can start by gathering up the calcs that deal with each of the
-        # plan's values. The val2calc dict maps each value name in the plan to a
-        # tuple of (output, filter, input) calcs that process the value. The
+        # plan's values. The val2calc dict maps each value name in the plan to
+        # a tuple of (output, filter, input) calcs that process the value. The
         # output calcs are those that produce the value as an output but don't
         # requie it as an input; the filter calcs are those that require the
         # value as an input and that produce the value as an output; the input
-        # calcs are those that require the calc as an input but don't produce it
-        # as output.
+        # calcs are those that require the calc as an input but don't produce
+        # it as output.
         val2calc = defaultdict(lambda:([],[],[]))
         filters = set()
         params = []
         reqs = tset()
         for (nm,c) in self.items():
+            c = to_calc(c)
             # Examine the inputs and outputs:
             for oo in c.outputs:
                 if oo not in c.inputs:
@@ -990,9 +1056,11 @@ class plan(pdict):
         output_docs = defaultdict(lambda:[])
         # We're going to be selecting filters and we want to do so
         # preferentially based on the number of inputs they require.
-        filts = tset(sorted(filters, key=lambda f:-len(self[f].inputs)))
+        filts = tset(sorted(
+            filters, key=lambda
+            f:-len(to_calc(self[f]).inputs)))
         filters = pset(filts)
-        is_ready = lambda f: self[f].inputs <= inputs
+        is_ready = lambda f: to_calc(self[f]).inputs <= inputs
         while len(calcs) > 0:
             # We start by greedily selecting filters.
             if len(filts) > 0:
@@ -1005,17 +1073,16 @@ class plan(pdict):
                 nextcalc = next(filter(is_ready, calcs), None)
                 if nextcalc is None:
                     raise ValueError(
-                        f"unreachable calcs: {tuple(calcs)}; this is likely due"
-                        f" to a circular dependency")
+                        f"unreachable calcs: {tuple(calcs)}; this is likely"
+                        f" due to a circular dependency")
             else:
                 filts.discard(nextcalc)
             # We have a next calculation in the order, so we add it.
             calcorder.append(nextcalc)
-            c = self[nextcalc]
+            c = to_calc(self[nextcalc])
             inputs.addall(c.outputs)
             calcs.discard(nextcalc)
-            # While we're going through the calcs in order, we process the docs:
-            # Process the documentation:
+            # While we're going through the calcs in order, we process docs:
             for (inp,doc) in c.input_docs.items():
                 if not doc:
                     continue
@@ -1044,21 +1111,21 @@ class plan(pdict):
         inputs = params
         # We now have a calculation ordering that we can use to turn the plan's
         # filtered values into sequential values.  For example, if the variable
-        # 'x' is filtered through calculations 'f', 'g', and 'h', in that order,
-        # then we update the inputs/outputs of the functions to force an
-        # ordering. First, the initial parameter will be renamed to 'x.', then f
-        # is changed to take 'x.' as an input in place of 'x' and to produce
+        # 'x' is filtered through calculations 'f', 'g', and 'h', in that
+        # order, then we update the inputs/outputs of the functions to force an
+        # ordering. First, the initial parameter will be renamed to 'x.', then
+        # f is changed to take 'x.' as an input in place of 'x' and to produce
         # 'x.f'. Then g is changed so that it takes 'x.f' instead of x and
-        # produces 'x.g'. Then h is changed so that it takes 'x.h' as instead of
-        # 'x' and produces the output 'x'.  The actual internal names don't use
-        # periods (they stay as valid variable names that are potentially
+        # produces 'x.g'. Then h is changed so that it takes 'x.h' as instead
+        # of 'x' and produces the output 'x'.  The actual internal names don't
+        # use periods (they stay as valid variable names that are potentially
         # randomly chosen using the _find_trname staticmethod).
         names = tuple(calcorder)
         calcs = tuple(self[k] for k in calcorder)
         if len(filters) == 0:
-            # We don't actually have any filters to put in order, so we have the
-            # straightforward job of wiring things up as-is. We already know
-            # that there aren't any cycles in the graph (they would have
+            # We don't actually have any filters to put in order, so we have
+            # the straightforward job of wiring things up as-is. We already
+            # know that there aren't any cycles in the graph (they would have
             # appeared earlier).
             (srcs, args) = plan._make_srcs_args(names, calcs, params)
             calcdata = plan.CalcData(names, calcs, args, srcs, calcidx)
@@ -1068,13 +1135,14 @@ class plan(pdict):
         else:
             # We need to do two things: (1) make a plan out of the unfiltered
             # calcs (i.e., separate inputs and outputs of each filter calc into
-            # different variables and link them up across calculations), and (2)
-            # make a translation for the output values.
+            # different variables and link them up across calculations), and
+            # (2) make a translation for the output values.
             tr = {}
             itr = {}
             valnames = set(val2calc.keys())
             new_calcs = []
             for (nm,c) in zip(names, calcs):
+                c = to_calc(c)
                 filts = c.inputs & set(c.outputs)
                 calctr = {}
                 for f in filts:
@@ -1084,7 +1152,7 @@ class plan(pdict):
                     tr[f] = new_k
                     itr[new_k] = f
                     calctr[f] = (k, new_k)
-                new_calcs.append(c.tr(tr, calctr))
+                new_calcs.append(c.rename_keys(tr, calctr))
             (srcs, args) = plan._make_srcs_args(names, new_calcs, params)
             new_calcs = tuple(new_calcs)
             calcdata = plan.CalcData(names, new_calcs, args, srcs, calcidx)
@@ -1094,11 +1162,12 @@ class plan(pdict):
             valsources = valsrcs.persistent()
         # Go through the calc ordering and find the earliest default value for
         # each of the keys.
-        defaults = rmerge(*(c.defaults for c in calcs if c.defaults))
+        defaults = rmerge(
+            *(c.defaults for c in map(to_calc, calcs) if c.defaults))
         # Note the requirements.
         requirements = pset(reqs)
-        # One final thing we need to do is to make the dependants graph; this is
-        # basically the graph of calculations and outputs that need to be
+        # One final thing we need to do is to make the dependants graph; this
+        # is basically the graph of calculations and outputs that need to be
         # updated / reset any time a parameter is changed.
         depset = set()
         for (cidx,c) in enumerate(calcdata.calcs):
@@ -1130,14 +1199,14 @@ class plan(pdict):
         object.__setattr__(self, 'calcdata', calcdata)
         object.__setattr__(self, 'valsources', valsources)
         object.__setattr__(self, 'dependants', dependants)
-    # Methods ------------------------------------------------------------------
+    # Methods -----------------------------------------------------------------
     def filtercall(self, *args, **kwargs):
         """Calls the plan object, but filters out args that aren't in the plan.
 
-        `plan_obj.filtercall(dict1, dict2, ..., k1=v1, k2=v2, ...)` is
-        equivalent to calling `plan_obj(dict1, dict2, ..., k1=v1, k2=v2, ...)`
-        except that any keys in the argument list to `filtercall` that aren't
-        in the parameter list of `plan_obj` are automatically filtered out.
+        ``plan_obj.filtercall(dict1, dict2, ..., k1=v1, k2=v2, ...)`` is
+        equivalent to ``plan_obj(dict1, dict2, ..., k1=v1, k2=v2, ...)`` except
+        that any keys in the argument list to ``filtercall`` that aren't in the
+        parameter list of ``plan_obj`` are automatically filtered out.
         """
         params = merge(*args, **kwargs)
         for k in params.keys():
@@ -1157,62 +1226,63 @@ class plan(pdict):
         return f"plan(<{n} calcs>, <{m} params>)"
 @docwrap
 def is_plan(arg):
-    """Determines if an object is a `plan` instance.
+    """Determines if an object is a ``plan`` instance.
 
-    `is_plan(x)` returns `True` if `x` is a calculation `plan` and `False`
-    otherwise.
+    ``is_plan(x)`` returns ``True`` if ``x`` is a calculation ``plan`` and
+    ``False`` otherwise.
     """
     return isinstance(arg, plan)
 
 
-# plandict #####################################################################
+# plandict ####################################################################
 
 class plandict(ldict):
     """A persistent dict type that manages the outputs of executing a plan.
 
-    `plandict(plan, params)` instantiates a plan object with the given dict-like
-    object of parameters, `params`.
+    ``plandict(plan, params)`` instantiates a plan object with the given
+    dict-like object of parameters, ``params``.
 
-    `plandict(plan, params, k1=v1, k2=v2, ...)` additional merges all keyword
+    ``plandict(plan, params, k1=v1, k2=v2, ...)`` additional merges all keyword
     arguments into parameters.
 
-    `plandict(plan, k1=v1, k2=v2, ...)` uses only the keyword arguments as the
-    plan parameters.
+    ``plandict(plan, k1=v1, k2=v2, ...)`` uses only the keyword arguments as
+    the plan parameters.
 
-    Note that `plandict(plan, args...)` is equivalent to `plan(args...)`.
+    Note that ``plandict(plan, args...)`` is equivalent to ``plan(args...)``.
 
-    `plandict` is a subclass of `lazydict`, but it has some unique behavior,
-    primarily in that only the parameters of a `plandict` may be updated; the
-    rest of the items are consequences of the plan and parameter.
+    ``plandict`` is a subclass of ``lazydict``, but it has some unique
+    behavior, primarily in that only the parameters of a ``plandict`` may be
+    updated; the rest of the items are consequences of the plan and parameter.
 
     Parameters
     ----------
     plan : plan
-        The `plan` object that is to be instantiated.
+        The ``plan`` object that is to be instantiated.
     *params : dict-like, optional
-        The dict-like object of the parameters of the `plan`. All and only
-        `plan` parameters must be provided, after the `params` argument is
-        merged with the `kwargs` options. This may be a `lazydict`, and this
-        dict's laziness is respected as much as possible.
+        The dict-like object of the parameters of the ``plan``. All and only
+        ``plan`` parameters must be provided, after the ``params`` argument is
+        merged with the ``kwargs`` options. This may be a ``lazydict``, and
+        this dict's laziness is respected as much as possible.
     **kwargs : optional keywords
-        Optional keywords that are merged into `params` to form the set of
+        Optional keywords that are merged into ``params`` to form the set of
         parameters for the plan.
     
     Attributes
     ----------
     plan : immlib.plan
         The plan object on which this plandict is based or alternatively a
-        `plandict` or object to copy.
+        ``plandict`` or object to copy.
     inputs : pdict
         The parameters that fulfill the plan. Note that these are the only keys
-        in the `plandict` that can be updated using methods like `set` and
-        `setdefault`.
+        in the ``plandict`` that can be updated using methods like ``set`` and
+        ``setdefault``.
+
     """
     __slots__ = ('plan', 'inputs', '_calcdata', '_inputdata')
     def __new__(cls, *args, **kwargs):
-        # There are two valid ways to call plandict(): plandict(planobj, params)
-        # and plandict(plandictobj, new_params). We call different classmethods
-        # for each version.
+        # There are two valid ways to call plandict(): plandict(planobj,
+        # params) and plandict(plandictobj, new_params). We call different
+        # classmethods for each version.
         if len(args) == 0:
             raise TypeError(
                 "plandict() requires 1 argument that is a plan or plandict")
@@ -1238,8 +1308,8 @@ class plandict(ldict):
         object.__setattr__(self, 'inputs', params)
         object.__setattr__(self, '_calcdata', calctup)
         object.__setattr__(self, '_inputdata', inputtup)
-        # At this point, the object should be entirely initialized, so we can go
-        # ahead and run its required calculations.
+        # At this point, the object should be entirely initialized, so we can
+        # go ahead and run its required calculations.
         calcdata = plan.calcdata
         for r in plan.requirements:
             cidx = calcdata.index[r]
@@ -1331,29 +1401,30 @@ class plandict(ldict):
         return hash(self.inputs) + hash(self.plan)
 
 class tplandict(tldict):
-    """A transient dict type that follows an `immlib` plan.
+    """A transient dict type that follows an ``immlib`` plan.
 
-    See `immlib.plandict` and `immlib.plan` for more information about `immlib`
-    plans and workflows. The `tplandict` type is a transient counterpart to the
-    persistent `plandict` type. A `tplandict` object can be created from a
-    `plandict` object `pd` using either the syntax `td = tplandict(pd)` or `td =
-    pd.transient()`. The keys corresponding to the inputs of the plan can be
-    changed in the resulting `tplandict` object, and the downstream outputs of
-    the plan will be automatically updated as these are changed. A `plandict`
-    can be recreated using either the syntax `plandict(td)` or `td.transient()`.
+    See ``immlib.plandict`` and ``immlib.plan`` for more information about
+    ``immlib`` plans and workflows. The ``tplandict`` type is a transient
+    counterpart to the persistent ``plandict`` type. A ``tplandict`` object can
+    be created from a ``plandict`` object ``pd`` using either the syntax ``td =
+    tplandict(pd)`` or ``td = pd.transient()``. The keys corresponding to the
+    inputs of the plan can be changed in the resulting ``tplandict`` object,
+    and the downstream outputs of the plan will be automatically updated as
+    these are changed. A ``plandict`` can be recreated using either the syntax
+    ``plandict(td)`` or ``td.transient()``.
 
     Parameters
     ----------
     plan : plan
-        The `plan` object that is to be instantiated or alternatively a
-        `plandict` or `tplandict` object to copy.
+        The ``plan`` object that is to be instantiated or alternatively a
+        ``plandict`` or ``tplandict`` object to copy.
     *params : dict-like, optional
-        The dict-like object of the parameters of the `plan`. All and only
-        `plan` parameters must be provided, after the `params` argument is
-        merged with the `kwargs` options. This may be a `lazydict`, and this
-        dict's laziness is respected as much as possible.
+        The dict-like object of the parameters of the ``plan``. All and only
+        ``plan`` parameters must be provided, after the ``params`` argument is
+        merged with the ``kwargs`` options. This may be a ``lazydict``, and
+         this dict's laziness is respected as much as possible.
     **kwargs : optional keywords
-        Optional keywords that are merged into `params` to form the set of
+        Optional keywords that are merged into ``params`` to form the set of
         parameters for the plan.
     
     Attributes
@@ -1362,13 +1433,14 @@ class tplandict(tldict):
         The plan object on which this tplandict is based.
     inputs : pdict
         The parameters that fulfill the plan. Note that these are the only keys
-        in the `tplandict` that can be updated directly.
+        in the ``tplandict`` that can be updated directly.
+
     """
     __slots__ = ('plan', 'inputs', '_calcdata', '_inputdata')
     def __new__(cls, *args, **kwargs):
-        # There are two valid ways to call plandict(): plandict(planobj, params)
-        # and plandict(plandictobj, new_params). We call different classmethods
-        # for each version.
+        # There are two valid ways to call plandict(): plandict(planobj,
+        # params) and plandict(plandictobj, new_params). We call different
+        # classmethods for each version.
         if len(args) == 0:
             raise TypeError(
                 "tplandict() requires 1 argument that is a plan or plandict")
@@ -1397,8 +1469,8 @@ class tplandict(tldict):
             pd._calcdata,
             param_updates)
         inputs = pd.inputs
-        # Inputs stays a pdict because we don't want to allow the user to update
-        # them directly.
+        # Inputs stays a pdict because we don't want to allow the user to
+        # update them directly.
         inputs = inputs.update(param_updates)
         items = merge(pd, items)
         return cls._new_tplandict(items, plan, inputs, calctup, inputtup)
@@ -1420,8 +1492,8 @@ class tplandict(tldict):
         # Now we add items.
         for (k,v) in holdlazy(items).items():
             tldict.__setitem__(self, k, v)
-        # At this point, the object should be entirely initialized, so we can go
-        # ahead and run its required calculations.
+        # At this point, the object should be entirely initialized, so we can
+        # go ahead and run its required calculations.
         calcdata = plan.calcdata
         for r in plan.requirements:
             cidx = calcdata.index[r]
@@ -1457,24 +1529,24 @@ class tplandict(tldict):
     def __delitem__(self, k):
         raise TypeError("cannot delete items from tplandict objects")
     def setdefault(self, k, default=None, /):
-        # All possible keys to set are already set in a plandict, so just return
-        # the current value of key k
+        # All possible keys to set are already set in a plandict, so just
+        # return the current value of key k
         return self[k]
     def persistent(self):
         return plandict(self)
 @docwrap
 def is_plandict(arg):
-    """Determines if an object is a `plandict` instance.
+    """Determines if an object is a ``plandict`` instance.
 
-    `is_plandict(x)` returns `True` if `x` is a `plandict` object and `False`
-    otherwise.
+    ``is_plandict(x)`` returns ``True`` if ``x`` is a ``plandict`` object and
+    ``False`` otherwise.
     """
     return isinstance(arg, plandict)
 @docwrap
 def is_tplandict(arg):
-    """Determines if an object is a `tplandict` instance.
+    """Determines if an object is a ``tplandict`` instance.
 
-    `is_tplandict(x)` returns `True` if `x` is a `tplandict` object and `False`
-    otherwise.
+    ``is_tplandict(x)`` returns ``True`` if ``x`` is a ``tplandict`` object and
+    ``False`` otherwise.
     """
     return isinstance(arg, tplandict)

@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-################################################################################
+###############################################################################
 # immlib/workflow/_plantype.py
 
 
-# Dependencies #################################################################
+# Dependencies ################################################################
 
 import inspect
 from functools import wraps
@@ -13,19 +13,19 @@ from pcollections import (pdict, ldict, lazy)
 
 from ..doc import docwrap
 from ..util import (is_str, is_pdict, is_tdict, is_ldict, assoc, merge)
-from ._core import (calc, plan, plandict, tplandict, is_calc)
+from ._core import (calc, plan, plandict, tplandict, is_calcfn)
 
 
-# #plantype ####################################################################
+# #plantype ###################################################################
 
 class plantype(type):
     """A metaclass that allows one to create lazy types from calculation plans.
 
     The `plantype` metaclass handles classes with the base-class `planobject`.
-    In general, one should create a plan-object by inheriting from `planobject`,
-    not by providing the `plantype` metaclass, but passing `plantype` has the
-    same effect (all classes created with metaclass `plantype` will inherit from
-    `planobject`).
+    In general, one should create a plan-object by inheriting from
+    `planobject`, not by providing the `plantype` metaclass, but passing
+    `plantype` has the same effect (all classes created with metaclass
+    `plantype` will inherit from `planobject`).
 
     See `planobject` for more information.
     """
@@ -43,16 +43,16 @@ class plantype(type):
         shouldn't be used directly and shouldn't be inherited. Use the
         `planobject` class instead.
         """
-        __slots__ = ('__plandict__',)
+        __slots__ = ('_plandict_',)
         def __getattr__(self, k):
-            pd = self.__plandict__
+            pd = self._plandict_
             r = pd.get(k, pd)
             if r is pd:
                 raise AttributeError
             else:
                 return r
         def __setattr__(self, k, v):
-            pd = self.__plandict__
+            pd = self._plandict_
             pdtype = type(pd)
             plan = type(self).plan
             if pdtype is dict or pdtype is tplandict:
@@ -63,11 +63,12 @@ class plantype(type):
                     else:
                         msg += "transient planobjects"
                     raise ValueError(msg)
-                pd[k] = v
+                else:
+                    pd[k] = v
             else:
                 raise TypeError(f"type {type(self)} is immutable")
         def __delattr__(self, k):
-            pd = object.__getattribute__(self, '__plandict__')
+            pd = self._plandict_
             if type(pd) is dict:
                 raise TypeError(
                     f"cannot delete attributes from plantype: {type(self)}")
@@ -76,12 +77,12 @@ class plantype(type):
         def __new__(cls, *args, **kwargs):
             # Start by creating the object itself and setting up its slots.
             obj = object.__new__(cls)
-            object.__setattr__(obj, '__plandict__', None)
+            object.__setattr__(obj, '_plandict_', None)
             # Once the __init__ function is done running, the plandict will be
             # cleaned up (this is guaranteed by the plantype meta-class).
             return obj
         def __dir__(self):
-            pd = self.__plandict__
+            pd = self._plandict_
             l = object.__dir__(self)
             l.extend(pd.keys())
             l.sort()
@@ -95,13 +96,14 @@ class plantype(type):
 
             The `planobject` type, and any types that inherit from it, is
             generally immutable; however, When a `planobject` is first created,
-            it is allowed to set its inputs, as if they were mutable attributes,
-            during the `__init__()` method. In order to facilitate this, a
-            reorganization of the initialization code for each `planobject`
-            subclass is performed when that class is defined. The class's true
-            `__init__` method is stored in the method `__planobject_init__`,
-            while the `plantype.planobject_base._init_wrapper` method is stored
-            in the type's `__init__` method. This method calls the type's
+            it is allowed to set its inputs, as if they were mutable
+            attributes, during the `__init__()` method. In order to facilitate
+            this, a reorganization of the initialization code for each
+            `planobject` subclass is performed when that class is defined. The
+            class's true `__init__` method is stored in the method
+            `__planobject_init__`, while the
+            `plantype.planobject_base._init_wrapper` method is stored in the
+            type's `__init__` method. This method calls the type's
             `__planobject_init__` method then makes the initialized object
             immutable.
 
@@ -109,7 +111,7 @@ class plantype(type):
             """
             # If the plandict is not a mutable dictionary, we have already been
             # initialized.
-            pd = self.__plandict__
+            pd = self._plandict_
             if is_pdict(pd) or is_tdict(pd):
                 raise RuntimeError(
                     "_init_wrapper method called on an already-initialized"
@@ -122,7 +124,7 @@ class plantype(type):
             # Otherwise, pd is None, meaning that we're the first initializer.
             # Note that we are now in the process of initializing...
             pd = {}
-            object.__setattr__(self, '__plandict__', pd)
+            object.__setattr__(self, '_plandict_', pd)
             # This method is the real initializer for the class (what the
             # class's actual code wrote as the __init__ method).
             cls.__planobject_init__(self, *args, **kwargs)
@@ -135,13 +137,13 @@ class plantype(type):
                     f" expected {tuple(theplan.inputs)} but found"
                     f" {tuple(params.keys())}")
             pd = theplan(params)
-            object.__setattr__(self, '__plandict__', pd)
+            object.__setattr__(self, '_plandict_', pd)
         # For the pickle module:
         def __getstate__(self):
-            return dict(self.__plandict__.inputs)
+            return dict(self._plandict_.inputs)
         def __setstate__(self, inputs):
             plan = type(self).plan
-            object.__setattr__(self, '__plandict__', plan(inputs))
+            object.__setattr__(self, '_plandict_', plan(inputs))
     def __new__(cls, name, bases, attrs, **kwargs):
         sup = super(plantype, cls)
         # Before we go too far, let's extract the valid args from kwargs.
@@ -172,13 +174,13 @@ class plantype(type):
         attrs['__init__'] = wraps(init)(_initfn)
         # (3) Go through the bases: see if there are planobject bases already,
         #     and if not, add planobject in. As we go, collect calculations.
-        calcs = {k:v for (k,v) in attrs.items() if is_calc(v)}
+        calcs = {k:v for (k,v) in attrs.items() if is_calcfn(v)}
         found_planobj = False
         for b in bases:
             if not issubclass(b, plantype.planobject_base): continue
             found_planobj = True
             for (k,v) in inspect.getmembers(b):
-                if k not in calcs and is_calc(v):
+                if k not in calcs and is_calcfn(v):
                     calcs[k] = v
         if not found_planobj:
             bases.append(plantype.planobject_base)
@@ -226,7 +228,7 @@ class planobject(plantype.planobject_base, metaclass=plantype):
     """
     __slots__ = ()
     def __str__(self):
-        pd = object.__getattribute__(self, '__plandict__')
+        pd = object.__getattribute__(self, '_plandict_')
         p = pd.plan
         param_str = ", ".join(
             f"{k}={pd[k] if pd.is_ready(k) else '<lazy>'}"
@@ -240,7 +242,7 @@ class planobject(plantype.planobject_base, metaclass=plantype):
         else:
             return f"{cls.__name__}({param_str})"
     def __repr__(self):
-        pd = object.__getattribute__(self, '__plandict__')
+        pd = object.__getattribute__(self, '_plandict_')
         p = pd.plan
         param_str = ", ".join(
             f"{k}={pd[k]}" for k in p.inputs)
@@ -254,34 +256,34 @@ class planobject(plantype.planobject_base, metaclass=plantype):
     def __eq__(self, other):
         if type(self) is not type(other):
             return False
-        return self.__plandict__.inputs == other.__plandict__.inputs
+        return self._plandict_.inputs == other._plandict_.inputs
     def __ne__(self, other):
         if type(self) is not type(other):
             return True
-        return self.__plandict__.inputs != other.__plandict__.inputs
+        return self._plandict_.inputs != other._plandict_.inputs
     def __hash__(self):
-        return hash((type(self), self.__plandict__.inputs))
+        return hash((type(self), self._plandict_.inputs))
     def copy(self, **kwargs):
         """Creates a copy of the planobject with optional parameter updates.
         """
-        pd = plandict(self.__plandict__, **kwargs)
+        pd = plandict(self._plandict_, **kwargs)
         obj = object.__new__(self.__class__)
-        object.__setattr__(obj, '__plandict__', pd)
+        object.__setattr__(obj, '_plandict_', pd)
         return obj
     def transient(self):
         """Returns a transient copy of the planobject."""
-        pd = self.__plandict__
+        pd = self._plandict_
         if pd is None or isinstance(pd, dict):
             raise RuntimeError(
                 f"cannot create transient copy during initialization")
         c = copy(self)
-        object.__setattr__(c, '__plandict__', tplandict(pd))
+        object.__setattr__(c, '_plandict_', tplandict(pd))
         return c
     def persistent(self):
         """Returns a persistent copy of the planobject. If the planobject is
         already persistent, it is returned unchanged.
         """
-        pd = self.__plandict__
+        pd = self._plandict_
         if pd is None or isinstance(pd, dict):
             raise RuntimeError(
                 f"cannot create persistent copy during initialization")
@@ -291,12 +293,12 @@ class planobject(plantype.planobject_base, metaclass=plantype):
         elif not isinstance(pd, tplandict):
             raise ValueError(f"unknown plandict type: {type(pd)}")
         c = copy(self)
-        object.__setattr__(c, '__plandict__', pd.persistent())
+        object.__setattr__(c, '_plandict_', pd.persistent())
         return c
     def is_persistent(self):
         """Returns `True` if the planobject is persistent and `False` if it is
         transient."""
-        pd = self.__plandict__
+        pd = self._plandict_
         if pd is None or isinstance(pd, dict):
             return type(self).init_transient
         else:

@@ -329,7 +329,7 @@ def quant(mag, /, unit=Ellipsis, *, ureg=None):
     quantity with dimensionless units.
 
     .. Warning:: The value ``unit=None`` is not equivalent to
-        ``unit='dimensionless'``; rather, ``unit=None`` us used throughout
+        ``unit='dimensionless'``; rather, ``unit=None`` is used throughout
         immlib to indicate a non-quantity such as a plain PyTorch tensor or a
         NumPy array. Accordingly, an exception is raised when ``unit=None`` is
         given.

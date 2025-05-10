@@ -2387,3 +2387,182 @@ class numapi:
                 return self._call_torch(args, kwargs)
         # Otherwise we use the array form.
         return self._call_numpy(args, kwargs)
+
+# The tensor_args, array_args, and numeric_args decorators are very similar,
+# but tensor_args has some extra magic for handling the keep_arrays option, and
+# numeric_args also needs some magic for finding the device from the first
+# tensor argument.
+def _args_find_tensor(argvals, varargs, kwargs):
+    try:
+        return next(filter(is_tensor, argvals))
+    except StopIteration:
+        pass
+    if varargs is not None:
+        try:
+            return next(filter(is_tensor, varargs))
+        except StopIteration:
+            pass
+    if kwargs is not None:
+        try:
+            return next(filter(is_tensor, kwargs.values()))
+        except StopIteration:
+            pass
+    return None
+def _args_try_tensor(val, name=None, binding=None, first_tensor=None):
+    device = None if first_tensor is None else first_tensor.device
+    try:
+        tns = to_tensor(val, device=device)
+    except TypeError:
+        return val
+    if name is not None and val is not tns:
+        binding.arguments[name] = tns
+    return tns
+def _args_try_array(val, name=None, binding=None, first_tensor=None):
+    # (The first_tensor parameter is ignored, but included to be similar to the
+    #  _args_try_tensor function.)
+    try:
+        arr = to_array(val)
+    except TypeError:
+        return val
+    if name is not None and val is not arr:
+        binding.arguments[name] = arr
+    return arr
+def _args_try_numeric(val, name=None, binding=None, first_tensor=None):
+    try:
+        if first_tensor is None:
+            arr = to_array(val)
+        else:
+            arr = to_tensor(val, device=first_tensor.device)
+    except TypeError:
+        return val
+    if name is not None and val is not arr:
+        binding.arguments[name] = arr
+    return arr
+def _args_dispatch(args_try_fn, fn,
+                   sig, sig_args, sig_vargs, sig_kwargs, keep_arrays,
+                   *args, **kwargs):
+    binding = sig.bind(*args, **kwargs)
+    vals = tuple(map(binding.arguments.__getitem__, sig_args))
+    if sig_vargs:
+        vargs = binding.arguments[sig_vargs]
+        nvargs = len(vargs)
+    else:
+        vargs = None
+        nvargs = 0
+    if sig_kwargs:
+        kwargs = binding.arguments[sig_kwargs]
+        nkw = len(kw)
+    else:
+        kwargs = None
+        nkw = 0
+    if args_try_fn is _args_try_array:
+        first_tensor = None
+    else:
+        first_tensor = _find_first_tensor(vals, vargs, kwargs)
+    # Convert to the appropriate types (and update the values in the arguments
+    # list if there is a change in any of the args):
+    for (argname,val) in zip(sig_args, vals):
+        args_try_fn(val, argname, binding, first_tensor)
+    if sig_vargs:
+        new_vargs = tuple(
+            args_try_fn(val, first_tensor=first_tensor)
+            for val in vals[nargs:nargs+nva])
+        binding.arguments[fn_varargs] = new_varargs
+    if fn_kwargs:
+        for (k,val) in kw.items():
+            cnv = args_try_fn(val, first_tensor=first_tensor)
+            if cnv is not val:
+                kw[k] = tns
+    rval = fn(*binding.args, **binding.kwargs)
+    if keep_arrays and first_tensor is None:
+        if is_tuple(rval):
+            rval = tuple(
+                to_array(u, copy=False) if is_tensor(u) else u
+                for u in rval)
+        elif is_tensor(rval):
+            rval = to_array(rval, copy=False)
+    return rval
+def _promote_args_decorate(arglist, keep_arrays, obj):
+    "[Private] Dispatcher for tensor_args decorator."
+    from ..workflow import calc
+    # These functions handle calc objects as well as normal functions.
+    # With calc objects, we need to return a duplicate at the end whose
+    # function field has been updated.
+    is_calc = isinstance(obj, calc)
+    fn = obj.function if is_calc else obj
+    sig = inspect.signature(fn)
+    if arglist is None or len(arglist) == 0:
+        # We convert all of the args.
+        arglist = tuple(sig.parameters.keys())
+    sig_args = []
+    sig_kwargs = None
+    sig_varargs = None
+    params = sig.parameters
+    for arg in arglist:
+        p = params.get(arg)
+        if p is None:
+            raise ValueError(
+                f"'{arg}' requested as tensor but not found in arguments")
+        if p.kind is p.VAR_POSITIONAL:
+            sig_varargs = p.name
+        elif p.kind is p.VAR_KEYWORD:
+            sig_kwargs = p.name
+        else:
+            sig_args.append(p.name)
+    nargs = len(sig_args)
+    dispatch = partial(
+        _args_dispatch,
+        args_try_fn, fn,
+        sig, sig_args, sig_varargs, sig_kwargs)
+    if is_calc:
+        from copy import copy
+        new_calc = copy(obj)
+        object.__setattr__(new_calc, 'function', dispatch)
+        dispatch = new_calc
+    return wraps(obj)(dispatch)
+@docwrap('immlib.tensor_args')
+def tensor_args(fn=None, /, *args, keep_arrays=False):
+    """Converts arguments of the decorated function into PyTorch tensors.
+
+    The decorator ``@tensor_args``, when applied to a function, will convert
+    all of that function's arguments into PyTorch tensors prior to invoking the
+    function. ``tensor_args`` considers ``pint.Quantity`` objects whose
+    magnitudes are tensors to be tensors and will convert arguments that are
+    quantitites into new quantities with tensor magnitudes.
+
+    If a function is decorated with ``@tensor_args('arg1', 'arg2' ...)`` then
+    only the arguments whose names are given (``arg1``, ``arg2``, ...) are
+    converted into tensors.
+
+    When arguments are converted into PyTorch tensors, the first object in the
+    argument list that is already a tensor is found and its device is used as
+    the device for all converted objects. If no such object is found, then
+    ``None`` is used for the device.
+    
+    The optional argument `keep_arrays` (default: ``False``) can be set to
+    ``True`` to indicate that the function should convert tensor return values
+    back into NumPy arrays if none of the arguments to the function were
+    originally tensors. This allows a function to be written using one
+    numerical interface (PyTorch) but to work for either PyTorch tensors or
+    NumPy arrays while returning values whose types match the input types.
+
+    """
+    if fn is None or is_str(fn):
+        # A function is being decorated with `@tensor_args('arg1' ...)` or
+        # `@tensor_args(keep_arrays=value)` but not `@tensor_args` alone.
+        return partial(_tensor_args, args, keep_arrays)
+    elif not callable(fn):
+        # We weren't given a string or a valid function to decorate.
+        raise TypeError(
+            f"expected string or callable for first argument; got {type(fn)}")
+    else:
+        # Otherwise, we have a callable, and maybe a list of strings. If we
+        # have a list of strings, we may as well use it, thus allowing the
+        # tensor_args decorator to be used either as:
+        #   @tensor_args('a')
+        #   def fn(a, b): ...
+        # or as
+        #   fn = tensor_args(lambda a,b: ..., 'a').
+        return _tensor_args(args, keep_arrays, fn)
+        
+    

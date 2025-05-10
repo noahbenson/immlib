@@ -91,7 +91,10 @@ from ._core import (
     lambdadict,
     args,
     argfilter,
-    unitregistry)
+    unitregistry,
+    to_pathcache,
+    to_lrucache,
+    identfn)
 
 from ._numeric import (
     checktorch,
@@ -130,7 +133,8 @@ from ._numeric import (
     is_number,
     like_number,
     to_number,
-    numapi)
+    numapi,
+    tensor_args)
 
 from ._quantity import (
     is_ureg,
@@ -221,6 +225,12 @@ __all__ = (
     "can_hash",
     "itersafe",
     "can_iter",
+    "is_pcoll",
+    "is_tcoll",
+    "is_mcoll",
+    "to_pcoll",
+    "to_tcoll",
+    "to_mcoll",
     "freezearray",
     "frozenarray",
     "is_number",
@@ -234,6 +244,7 @@ __all__ = (
     "is_realdata",
     "is_complexdata",
     "numapi",
+    "tensor_args",
     "default_ureg",
     "like_unit",
     "alike_units",
@@ -258,10 +269,11 @@ __all__ = (
     "args",
     "argfilter",
     "is_url",
-    "url_download",
-    "reclaim")
+    "url_download")
 
 # Mark all the imported functions as belonging to this module instead of the
 # hidden submodules. Most of these will later get claimed by the immlib primary
 # module, but any that aren't belong here in immlib.util.
-reclaim(__name__, __all__, del_reclaim=False, skip_externs=False)
+reclaim(__name__, del_reclaim=False)
+# We also want to claim the `reclaim` function for util.
+reclaim.__module__ = __name__
