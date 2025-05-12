@@ -630,7 +630,8 @@ class calc:
         # Make a copy.
         tr = object.__new__(calc)
         # Simple changes first.
-        trhash = np.sum(np.fromiter(map(hash, d.items()), dtype=int))
+        trhash = np.fromiter(map(hash, d.items()), dtype=int)
+        trhash = np.sum(trhash.astype(np.uintp))
         object.__setattr__(tr, 'name', self.name + f'.rename{hex(trhash)}')
         object.__setattr__(tr, 'base_function', self.base_function)
         object.__setattr__(tr, 'lrucache', self.lrucache)
