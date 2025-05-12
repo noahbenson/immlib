@@ -134,7 +134,9 @@ from ._numeric import (
     like_number,
     to_number,
     numapi,
-    tensor_args)
+    tensor_args,
+    array_args,
+    numeric_args)
 
 from ._quantity import (
     is_ureg,
@@ -245,6 +247,8 @@ __all__ = (
     "is_complexdata",
     "numapi",
     "tensor_args",
+    "array_args",
+    "numeric_args",
     "default_ureg",
     "like_unit",
     "alike_units",

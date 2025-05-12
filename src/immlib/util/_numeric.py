@@ -2458,7 +2458,7 @@ def _args_dispatch(args_try_fn, fn,
     if args_try_fn is _args_try_array:
         first_tensor = None
     else:
-        first_tensor = _find_first_tensor(vals, vargs, kwargs)
+        first_tensor = _args_find_tensor(vals, vargs, kwargs)
     # Convert to the appropriate types (and update the values in the arguments
     # list if there is a change in any of the args):
     for (argname,val) in zip(sig_args, vals):
@@ -2467,8 +2467,8 @@ def _args_dispatch(args_try_fn, fn,
         new_vargs = tuple(
             args_try_fn(val, first_tensor=first_tensor)
             for val in vals[nargs:nargs+nva])
-        binding.arguments[fn_varargs] = new_varargs
-    if fn_kwargs:
+        binding.arguments[sig_varargs] = new_varargs
+    if sig_kwargs:
         for (k,val) in kw.items():
             cnv = args_try_fn(val, first_tensor=first_tensor)
             if cnv is not val:
@@ -2482,14 +2482,9 @@ def _args_dispatch(args_try_fn, fn,
         elif is_tensor(rval):
             rval = to_array(rval, copy=False)
     return rval
-def _promote_args_decorate(arglist, keep_arrays, obj):
+def _promote_args_decorate(arglist, args_try_fn, keep_arrays, fn):
     "[Private] Dispatcher for tensor_args decorator."
     from ..workflow import calc
-    # These functions handle calc objects as well as normal functions.
-    # With calc objects, we need to return a duplicate at the end whose
-    # function field has been updated.
-    is_calc = isinstance(obj, calc)
-    fn = obj.function if is_calc else obj
     sig = inspect.signature(fn)
     if arglist is None or len(arglist) == 0:
         # We convert all of the args.
@@ -2513,13 +2508,8 @@ def _promote_args_decorate(arglist, keep_arrays, obj):
     dispatch = partial(
         _args_dispatch,
         args_try_fn, fn,
-        sig, sig_args, sig_varargs, sig_kwargs)
-    if is_calc:
-        from copy import copy
-        new_calc = copy(obj)
-        object.__setattr__(new_calc, 'function', dispatch)
-        dispatch = new_calc
-    return wraps(obj)(dispatch)
+        sig, sig_args, sig_varargs, sig_kwargs, keep_arrays)
+    return wraps(fn)(dispatch)
 @docwrap('immlib.tensor_args')
 def tensor_args(fn=None, /, *args, keep_arrays=False):
     """Converts arguments of the decorated function into PyTorch tensors.
@@ -2550,7 +2540,9 @@ def tensor_args(fn=None, /, *args, keep_arrays=False):
     if fn is None or is_str(fn):
         # A function is being decorated with `@tensor_args('arg1' ...)` or
         # `@tensor_args(keep_arrays=value)` but not `@tensor_args` alone.
-        return partial(_tensor_args, args, keep_arrays)
+        return partial(
+            _promote_args_decorate,
+            args, _args_try_tensor, keep_arrays)
     elif not callable(fn):
         # We weren't given a string or a valid function to decorate.
         raise TypeError(
@@ -2563,6 +2555,81 @@ def tensor_args(fn=None, /, *args, keep_arrays=False):
         #   def fn(a, b): ...
         # or as
         #   fn = tensor_args(lambda a,b: ..., 'a').
-        return _tensor_args(args, keep_arrays, fn)
-        
-    
+        return _promote_args_decorate(args, _args_try_tensor, keep_arrays, fn)
+@docwrap('immlib.array_args')
+def array_args(fn=None, /, *args):
+    """Converts arguments of the decorated function into NumPy arrays.
+
+    The decorator ``@array_args``, when applied to a function, will convert all
+    of that function's arguments into NumPy arrays prior to invoking the
+    function. ``array_args`` considers ``pint.Quantity`` objects whose
+    magnitudes are arrays to be arrays and will convert arguments that are
+    quantitites whose magnitudes are not arrays into new quantities with array
+    magnitudes.
+
+    If a function is decorated with ``@array_args('arg1', 'arg2' ...)`` then
+    only the arguments whose names are given (``arg1``, ``arg2``, ...) are
+    converted into arrays.
+    """
+    if fn is None or is_str(fn):
+        # A function is being decorated with `@array_args('arg1' ...)` or
+        # `@array_args()` but not `@array_args` alone.
+        return partial(
+            _promote_args_decorate,
+            args, _args_try_tensor, False)
+    elif not callable(fn):
+        # We weren't given a string or a valid function to decorate.
+        raise TypeError(
+            f"expected string or callable for first argument; got {type(fn)}")
+    else:
+        # Otherwise, we have a callable, and maybe a list of strings. If we
+        # have a list of strings, we may as well use it, thus allowing the
+        # tensor_args decorator to be used either as:
+        #   @array_args('a')
+        #   def fn(a, b): ...
+        # or as
+        #   fn = array_args(lambda a,b: ..., 'a').
+        return _promote_args_decorate(args, _args_try_tensor, False, fn)
+@docwrap('immlib.numeric_args')
+def numeric_args(fn=None, /, *args):
+    """Converts arguments of the decorated function into either NumPy arrays or
+    PyTorch tensors.
+
+    The decorator ``@numeric_args``, when applied to a function, will convert
+    all of that function's arguments into numeric collections--either PyTorch
+    tensors or NumPy arrays--prior to invoking the function. Either all
+    arguments are converted into either NumPy arrays or all arguments are
+    converted into PyTorch tensors; the former only occurs when no PyTorch
+    tensors occur in the argument list. ``numeric_args`` considers
+    ``pint.Quantity`` objects whose magnitudes are numeric collections to be
+    numeric collections and will convert arguments that are quantitites into
+    new quantities with numeric magnitudes if necessary.
+
+    If a function is decorated with ``@numeric_args('arg1', 'arg2' ...)`` then
+    only the arguments whose names are given (``arg1``, ``arg2``, ...) are
+    converted into numeric collections.
+
+    When arguments are converted into PyTorch tensors, the first object in the
+    argument list that is already a tensor is found and its device is used as
+    the device for all converted objects. If no such object is found, then
+    ``None`` is used for the device.
+    """
+    if fn is None or is_str(fn):
+        # A function is being decorated with `@numeric_args('arg1' ...)` or
+        # `@numeric_args(keep_arrays=value)` but not `@numeric_args` alone.
+        return partial(
+            _promote_args_decorate,
+            args, _args_try_numeric, False)
+    elif not callable(fn):
+        # We weren't given a string or a valid function to decorate.
+        raise TypeError(
+            f"expected string or callable for first argument; got {type(fn)}")
+    else:
+        # Otherwise, we have a callable, and maybe a list of strings. If we
+        # have a list of strings, we may as well use it, thus allowing the
+        # numeric_args decorator to be used either as:
+        #   @numeric_args('a')
+        #   def fn(a, b): ...
+        # or as
+        #   fn = numeric_args(lambda a,b: ..., 'a').
+        return _promote_args_decorate(args, _args_try_numeric, False, fn)
