@@ -1244,4 +1244,131 @@ class TestUtilNumeric(TestCase):
         arr = l2_distance([0,0], [0,1])
         self.assertIsInstance(arr, float)
         self.assertEqual(arr, 1.0)
-    
+
+    # The tensor_args, array_args, and numeric_args decorators ################
+    def test_tensor_args(self):
+        from immlib.util import tensor_args
+        import numpy as np, torch
+        # Without any arguments, it should just auto-tensorify the args.
+        @tensor_args
+        def test1(a, b, c='test'):
+            return (torch.is_tensor(a), torch.is_tensor(b), torch.is_tensor(c))
+        # By default it shouldn't convert things like strings or dicts into
+        # tensors.
+        (a, b, c) = test1(10, {'a':12, 'b':13})
+        self.assertTrue(a)
+        self.assertFalse(b)
+        self.assertFalse(c)
+        # But lists, numbers, and compatible arrays should get converted.
+        (a, b, c) = test1(5.5, [10.1, 12.7], c=np.linspace(0,1,5))
+        self.assertTrue(a)
+        self.assertTrue(b)
+        self.assertTrue(c)
+        # Tensors should be passed through.
+        (a, b, c) = test1(5.5, [10.1, 12.7], c=torch.linspace(0,1,5))
+        self.assertTrue(a)
+        self.assertTrue(b)
+        self.assertTrue(c)
+        # With the keep_arrays argument set to True, non-tensor arguments get
+        # converted back to arrays if all the arguments were non-tensors.
+        @tensor_args(keep_arrays=True)
+        def test2(a, b, c='test'):
+            return (torch.sqrt(a**2 + b**2), c)
+        (x, y) = test2(10.0, [11.1, 12.2])
+        self.assertFalse(torch.is_tensor(x))
+        self.assertFalse(torch.is_tensor(y))
+        # If there were any tensors, the results should remain as tensors.
+        (x, y) = test2(torch.tensor(10.0), [11.1, 12.2])
+        self.assertTrue(torch.is_tensor(x))
+        self.assertFalse(torch.is_tensor(y))  # Still a string 'test' here.
+        # With named arguments in the tensor_args arguments, only those args
+        # are converted or considered.
+        @tensor_args('a', keep_arrays=True)
+        def test3(a, b, c='test'):
+            return (torch.sqrt(a**2 + b**2), c)
+        with self.assertRaises(TypeError):
+            (x, y) = test3(torch.tensor(10.0), [11.1, 12.2])
+        with self.assertRaises(TypeError):
+            (x, y) = test3(10.0, [11.1, 12.2])
+        (x, y) = test3(10.0, torch.tensor([11.1, 12.2]))
+        # Because it skips parameter b, it doesn't consider this example to be
+        # a case where the tensors should be maintained (keep_arrays indicates
+        # that if any of the converted parameters were tensors it should not
+        # convert results into arrays, but in this case parameter b isn't one
+        # of the named parameters, so all that the conversion algorithm sees is
+        # that parameter a isn't a tensor).
+        self.assertFalse(torch.is_tensor(x))
+        self.assertTrue(isinstance(y, str))
+        (x, y) = test3(torch.tensor(10.0), torch.tensor([11.1, 12.2]))
+        self.assertTrue(torch.is_tensor(x))
+        self.assertTrue(isinstance(y, str))
+    def test_array_args(self):
+        from immlib.util import array_args
+        import numpy as np, torch
+        # Without any arguments, it should just auto-array all the args.
+        @array_args
+        def test1(a, b, c='test'):
+            return (type(a), type(b), type(c))
+        # Even strings and dictionaries get converted into arrays.
+        (a, b, c) = test1(10, {'a':12, 'b':13})
+        self.assertIs(a, np.ndarray)
+        self.assertIs(a, np.ndarray)
+        self.assertIs(a, np.ndarray)
+        # Even tensors should be converted down when possible.
+        (a, b, c) = test1(5.5, [10.1, 12.7], c=torch.linspace(0,1,5))
+        self.assertIs(a, np.ndarray)
+        self.assertIs(b, np.ndarray)
+        self.assertIs(c, np.ndarray)
+        # Tensors should be passed through.
+        (a, b, c) = test1(5.5, [10.1, 12.7], c=torch.linspace(0,1,5))
+        self.assertTrue(a)
+        self.assertTrue(b)
+        self.assertTrue(c)
+        # With named arguments in the tensor_args arguments, only those args
+        # are converted or considered.
+        @array_args('a')
+        def test3(a, b, c='test'):
+            if not isinstance(a, np.ndarray):
+                raise TypeError()
+            if torch.is_tensor(b):
+                raise TypeError()
+            return (np.sqrt(a**2 + b**2), c)
+        with self.assertRaises(TypeError):
+            (x, y) = test3(10.0, torch.tensor([11.1, 12.2]))
+        with self.assertRaises(TypeError):
+            # Fails because you can't run [11.1, 12.2]**2.
+            (x, y) = test3(10.0, [11.1, 12.2])
+        (x, y) = test3(torch.tensor(10.0), np.array([11.1, 12.2]))
+        self.assertFalse(torch.is_tensor(x))
+        self.assertTrue(isinstance(y, str))
+    def test_numeric_args(self):
+        from immlib.util import numeric_args
+        import numpy as np, torch
+        # Without any arguments, it should just auto-array all the args.
+        @numeric_args
+        def test1(a, b, c='test'):
+            return (type(a), type(b), type(c))
+        # Even strings and dictionaries get converted into arrays.
+        (a, b, c) = test1(10, {'a':12, 'b':13})
+        self.assertIs(a, np.ndarray)
+        self.assertIs(a, np.ndarray)
+        self.assertIs(a, np.ndarray)
+        # If there are tensors, then all args should be converted into tensors.
+        (a, b, c) = test1(5.5, [10.1, 12.7], c=torch.linspace(0,1,5))
+        self.assertIs(a, torch.Tensor)
+        self.assertIs(b, torch.Tensor)
+        self.assertIs(c, torch.Tensor)
+        # With named arguments in the tensor_args arguments, only those args
+        # are converted or considered.
+        @numeric_args('a')
+        def test3(a, b, c='test'):
+            return (np.sqrt(a**2 + b**2), c)
+        (x, y) = test3(10.0, torch.tensor([11.1, 12.2]))
+        self.assertIsInstance(x, torch.Tensor)
+        self.assertIsInstance(y, str)
+        with self.assertRaises(TypeError):
+            # Fails because you can't run [11.1, 12.2]**2.
+            (x, y) = test3(10.0, [11.1, 12.2])
+        (x, y) = test3(torch.tensor(10.0), np.array([11.1, 12.2]))
+        self.assertTrue(torch.is_tensor(x))
+        self.assertTrue(isinstance(y, str))

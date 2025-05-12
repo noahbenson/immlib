@@ -2412,7 +2412,7 @@ def _args_try_tensor(val, name=None, binding=None, first_tensor=None):
     device = None if first_tensor is None else first_tensor.device
     try:
         tns = to_tensor(val, device=device)
-    except TypeError:
+    except (TypeError, RuntimeError):
         return val
     if name is not None and val is not tns:
         binding.arguments[name] = tns
@@ -2442,6 +2442,7 @@ def _args_dispatch(args_try_fn, fn,
                    sig, sig_args, sig_vargs, sig_kwargs, keep_arrays,
                    *args, **kwargs):
     binding = sig.bind(*args, **kwargs)
+    binding.apply_defaults()
     vals = tuple(map(binding.arguments.__getitem__, sig_args))
     if sig_vargs:
         vargs = binding.arguments[sig_vargs]
@@ -2537,12 +2538,17 @@ def tensor_args(fn=None, /, *args, keep_arrays=False):
     NumPy arrays while returning values whose types match the input types.
 
     """
-    if fn is None or is_str(fn):
-        # A function is being decorated with `@tensor_args('arg1' ...)` or
-        # `@tensor_args(keep_arrays=value)` but not `@tensor_args` alone.
+    if fn is None:
+        # A function is being decorated with `@tensor_args(keep_arrays=value)`
+        # but not `@tensor_args` alone.
         return partial(
             _promote_args_decorate,
             args, _args_try_tensor, keep_arrays)
+    elif is_str(fn):
+        # A function is being decorated with `@tensor_args('arg1' ...)`.
+        return partial(
+            _promote_args_decorate,
+            (fn,) + args, _args_try_tensor, keep_arrays)
     elif not callable(fn):
         # We weren't given a string or a valid function to decorate.
         raise TypeError(
@@ -2571,12 +2577,17 @@ def array_args(fn=None, /, *args):
     only the arguments whose names are given (``arg1``, ``arg2``, ...) are
     converted into arrays.
     """
-    if fn is None or is_str(fn):
-        # A function is being decorated with `@array_args('arg1' ...)` or
-        # `@array_args()` but not `@array_args` alone.
+    if fn is None:
+        # A function is being decorated with `@array_args()` or `@array_args`
+        # alone.
         return partial(
             _promote_args_decorate,
-            args, _args_try_tensor, False)
+            args, _args_try_array, False)
+    elif is_str(fn):
+        # A function is being decorated with `@array_args('arg1' ...)`
+        return partial(
+            _promote_args_decorate,
+            (fn,) + args, _args_try_array, False)
     elif not callable(fn):
         # We weren't given a string or a valid function to decorate.
         raise TypeError(
@@ -2589,7 +2600,7 @@ def array_args(fn=None, /, *args):
         #   def fn(a, b): ...
         # or as
         #   fn = array_args(lambda a,b: ..., 'a').
-        return _promote_args_decorate(args, _args_try_tensor, False, fn)
+        return _promote_args_decorate(args, _args_try_array, False, fn)
 @docwrap('immlib.numeric_args')
 def numeric_args(fn=None, /, *args):
     """Converts arguments of the decorated function into either NumPy arrays or
@@ -2614,12 +2625,17 @@ def numeric_args(fn=None, /, *args):
     the device for all converted objects. If no such object is found, then
     ``None`` is used for the device.
     """
-    if fn is None or is_str(fn):
-        # A function is being decorated with `@numeric_args('arg1' ...)` or
-        # `@numeric_args(keep_arrays=value)` but not `@numeric_args` alone.
+    if fn is None:
+        # A function is being decorated with `@numeric_args(keep_arrays=value)`
+        # or `@numeric_args` alone.
         return partial(
             _promote_args_decorate,
             args, _args_try_numeric, False)
+    elif is_str(fn):
+        # A function is being decorated with `@array_args('arg1' ...)`
+        return partial(
+            _promote_args_decorate,
+            (fn,) + args, _args_try_numeric, False)
     elif not callable(fn):
         # We weren't given a string or a valid function to decorate.
         raise TypeError(
