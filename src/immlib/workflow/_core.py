@@ -5,7 +5,7 @@
 
 # Dependencies ################################################################
 
-import copy
+import copy, textwrap
 from collections.abc import (Callable, Mapping)
 from collections import (defaultdict, namedtuple)
 from functools import (reduce, wraps, partial, update_wrapper)
@@ -20,7 +20,7 @@ from pcollections import (
     pset, tset,
     plist)
 
-from ..doc import (docwrap, make_docproc)
+from ..doc import (docwrap, make_docproc, reindent, detect_indentation)
 from ..util import (
     is_pdict, is_str, is_number, is_tuple, is_dict, is_ldict,
     is_array, is_integer, strisvar, is_amap, is_pcoll, to_pcoll,
@@ -169,7 +169,6 @@ class calc:
     output_docs : pcollections.pdict
         A ``pdict`` object whose keys are output names and whose values are
         the documentation for the associated output values.
-
     '''
     __slots__ = (
         'name', 'base_function', 'lrucache', 'pathcache',
@@ -261,10 +260,12 @@ class calc:
             fn = docwrap('fn', indent=indent, proc=dp)(fn)
             input_docs  = {k[10:]: doc
                            for (k,doc) in dp.params.items()
-                           if k.startswith('fn.inputs.')}
+                           if (k.startswith('fn.inputs.') or
+                               k.startswith('fn.parameters.'))}
             output_docs = {k[11:]: doc
                            for (k,doc) in dp.params.items()
-                           if k.startswith('fn.outputs.')}
+                           if (k.startswith('fn.outputs.') or
+                               k.startswith('fn.returns.'))}
             input_docs  = pdict(input_docs)
             output_docs = pdict(output_docs)
         else:
@@ -375,7 +376,7 @@ class calc:
                 return cls._new(f, args, **kw)
             return calc_outputs
     def update_function(self, fn):
-        """Updates the function used by the calc object.
+        """Updates the function and its calc object.
 
         On occasion, a function decorated with ``@calc`` is later decorated
         with another feature, such as a decorator that causes its inputs to be
@@ -420,11 +421,12 @@ class calc:
                 " calcobj.base_function")
         # At this point, we have verified that this is an appropriate update,
         # so we can go ahead and make a duplicate calc with the new function.
-        return calc._new(
+        new_fn = calc._new(
             fn, self.outputs,
             name=self.name, lazy=self.lazy,
             lrucache=self.lrucache,
             pathcache=self.pathcache)
+        return new_fn.calc
     def eager_call(self, *args, **kwargs):
         """Eagerly calls the given calculation using the arguments.
 
@@ -814,6 +816,10 @@ class plan(pdict):
     requirements : pset
         A ``pset`` of the names of the required calculations of the plan (i.e.,
         those with option ``lazy=False``).
+    __doc__ : str
+        Every ``plan`` object is given a set of documentation which includes
+        sections for the inputs and outputs as well as a listing of all the
+        calculation steps.
     '''
     # Subclasses --------------------------------------------------------------
     CalcData = namedtuple(
@@ -980,7 +986,7 @@ class plan(pdict):
     # Construction ------------------------------------------------------------
     __slots__ = (
         'inputs', 'outputs', 'defaults', 'requirements',
-        'input_docs', 'output_docs'
+        'input_docs', 'output_docs', 'docstr',
         'calcdata', 'valsources', 'dependants')
     def __new__(cls, *args, **kwargs):
         # We overload new just to parse the input arguments and convert any
@@ -999,7 +1005,8 @@ class plan(pdict):
                 f"plan expects 0 or 1 positional arguments; found {nargs}")
         calcs.update(kwargs)
         for (k,v) in calcs.items():
-            calcs[k] = to_calc(v)
+            u = to_calc(v)
+            calcs[k] = u
         return pdict.__new__(cls, calcs)
     def __init__(self, *args, **kwargs):
         # We ignore the arguments because they are handled by __new__.
@@ -1085,21 +1092,35 @@ class plan(pdict):
             for (inp,doc) in c.input_docs.items():
                 if not doc:
                     continue
-                s = f"{nextcalc} input: {inp}"
-                if len(s) > 80:
-                    s = s[77] + '...'
-                if inp in params:
-                    input_docs[inp].append(s + '\n' + doc)
+                lns = doc.split('\n')
+                nameln = lns[0]
+                if ':' in nameln:
+                    tag = ' :' + ':'.join(nameln.split(':')[1:])
                 else:
-                    output_docs[inp].append(s + '\n' + doc)
+                    tag = ''
+                doc = reindent(
+                    '\n'.join(lns[1:]), 4,
+                    skip_first=False, final_endline=False)
+                doc = f"    **``{nextcalc}``** input: ``{inp}``{tag}  \n{doc}"
+                if inp in params:
+                    input_docs[inp].append(doc)
+                else:
+                    output_docs[inp].append(doc)
             for (out,doc) in c.output_docs.items():
                 if not doc:
                     continue
-                s = f"{nextcalc} output: {out}"
-                if len(s) > 80:
-                    s = s[77] + '...'
-                output_docs[out].append(s + '\n' + doc)
-        doc_connectfn = lambda v: '\n---\n'.join(v)
+                lns = doc.split('\n')
+                nameln = lns[0]
+                if ':' in nameln:
+                    tag = ' :' + ':'.join(nameln.split(':')[1:])
+                else:
+                    tag = ''
+                doc = reindent(
+                    '\n'.join(lns[1:]), 4,
+                    skip_first=False, final_endline=False)
+                doc = f"    **``{nextcalc}``** output: ``{out}``{tag}  \n{doc}"
+                output_docs[out].append(doc)
+        doc_connectfn = lambda v: '\n\n'.join(v)
         input_docs = pdict(valmap(doc_connectfn, input_docs))
         output_docs = pdict(valmap(doc_connectfn, output_docs))
         ncalcs = len(calcorder)
@@ -1108,6 +1129,68 @@ class plan(pdict):
         outputs -= params
         outputs = outputs.persistent()
         inputs = params
+        # Before we move on to the calculation graph, let's make the docstring.
+        # the 12 here must match the indentation of the docstring that
+        # follows.
+        code_indent = 12
+        code_head = ' ' * code_indent
+        sep = '\n' + code_head
+        # The calculation substring is the most complex part; we make it
+        # out of the list of calculations and their inputs/outputs.
+        calcstr = []
+        for (name,c) in self.items():
+            cname = c.base_function if c.name is None else c.name
+            calcstr.append(f"* ``{name}``: ``{cname}``  ")
+            if len(inputs) == 0:
+                inps = "None"
+            else:
+                inps = textwrap.wrap('``' + '``, ``'.join(inputs) + '``', 68)
+                inps = (' '*11).join(inps)
+            calcstr.append(f"  Inputs:  {inps}  ")
+            if len(outputs) == 0:
+                outs = "None"
+            else:
+                outs = textwrap.wrap('``' + '``, ``'.join(outputs) + '``', 68)
+                outs = (' '*11).join(outs)
+            calcstr.append(f"  Outputs: {outs}  ")
+        calcstr = '\n'.join(calcstr)
+        calcstr = reindent(
+            calcstr, code_indent + 1,
+            skip_first=False,
+            final_endline=False)
+        calcstr = calcstr[code_indent + 1:]
+        # Make up the input and output strings too.
+        inputstr = '\n'.join(
+            [reindent(
+                k + '\n' + s, code_indent,
+                skip_first=False, final_endline=False)
+             for (k,s) in input_docs.items()])
+        outputstr = '\n'.join(
+            [reindent(
+                k + '\n' + s, code_indent,
+                skip_first=False, final_endline=False)
+             for (k,s) in output_docs.items()])
+        if len(inputstr) > 0:
+            inputstr = (
+                f"{sep}Inputs{sep}"
+                f"------\n"
+                f"{inputstr}{sep}")
+        if len(outputstr) > 0:
+            outputstr = (
+                f"{sep}Outputs{sep}"
+                f"-------\n"
+                f"{outputstr}{sep}")
+        docstr = f"""An ``immlib.plan`` object for a set of calculations.
+
+            This documentation was generated automatically from the docstrings
+            of the individual ``immlib.calc`` objects that make up this plan.
+
+            This plan contains the following calculations:
+             {calcstr}
+            {inputstr}{outputstr}"""
+        docstr = reindent(docstr, 4, final_endline=False)
+        object.__setattr__(self, 'docstr', docstr)
+        object.__setattr__(self, '__doc__', docstr)
         # We now have a calculation ordering that we can use to turn the plan's
         # filtered values into sequential values.  For example, if the variable
         # 'x' is filtered through calculations 'f', 'g', and 'h', in that

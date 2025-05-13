@@ -204,3 +204,108 @@ class default_docproc:
         ``immlib`` library was originally loaded."""
         import immlib
         immlib.docproc = _initial_global_docproc
+
+
+# Other Utilities #############################################################
+
+@docwrap
+def detect_indentation(text, /, skip_first=True, tabsize=8):
+    """Given a block of text that is part of a docstring, guess the level of
+    indentation used to write it.
+
+    This function accepts a string that contains multiple lines and guesses the
+    indentation level used to write it. It does this by splitting the lines and
+    finding the line that starts with the smallest number of spaces. That
+    number of spaces is the indentation guess.
+
+    By default, this function skips the first line because it is customary to
+    start docstrings out with an unindented line. This behavior can be changed
+    by setting the optional argument `skip_first` to ``False``.
+
+    Parameters
+    ----------
+    text : str
+        The text whose indentation is to be guessed.
+    skip_first : bool, optional
+        Whether to skip the first line when detecting the indentation level.
+        The default is ``True``.
+    tabsize : int, optional
+        The number of spaces in a tab-stop; used to replace the tab characters
+        in each line using the method ``str.expandtabs``. The default is ``8``.
+
+    Returns
+    -------
+    int
+        The number of spaces of indentation detected.
+    """
+    if not isinstance(text, str):
+        raise TypeError(
+            f"detect_indentation requires str but got {type(text)}")
+    lns = text.split('\n')
+    ident = None
+    if skip_first:
+        lns = lns[1:]
+    for ln in lns:
+        ln = ln.expandtabs(tabsize)
+        if ln.strip() == '':
+            continue
+        ln_ident = len(ln) - len(ln.lstrip())
+        if ident is None:
+            ident = ln_ident
+        elif ln_ident < ident:
+            ident = ln_ident
+    return ident
+@docwrap
+def reindent(text, new_indent=0, /,
+             skip_first=True, tabsize=8, final_endline=True):
+    """Returns a block of text with a different indentation.
+
+    ``reindent(text, n)`` returns a copy of `text` after removing its current
+    indentation level and uniformly reindenting the text with ``n`` spaces. The
+    first line is skipped entirely, and the current indentation level is
+    detected using ``detect_indentation``.
+
+    Parameters
+    ----------
+    text : str
+        The text that is to be reindented.
+    new_indent : int, optional
+        The new indentation level. If this is not provided, then the default is
+        0, meaning that the text will be unindented.
+    skip_first : bool, optional
+        Whether or not to skip the first line.
+    tabside : int, optional
+        How large to consider tab characters in the text; this is used with the
+        ``str.expandtabs`` method. The default is 8.
+    final_endline : bool, optional
+        Whether the returned string should end with a newline or not. The
+        default is ``True``.
+
+    Returns
+    -------
+    str
+        A duplicate of `text` with updated indentation.
+    """
+    # Get the current indentation level:
+    currind = detect_indentation(text, skip_first=skip_first, tabsize=tabsize)
+    # Split the text into lines.
+    lns = text.split('\n')
+    # Remove all the current indentations:
+    newlns = []
+    if skip_first:
+        newlns.append(lns[0].expandtabs(tabsize))
+        lns = lns[1:]
+    head = ' ' * currind
+    newhead = ' ' * new_indent
+    for ln in lns:
+        ln = ln.expandtabs(tabsize)
+        if ln.strip() == '':
+            newlns.append('')
+            continue
+        if ln.startswith(head):
+            ln = ln[currind:]
+        newlns.append(newhead + ln)
+    newtext = '\n'.join(newlns)
+    if final_endline and newtext[-1] != '\n':
+        newtext += '\n'
+    return newtext

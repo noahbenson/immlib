@@ -179,9 +179,10 @@ class TestWorkflowCore(TestCase):
             assert np.issubdtype(x.dtype, np.number), "x must be numeric"
             return (x,)
         # The calculations are given names (keys) and put together in a plan.
-        nwm = plan(weights_step=normal_pdf,
-                   mean_step=weighted_mean,
-                   filter_x=filter_x)
+        nwm = plan(
+            weights_step=normal_pdf,
+            mean_step=weighted_mean,
+            filter_x=filter_x)
         # This creates a plan object, which stores these computations.
         self.assertIsInstance(nwm, plan)
         # The plan keeps track lots of meta-data, including an agglomeration of
