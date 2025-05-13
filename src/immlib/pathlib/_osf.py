@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-################################################################################
+###############################################################################
 # immlib/pathlib/_osf.py
 
 
-# Dependencies #################################################################
+# Dependencies ################################################################
 
 import mimetypes, json, os
 from pathlib import (PosixPath, PurePosixPath, Path)
@@ -11,14 +11,15 @@ from urllib.parse import urlparse
 from functools import reduce
 from datetime import datetime
 
-from cloudpathlib.cloudpath import (register_path_class, CloudPath, NoStatError)
+from cloudpathlib.cloudpath import (
+    register_path_class, CloudPath, NoStatError)
 from cloudpathlib.client import (register_client_class, Client)
 from pcollections import (pdict, ldict, lazy)
 
 from ..doc  import docwrap
 from ..util import (is_str, is_amap, is_url, url_download)
 
-# Utility Functions ############################################################
+# Utility Functions ###########################################################
 
 osf_basepath = 'https://api.osf.io/v2/nodes/%s/files/%s/'
 osf_pagesize_format = 'page[size]='
@@ -180,32 +181,32 @@ def osf_contents(proj,
                  lazy=True):
     """Returns a dictionary of the contents of the given OSF project and path.
 
-    `osf_contents(project_name)` returns a dictionary of the contents of the OSF
-    project with the given `project_name`. These contents are represented in a
-    nested dictionary; each entry contains the keys `'kind'` (either `'file'` or
-    `'directory'`), `'cache_path'` (the directory or filename of the associated
-    cache), and either `'contents'` (for directories) or `'download_url'` (for
-    files).
+    ``osf_contents(project_name)`` returns a dictionary of the contents of the
+    OSF project with the given ``project_name``. These contents are represented
+    in a nested dictionary; each entry contains the keys ``'kind'`` (either
+    ``'file'`` or ``'directory'``), ``'cache_path'`` (the directory or filename
+    of the associated cache), and either ``'contents'`` (for directories) or
+    ``'download_url'`` (for files).
 
     Parameters
     ----------
     project : str
         The OSF project ID.
     storage : str, optional
-        The OSF storage type to extract. By default this is `'osfstorage'`.
+        The OSF storage type to extract. By default this is ``'osfstorage'``.
     cache_path : path or None, optional
         The cache directory in which to store the data downloaded.
     mkdir_mode : int, optional
-        The mode to use when making directories in the cache. By default this is
-        `0o775`.
+        The mode to use when making directories in the cache. By default this
+        is ``0o775``.
     pagesize : int, optional
         The number of items to include in a single page when paging directory
         contents from the OSF server. The default is 100.
     lazy : bool, optional
-        If `True` (the default), then the returned dictionary is a lazy dict
+        If ``True`` (the default), then the returned dictionary is a lazy dict
         representing the root of the project, but the OSF is not queried until
-        its contents are requested. If `False`, then the directory contents are
-        built immediately.
+        its contents are requested. If ``False``, then the directory contents
+        are built immediately.
 
     Returns
     -------
@@ -232,7 +233,7 @@ def osf_contents(proj,
                           pagesize=pagesize)
 
 
-# OSFClient ####################################################################
+# OSFClient ###################################################################
 
 @register_client_class("osf")
 class OSFClient(Client):
@@ -281,8 +282,8 @@ class OSFClient(Client):
             mkdir_mode=mkdir_mode)
         # Save these as the whole-project contents.
         self.project_contents = contents
-        # Now extract the root of these contents; if the root is '/' or '', then
-        # we just use the project contents.
+        # Now extract the root of these contents; if the root is '/' or '',
+        # then we just use the project contents.
         root = str(root).lstrip('/')
         if root == '':
             self.root_contents = contents
@@ -353,44 +354,48 @@ class OSFClient(Client):
             f"{type(self)} does not support _generate_presigned_url")
 
 
-# OSFPath ######################################################################
+# OSFPath #####################################################################
 
 @register_path_class("osf")
 class OSFPath(CloudPath):
     """Class for representing and operating on OSF repositories.
 
-    `OSFPath(path)` returns a path object representing an OSF path; OSF paths
-    use the format `osf://<project-id>/<path>`. The project ID is derived from
-    the OSF tag; i.e., the website `https://osf.io/<project-id>` is the primary
-    website of the OSF project. The project-ID may be followed by a colon and an
-    OSF storage name (the project ID by itself is equivalent to
-    `osf://<project-ID>:osfstorage/`).
+    ``OSFPath(path)`` returns a path object representing an OSF path; OSF paths
+    use the format ``osf://<project-id>/<path>``. The project ID is derived
+    from the OSF tag; i.e., the website ``https://osf.io/<project-id>`` is the
+    primary website of the OSF project. The project-ID may be followed by a
+    colon and an OSF storage name (the project ID by itself is equivalent to
+    ``osf://<project-ID>:osfstorage/``).
+
+    For example, the project found at the OSF website ``https://osf.io/bw9ec/``
+    has the URL ``osf://bw9ec/``.
 
     Parameters
     ----------
     cloud_path : str or path-like
-        The OSF path that the created `OSFPath` object is to represent.
+        The OSF path that the created ``OSFPath`` object is to represent.
     client : OSFClient or None, optional
-        The `OSFClient` object to use. The `OSFClient` is responsible primarily
-        for the caching of data locally. If `OSFClient` is `None`, then an
-        `OSFClient` object is created for the project using a temporary cache
-        directory.
+        The ``OSFClient`` object to use. The ``OSFClient`` is responsible
+        primarily for the caching of data locally. If ``OSFClient`` is
+        ``None``, then an ``OSFClient`` object is created for the project using
+        a temporary cache directory.
     local_cache_dir : str or path-like, optional
         The local directory in which cache files should be stored. This option
-        is ignored if `client` is not `None`; otherwise it is passed to the
+        is ignored if ``client`` is not ``None``; otherwise it is passed to the
         created client object. The cache directory is the root cache directory
         for the entire OSF project.
     file_cache_mode : cloudpathlib.enums.FileCacheMode, optional
         How often to clear the file cache; see [cloudpathlib's caching
         docs](https://cloudpathlib.drivendata.org/stable/caching/) for more
-        information about the options in `cloudpathlib.enums.FileCacheMode`.
+        information about the options in ``cloudpathlib.enums.FileCacheMode``.
     mkdir_mode : int, optional
-        The mode to use when making directories in the cache. By default this is
-        `0o775`. This option is ignored if the `client` option is not `None`.
+        The mode to use when making directories in the cache. By default this
+        is ``0o775``. This option is ignored if the ``client`` option is not
+        ``None``.
     pagesize : int, optional
         The number of items to include in a single page when paging directory
-        contents from the OSF server. The default is 100. This option is ignored
-        if the `client` option is not `None`.
+        contents from the OSF server. The default is 100. This option is
+        ignored if the ``client`` option is not ``None``.
     """
     cloud_prefix = "osf://"
     client = OSFClient
@@ -425,12 +430,12 @@ class OSFPath(CloudPath):
             (project, storage) = url.netloc.split(':')
         else:
             (project, storage) = (url.netloc, 'osfstorage')
-        # Now that we have the project and storage, we can figure out the client
-        # option, which we may be updating with options.
+        # Now that we have the project and storage, we can figure out the
+        # client option, which we may be updating with options.
         if client is None:
-            # No client was implied or given, so we make a new one from the path
-            # and the remaining options. Any Ellipsis options we look up in the
-            # default options dict (above).
+            # No client was implied or given, so we make a new one from the
+            # path and the remaining options. Any Ellipsis options we look up
+            # in the default options dict (above).
             if local_cache_dir is Ellipsis:
                 local_cache_dir = self.init_default_options['local_cache_dir']
             if file_cache_mode is Ellipsis:

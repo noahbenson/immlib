@@ -245,6 +245,13 @@ class TestWorkflowCore(TestCase):
         # Since we marked the filter as non-lazy, it should raise errors when
         # the plan is fulfilled.
         with self.assertRaises(RuntimeError): nwm(x=10)
+        # We should also make sure the documentation is getting loaded
+        # correctly.
+        for k in ('x', 'mu', 'std'):
+            self.assertIn(k, nwm.inputs)
+            self.assertIn(k, nwm.input_docs)
+        for k in ('mean', 'weights'):
+            self.assertIn(k, nwm.output_docs)
     def test_multifilter(self):
         """Tests the ability of plans to contain multi-input filters."""
         import numpy as np
