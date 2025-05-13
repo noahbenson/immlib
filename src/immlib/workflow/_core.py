@@ -394,7 +394,7 @@ class calc:
         ``plan`` or ``planobject``.
         """
         # First, make sure the right calc was passed this function.
-        if to_calc(fn) is not self:
+        if to_calc(fn, update=False) is not self:
             raise ValueError(
                 "calcobj.update_function(f) called, but to_calc(f) is not"
                 " calcobj")
@@ -420,12 +420,11 @@ class calc:
                 " calcobj.base_function")
         # At this point, we have verified that this is an appropriate update,
         # so we can go ahead and make a duplicate calc with the new function.
-        newcalc = copy.copy(self)
-        object.__setattr__(newcalc, 'base_function', fn)
-        dec_fn = calc._apply_caching(
-            fn, self.signature, self.lrucache, self.pathcache)
-        object.__setattr__(newcalc, 'function', dec_fn)
-        return newcalc
+        return calc._new(
+            fn, self.outputs,
+            name=self.name, lazy=self.lazy,
+            lrucache=self.lrucache,
+            pathcache=self.pathcache)
     def eager_call(self, *args, **kwargs):
         """Eagerly calls the given calculation using the arguments.
 
@@ -729,7 +728,7 @@ def is_calcfn(obj, /):
     """
     return isinstance(getattr(obj, 'calc', None), calc)
 @docwrap('immlib.workflow.to_calc')
-def to_calc(obj, /):
+def to_calc(obj, /, update=True):
     """Converts an object into a ``calc`` object or raises a ``TypeError``.
 
     ``to_calc(obj)`` returns `obj` if `obj` is already a ``calc``
@@ -744,6 +743,8 @@ def to_calc(obj, /):
         return obj
     c = getattr(obj, 'calc', None)
     if isinstance(c, calc):
+        if update:
+            c = c.update_function(obj)
         return c
     raise TypeError(f"to_calc received non-calc object of type {type(obj)}")
 
@@ -856,6 +857,7 @@ class plan(pdict):
         argvals = map(partial(plan._source_lookup, inputtup, calctup), args)
         args = []
         kwargs = {}
+        c = to_calc(c)
         for (p,arg) in zip(c.signature.parameters.values(), argvals):
             if p.kind == p.POSITIONAL_ONLY:
                 args.append[arg]
@@ -939,6 +941,7 @@ class plan(pdict):
         args = []
         srcs = {k:ii for (ii,k) in enumerate(params)}
         for (cidx,(nm,c)) in enumerate(zip(names, calcs)):
+            c = to_calc(c)
             # Wire up the inputs/arguments:
             a = []
             for k in c.inputs:
@@ -996,10 +999,7 @@ class plan(pdict):
                 f"plan expects 0 or 1 positional arguments; found {nargs}")
         calcs.update(kwargs)
         for (k,v) in calcs.items():
-            if is_calc(v):
-                calcs[k] = v
-            else:
-                calcs[k] = to_calc(v).update_function(v)
+            calcs[k] = to_calc(v)
         return pdict.__new__(cls, calcs)
     def __init__(self, *args, **kwargs):
         # We ignore the arguments because they are handled by __new__.
@@ -1170,6 +1170,7 @@ class plan(pdict):
         # updated / reset any time a parameter is changed.
         depset = set()
         for (cidx,c) in enumerate(calcdata.calcs):
+            c = to_calc(c)
             for k in c.inputs:
                 depset.add((k, cidx))
             for k in c.outputs:

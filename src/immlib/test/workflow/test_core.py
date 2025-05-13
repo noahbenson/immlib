@@ -381,6 +381,30 @@ class TestWorkflowCore(TestCase):
             self.assertEqual(d['outputval2'], 1)
             self.assertEqual(d['out_cpath'], tmpdir)
             self.assertEqual(self.pc_runcount, 3)
+    def test_decstack(self):
+        "Tests the ability to stack calc decorations with other decorators."
+        from immlib.workflow import calc, plan
+        from immlib.util import tensor_args
+        import numpy as np, torch
+        # Create a calculation that computes a normalized vector `u` and a
+        # length `xlen` given an unnormalized vector `x`.
+        @tensor_args(keep_arrays=True)
+        @calc('u', 'xlen')
+        def normalize_vector(x):
+            xlen = torch.sqrt(torch.sum(x**2))
+            u = x / xlen
+            return (u, xlen)
+        # Create another calculation that finds the signed distance between a
+        # point `y` and the vector `x`, as well as the point of intersection.
+        @calc('distance', 'intersection')
+        @tensor_args(keep_arrays=True)
+        def point_vec_intersection(u, y):
+            d = torch.dot(u, y)
+            return (d, u*d)
+        p = plan(step1=normalize_vector, step2=point_vec_intersection)
+        pd = p(x=[0.0, 1.0], y=[1.0, 1.0])
+        self.assertEqual(pd['distance'], 1.0)
+        self.assertIsInstance(pd['u'], np.ndarray)
     def test_tplandict(self):
         "Tests the tplandict type."
         pass
