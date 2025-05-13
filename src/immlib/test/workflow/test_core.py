@@ -293,6 +293,7 @@ class TestWorkflowCore(TestCase):
         from tempfile import TemporaryDirectory
         from joblib import Memory
         from immlib import calc, plan
+        from immlib.workflow import to_calc
         with TemporaryDirectory() as tmpdir:
             self.pc_runcount = 0
             @calc('outputval1', 'outputval2', pathcache=tmpdir)
@@ -322,22 +323,30 @@ class TestWorkflowCore(TestCase):
             def test_cache2(inputval1, inputval2):
                 self.pc_runcount = self.pc_runcount + 1
                 return (inputval1 // inputval2, inputval1 % inputval2)
+            # The pathcache gets noted
+            c = to_calc(test_cache2)
+            self.assertTrue(c.pathcache)
+            # Now make a plan.
             p = plan(test=test_cache2)
             # No cache_path, no caching.
             d = p(inputval1=10, inputval2=3)
+            self.assertEqual(d['cache_path'], None)
             self.assertEqual(d['outputval1'], 3)
             self.assertEqual(d['outputval2'], 1)
             self.assertEqual(self.pc_runcount, 1)
             d = p(inputval1=10, inputval2=3)
+            self.assertEqual(d['cache_path'], None)
             self.assertEqual(d['outputval1'], 3)
             self.assertEqual(d['outputval2'], 1)
             self.assertEqual(self.pc_runcount, 2)
             # With a cache_path, it gets cached.
             d = p(inputval1=10, inputval2=3, cache_path=tmpdir)
+            self.assertEqual(d['cache_path'], tmpdir)
             self.assertEqual(d['outputval1'], 3)
             self.assertEqual(d['outputval2'], 1)
             self.assertEqual(self.pc_runcount, 3)
             d = p(inputval1=10, inputval2=3, cache_path=tmpdir)
+            self.assertEqual(d['cache_path'], tmpdir)
             self.assertEqual(d['outputval1'], 3)
             self.assertEqual(d['outputval2'], 1)
             self.assertEqual(self.pc_runcount, 3)

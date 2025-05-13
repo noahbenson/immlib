@@ -11,6 +11,7 @@ from ._core import (
     calc,
     is_calc,
     is_calcfn,
+    to_calc,
     plan,
     is_plan,
     plandict,

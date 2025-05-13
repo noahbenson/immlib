@@ -9,10 +9,11 @@ import copy
 from collections.abc import (Callable, Mapping)
 from collections import (defaultdict, namedtuple)
 from functools import (reduce, wraps, partial, update_wrapper)
-from inspect import getfullargspec, signature
+from inspect import (signature, Parameter)
+from joblib import Memory
+from pathlib import Path
 
 import numpy as np
-
 from pcollections import (
     pdict, tdict, ldict, tldict,
     lazy, holdlazy,
@@ -150,14 +151,8 @@ class calc:
         function.
     function : callable
         The function itself.
-    argspec : inspect.FullArgSpec
-        The argspec of ``fn``, as returned from
-        ``inspect.getfullargspec(fn)``. This may not precisely match the
-        argspec of ``function`` at any given time, but it remains correct as
-        far as the calculation object requires (changes are due to translation
-        calls). The ``argspec`` also differs from a true ``argspec`` object in
-        that its members are all persistent objects such as tuples instead
-        of lists.
+    signature : inspect.Signature
+        The signature of ``fn``, as returned from ``inspect.signature(fn)``.
     inputs : pcollections.pset of str
         The names of the input parameters for the calculation.
     outputs : tuple of str
@@ -174,25 +169,15 @@ class calc:
     output_docs : pcollections.pdict
         A ``pdict`` object whose keys are output names and whose values are
         the documentation for the associated output values.
+
     '''
     __slots__ = (
         'name', 'base_function', 'lrucache', 'pathcache',
-        'function', 'argspec', 'inputs', 'outputs', 'defaults', 'lazy',
+        'function', 'signature', 'inputs', 'outputs', 'defaults', 'lazy',
         'input_docs', 'output_docs')
     @staticmethod
     def _dict_persist(arg):
         return None if arg is None else pdict(arg)
-    @staticmethod
-    def _argspec_persist(spec):
-        from inspect import FullArgSpec
-        return FullArgSpec(
-            args=tuple(spec.args),
-            varargs=spec.varargs,
-            varkw=spec.varkw,
-            defaults=spec.defaults,
-            kwonlyargs=tuple(spec.kwonlyargs),
-            kwonlydefaults=calc._dict_persist(spec.kwonlydefaults),
-            annotations=calc._dict_persist(spec.annotations))
     @classmethod
     def _interpret_pathcache(cls, pathcache):
         if pathcache is None or pathcache is False:
@@ -203,8 +188,13 @@ class calc:
             return to_pathcache(pathcache)
     @staticmethod
     def _pathcache_woutsig(base_fn, *args, **kw):
-        cache_path = args[-1]
-        args = args[:-1]
+        if 'cache_path' in kw:
+            cache_path = kw.pop('cache_path')
+        elif len(args) > 0:
+            cache_path = args[-1]
+            args = args[:-1]
+        else:
+            cache_path = None
         if cache_path is None or cache_path is False:
             return base_fn(*args, **kw)
         cp = to_pathcache(cache_path)
@@ -215,11 +205,16 @@ class calc:
         ba = sig.bind(*args, **kw)
         ba.apply_defaults()
         cp = ba.arguments['cache_path']
-        return calc._pathcache_woutsig(base_fn, *args, cache_path=cp, **kw)
+        if cp is None or cp is False:
+            return base_fn(*args, **kw)
+        cp = to_pathcache(cp)
+        cache_fn = cp.cache(base_fn)
+        return cache_fn(*args, **kw)
     @staticmethod
-    def _apply_caching(base_fn, argspec, lrucache, pathcache):
+    def _apply_caching(base_fn, sig, lrucache, pathcache):
         # We assume that cache and pathcache have already been appropriately
         # filtered by the to_lrucache and to_pathcache functions.
+        newsig = None
         if pathcache is None or pathcache is False:
             # No caching requested, either for plandicts or globally.
             fn = base_fn
@@ -227,16 +222,28 @@ class calc:
             # This means we are caching into the cache_path input, which may be
             # implicitly given. We make a special function if we need to ignore
             # (not pass along) the cache_path argument.
-            if 'cache_path' in argspec.args:
-                sig = signature(base_fn)
+            if 'cache_path' in sig.parameters:
                 fn = partial(calc._pathcache_withsig, base_fn, sig)
             else:
                 fn = partial(calc._pathcache_woutsig, base_fn)
-        else:
+                params = list(sig.parameters.values())
+                params.append(
+                    Parameter(
+                        'cache_path',
+                        Parameter.KEYWORD_ONLY,
+                        default=None))
+                newsig = sig.replace(parameters=params)
+        elif isinstance(pathcache, Memory):
             fn = pathcache.cache(base_fn)
+        else:
+            fn = Memory(pathcache).cache(base_fn)
         if lrucache is not None:
             fn = lrucache(fn)
-        return fn
+        # We want to wrap base_fn but use the signature sig.
+        wrapfn = fn if fn is base_fn else wraps(base_fn)(fn)
+        if newsig is not None:
+            wrapfn.__signature__ = newsig
+        return wrapfn
     @classmethod
     def _new(cls, fn, outputs,
              name=None, lazy=True, indent=None,
@@ -282,17 +289,15 @@ class calc:
         pathcache = self._interpret_pathcache(pathcache)
         self.pathcache = pathcache
         # Get the argspec for the calculation function.
-        spec = getfullargspec(fn)
-        if spec.varargs is not None:
-            raise ValueError("calculations do not support varargs")
-        if spec.varkw is not None:
-            raise ValueError("calculations do not support varkw")
-        # Save this for future use.
-        spec = calc._argspec_persist(spec)
-        self.argspec = spec
+        sig = signature(fn)
+        for p in sig.parameters.values():
+            if p.kind == p.VAR_POSITIONAL:
+                raise ValueError("calculations do not support varargs")
+            elif p.kind == p.VAR_KEYWORD:
+                raise ValueError("calculations do not support varkw")
         # Figure out the inputs from the argspec; we set them below, after we
         # have checked the pathcache.
-        inputs = pset(spec.args + spec.kwonlyargs)
+        inputs = pset(sig.parameters.keys())
         # Check that the outputs are okay.
         outputs = tuple(outputs)
         for out in outputs:
@@ -301,11 +306,9 @@ class calc:
         self.outputs = outputs
         # We need to grab the defaults also.
         dflts = {}
-        for (arglst,argdfs) in [(spec.args, spec.defaults),
-                                (spec.kwonlyargs, spec.kwonlydefaults)]:
-            if not arglst or not argdfs: continue
-            arglst = arglst[-len(argdfs):]
-            dflts.update(zip(arglst, argdfs))
+        for p in sig.parameters.values():
+            if p.default is not p.empty:
+                dflts[p.name] = p.default
         # If pathcache is True, then cache_path is an implicit argument if not
         # already included; add that here if necessary. This won't screw up the
         # arguments when the eager_call is eventually made because the
@@ -321,8 +324,11 @@ class calc:
         self.output_docs = output_docs
         # Last thing is to set the function, which signals that construction is
         # done and the calc is now immutable.
-        cache_fn = self._apply_caching(fn, spec, lrucache, pathcache)
-        self.function = wraps(fn)(cache_fn)
+        cache_fn = self._apply_caching(fn, sig, lrucache, pathcache)
+        # At this point we get the signature for cache_fn because it's possible
+        # that cache_fn added a cache_path parameter.
+        self.signature = signature(cache_fn)
+        self.function = cache_fn
         # That is all for the constructor. However, what we actually return
         # from a calc decorator/call is a function with a
         # `calc` field.
@@ -417,7 +423,7 @@ class calc:
         newcalc = copy.copy(self)
         object.__setattr__(newcalc, 'base_function', fn)
         dec_fn = calc._apply_caching(
-            fn, self.argspec, self.lrucache, self.pathcache)
+            fn, self.signature, self.lrucache, self.pathcache)
         object.__setattr__(newcalc, 'function', dec_fn)
         return newcalc
     def eager_call(self, *args, **kwargs):
@@ -497,17 +503,12 @@ class calc:
         opts = merge(self.defaults, *args, **kwargs)
         args = []
         kwargs = {}
-        miss = False
-        for name in self.argspec.args:
+        for (name,p) in self.signature.parameters.items():
             if name not in opts:
-                miss = True
-                continue
-            if miss:
-                kwargs[name] = opts[name]
-            else:
+                raise ValueError(f"required argument {name} not found")
+            if p.kind == p.POSITIONAL_ONLY:
                 args.append(opts[name])
-        for name in self.argspec.kwonlyargs:
-            if name in opts:
+            else:
                 kwargs[name] = opts[name]
         return (args, kwargs)
     def eager_mapcall(self, *args, **kwargs):
@@ -636,7 +637,6 @@ class calc:
         object.__setattr__(tr, 'base_function', self.base_function)
         object.__setattr__(tr, 'lrucache', self.lrucache)
         object.__setattr__(tr, 'pathcache', self.pathcache)
-        object.__setattr__(tr, 'argspec', self.argspec)
         object.__setattr__(tr, 'lazy', self.lazy)
         object.__setattr__(tr, 'inputs', calc._tr_set(d, self.inputs, True))
         object.__setattr__(tr, 'outputs', calc._tr_tup(d, self.outputs, False))
@@ -647,16 +647,15 @@ class calc:
         object.__setattr__(
             tr, 'output_docs', calc._tr_map(d, self.output_docs, False))
         # Translate the argspec.
-        from inspect import FullArgSpec
-        spec = self.argspec
-        spec = FullArgSpec(
-            args=calc._tr_tup(d, spec.args, True),
-            varargs=None, varkw=None,
-            defaults=calc._tr_tup(d, spec.defaults, True),
-            kwonlyargs=calc._tr_tup(d, spec.kwonlyargs, True),
-            kwonlydefaults=calc._tr_map(d, spec.kwonlydefaults, True),
-            annotations=calc._tr_map(d, spec.annotations, True))
-        object.__setattr__(tr, 'argspec', spec)
+        params = []
+        for (k,v) in self.signature.parameters.items():
+            name = d.get(k, k)
+            if name != k:
+                name = name if isinstance(name, str) else name[0]
+                v = v.replace(name=name)
+            params.append(v)
+        newsig = self.signature.replace(parameters=params)
+        object.__setattr__(tr, 'signature', newsig)
         # The reversed version of d (for inputs).
         r = {v:(k if isinstance(k, str) else k[0]) for (k,v) in d.items()}
         fn = self.function
@@ -668,7 +667,7 @@ class calc:
                 return calc._tr_map(d, res, False)
             else:
                 return res
-        wrapfn = wraps(self.base_function)(_tr_fn_wrapper)
+        wrapfn = wraps(self.function)(_tr_fn_wrapper)
         object.__setattr__(tr, 'function', wrapfn)
         return tr
     def with_lrucache(self, new_cache):
@@ -854,16 +853,15 @@ class plan(pdict):
         return plan._source_lookup(inputtup, calctup, calcdata.sources[key])
     @staticmethod
     def _call_calc(inputtup, calctup, c, args):
-        args = map(partial(plan._source_lookup, inputtup, calctup), args)
-        kwonlyargs = c.argspec.kwonlyargs
-        nkwonly = len(kwonlyargs)
-        if nkwonly == 0:
-            r = c.eager_call(*args)
-        else:
-            args = tuple(args)
-            kw = dict(zip(kwonlyargs, args[-nkwonly:]))
-            args = args[:nkwonly]
-            r = c.eager_call(*args, **kw)
+        argvals = map(partial(plan._source_lookup, inputtup, calctup), args)
+        args = []
+        kwargs = {}
+        for (p,arg) in zip(c.signature.parameters.values(), argvals):
+            if p.kind == p.POSITIONAL_ONLY:
+                args.append[arg]
+            else:
+                kwargs[p.name] = arg
+        r = c.eager_call(*args, **kwargs)
         if is_amap(r):
             return tuple(map(r.__getitem__, c.outputs))
         else:
