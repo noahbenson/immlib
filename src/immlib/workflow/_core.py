@@ -694,7 +694,7 @@ class calc:
         if fn is not new_fn:
             object.__setattr__(new_calc, 'function', new_fn)
         return new_calc
-@docwrap('immlib.is_calc')
+@docwrap('immlib.workflow.is_calc')
 def is_calc(obj, /):
     """Determines if an object is a ``calc`` instance.
 
@@ -728,7 +728,7 @@ def is_calcfn(obj, /):
     calc, to_calc, is_calc
     """
     return isinstance(getattr(obj, 'calc', None), calc)
-@docwrap('immlib.to_calc')
+@docwrap('immlib.workflow.to_calc')
 def to_calc(obj, /):
     """Converts an object into a ``calc`` object or raises a ``TypeError``.
 
@@ -995,7 +995,7 @@ class plan(pdict):
             raise ValueError(
                 f"plan expects 0 or 1 positional arguments; found {nargs}")
         calcs.update(kwargs)
-        for (k,v) in kwargs.items():
+        for (k,v) in calcs.items():
             if is_calc(v):
                 calcs[k] = v
             else:
