@@ -128,4 +128,4 @@ __all__ = tuple(
      if k != 'version'
      if ('immlib.' + k) not in submodules])
 # We want to mark our functions as being from the immlib module.
-reclaim(__name__, __all__)
+reclaim(__name__, __all__, del_reclaim=True)

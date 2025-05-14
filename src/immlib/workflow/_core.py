@@ -1189,7 +1189,7 @@ class plan(pdict):
             This plan contains the following calculations:
              {calcstr}
             {inputstr}{outputstr}"""
-        docstr = reindent(docstr, 4, final_endline=False)
+        docstr = reindent(docstr, 0, final_endline=False)
         object.__setattr__(self, 'docstr', docstr)
         object.__setattr__(self, '__doc__', docstr)
         # We now have a calculation ordering that we can use to turn the plan's

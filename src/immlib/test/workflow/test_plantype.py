@@ -116,7 +116,6 @@ class TestWorkflowPlanType(TestCase):
         sys.stdout = io.StringIO()
         self.assertEqual(tri.area, 0.5)
         self.assertEqual(sys.stdout.getvalue(), 'Calculating area...\n')
-        sys.stdout = sys.__stdout__
         # Objects of type planobject are immutable:
         with self.assertRaises(TypeError):
             tri.a = (2,2)
@@ -212,6 +211,9 @@ class TestWorkflowPlanType(TestCase):
         self.assertTrue(tri5.is_persistent())
         self.assertTrue(np.array_equal(tri5.a, (0.2, 0.2)))
         self.assertAlmostEqual(tri5.area, 0.3)
+        # At this point, we can return the normal standard output (we should be
+        # done printing things).
+        sys.stdout = sys.__stdout__
         # We can turn planobjects into strings:
         class SimpleObj(planobject):
             @calc('x')

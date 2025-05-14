@@ -35,4 +35,4 @@ make_docproc.__module__ = __name__
 __all__ = ("docwrap", "default_docproc")
 
 from .._init import reclaim
-reclaim(__name__)
+reclaim(__name__, del_reclaim=True)
