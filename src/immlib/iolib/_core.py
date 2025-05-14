@@ -399,7 +399,7 @@ def save_str(stream, obj, append_nl=False):
     stream.write(str(obj))
     if append_nl:
         stream.write('\n')
-@save.register('bytes', mode='t')
+@save.register('bytes', mode='b')
 def save_bytes(stream, obj):
     """Saves `bytes(obj)` to the given stream."""
     stream.write(bytes(obj))

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-################################################################################
+###############################################################################
 # immlib/pathlib/__init__.py
 
 """Core implementation of the classes for exploring and managing cached paths.
@@ -65,13 +65,5 @@ __all__ = (
 
 # Mark all the imported functions as belonging to this module instead of the
 # hidden submodules:
-from sys import modules
-thismod = modules[__name__]
-for k in dir():
-    if k[0] == '_':
-        continue
-    obj = getattr(thismod, k)
-    if getattr(obj, '__module__', __name__) == __name__:
-        continue
-    obj.__module__ = __name__
-del obj, thismod, modules, k
+from .._init import reclaim
+reclaim(__name__)

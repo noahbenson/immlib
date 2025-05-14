@@ -18,11 +18,12 @@ on:
   workflow_dispatch:
     
 jobs:
-  deploy-book:
+  deploy-docs:
     runs-on: ubuntu-latest
     permissions:
       pages: write
       id-token: write
+    environment: github-pages
     steps:
       - uses: actions/checkout@v4
       # Install dependencies
@@ -31,26 +32,17 @@ jobs:
         with:
           python-version: '3.11'
           cache: pip # Implicitly uses requirements.txt for cache key
-      - name: Install Dependencies
-        run: pip install -r requirements.txt
-      # (optional) Cache your executed notebooks between runs
-      # if you have config:
-      # execute:
-      #   execute_notebooks: cache
-      - name: cache executed notebooks
-        uses: actions/cache@v4
-        with:
-          path: _build/.jupyter_cache
-          key: jupyter-book-cache-${{ hashFiles('requirements.txt') }}
+      - name: Install immlib and Dependencies
+        run: pip install -e .[docs]
       # Build the book
       - name: Build Documentation
         run: |
-          jupyter-book build docs/
+          jupyter-book build docs/immlib/
       # Upload the book's HTML as an artifact
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: "docs/_build/html"
+          path: "docs/immlib/_build/html"
       # Deploy the book's HTML to GitHub Pages
       - name: Deploy to GitHub Pages
         id: deployment

@@ -1,6 +1,6 @@
 [project]
 name = "immlib"
-version = "1.0.0.dev1"
+version = "1.0.0.dev2"
 description = """A library of utilites for immutable scientific data."""
 authors = [{name="Noah C. Benson", email="nben@uw.edu"}]
 license = {"text"="MIT"}
@@ -16,6 +16,8 @@ classifiers = [
     'Programming Language :: Python :: 3.9',
     'Programming Language :: Python :: 3.10',
     'Programming Language :: Python :: 3.11',
+    'Programming Language :: Python :: 3.12',
+    'Programming Language :: Python :: 3.13',
     'Topic :: Software Development',
     'Topic :: Software Development :: Libraries',
     'Topic :: Software Development :: Libraries :: Python Modules',
@@ -26,17 +28,19 @@ classifiers = [
     'Operating System :: Unix',
     'Operating System :: MacOS']
 dependencies = [
-     'pcollections >= 0.2.9',
+     'pcollections >= 0.3.2',
      'numpy >= 1.24.0',
      'scipy >= 1.7.0',
-     'pint >= 0.18.0',
+     'pint >= 0.20.0',
      'docrep >= 0.3.2',
      'joblib >= 1.3.0',
-     'cloudpathlib[s3,gs,azure] >= 0.18.0']
+     'cloudpathlib[s3,gs,azure] >= 0.18.0',
+     'pyyaml >= 6.0']
 
 [project.optional-dependencies]
-dev = ["torch >= 2.2.0", "pyyaml"]
-test = ["torch >= 2.2.0", "pyyaml"]
+dev = ["torch >= 2.2.0"]
+test = ["torch >= 2.2.0"]
+docs = ["torch >= 2.2.0", "jupyter-book >= 1.0.0", "matplotlib >= 3.4.0"]
 
 [project.urls]
 homepage = "https://github.com/noahbenson/immlib"

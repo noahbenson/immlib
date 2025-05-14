@@ -10,6 +10,7 @@ examples of the library's usage.
 
 from .doc      import *
 from .util     import *
+from .types    import *
 from .pathlib  import *
 from .iolib    import *
 from .workflow import *

@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-################################################################################
+###############################################################################
 # immlib/pathlib/_cache.py
 
 
-# Dependencies #################################################################
+# Dependencies ################################################################
 
 import os, sys
 from pathlib      import (Path, PurePath)
@@ -14,7 +14,7 @@ from cloudpathlib import CloudPath
 from   ..doc      import docwrap
 
 
-# CloudCachePath ###############################################################
+# CloudCachePath ##############################################################
 
 _pymajor = int(sys.version.split('.')[0])
 _pyminor = int(sys.version.split('.')[1])
@@ -47,7 +47,7 @@ class CloudCachePath(_pathbase):
             pre = cloud_path.cloud_prefix
             lcd = cloud_path.client._local_cache_dir
             fspath = Path(lcd).absolute() / str(cloud_path)[len(pre):]
-            super().__init__(self, fspath)
+            super().__init__(fspath)
     def __truediv__(self, other):
         return CloudCachePath(self.cloud_path / other)
     def iterdir(self):

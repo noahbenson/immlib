@@ -14,15 +14,13 @@ from ._core import (
     Save,
     save,
     Load,
-    load,
-)
+    load)
 
 __all__ = (
     'Save',
     'save',
     'Load',
-    'load',
-)
+    'load')
 
 # Mark these as native to this module.
 Save.__module__ = __name__

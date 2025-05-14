@@ -10,10 +10,13 @@ from ._core import (
     to_lrucache,
     calc,
     is_calc,
+    is_calcfn,
+    to_calc,
     plan,
     is_plan,
     plandict,
-    is_plandict)
+    is_plandict,
+    is_tplandict)
 
 from ._plantype import (
     plantype,
@@ -25,11 +28,15 @@ __all__ = (
     #"to_pathcache",
     #"to_lrucache",
     "calc",
-    "is_calc",
+    # We don't export is_calc because its presence in the library outside of
+    # this subpackage is likely to lead to people using it when the function
+    # really want is is_calcfn.
+    "is_calcfn",
     "plan",
     "is_plan",
     "plandict",
     "is_plandict",
+    "is_tplandict",
     "plantype",
     "planobject",
     "is_plantype",
@@ -37,13 +44,5 @@ __all__ = (
 
 # Mark all the imported functions as belonging to this module instead of the
 # hidden submodules:
-from sys import modules
-thismod = modules[__name__]
-for k in dir():
-    if k[0] == '_':
-        continue
-    obj = getattr(thismod, k)
-    if getattr(obj, '__module__', __name__) == __name__:
-        continue
-    obj.__module__ = __name__
-del obj, thismod, modules, k
+from .._init import reclaim
+reclaim(__name__)

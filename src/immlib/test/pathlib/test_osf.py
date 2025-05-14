@@ -52,8 +52,3 @@ class TestPathlibOSF(TestCase):
             f = p / "rh-angle.mov"
             self.assertEqual(f, ls["rh-angle.mov"])
             self.assertTrue(f.is_file())
-
-            
-            
-            
-    

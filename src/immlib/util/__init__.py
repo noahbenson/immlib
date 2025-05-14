@@ -5,11 +5,16 @@
 """Utilites managed by immlib.
 
 The `immlib.util` module contains numerous utility functions that are intended
-to be useful when writing APIs for scientific libraries. These include functions
-that test for particular types or common object features, functions for coercing
-types into other types, and functions for querying numpy arrays and pytorch
-tensors.
+to be useful when writing APIs for scientific libraries. These include
+functions that test for particular types or common object features, functions
+for coercing types into other types, and functions for querying numpy arrays
+and pytorch tensors.
 """
+
+# The _init module provides useful utilities for use during import, but these
+# utilities happen to rightfully belong in this namespace.
+from .._init import (
+    reclaim)
 
 from ._core import (
     is_str,
@@ -44,14 +49,17 @@ from ._core import (
     is_tuple,
     is_list,
     is_plist,
+    is_tlist,
     is_llist,
     is_set,
     is_frozenset,
     is_pset,
+    is_tset,
     is_dict,
     is_odict,
     is_ddict,
     is_pdict,
+    is_tdict,
     is_ldict,
     get,
     nestget,
@@ -65,9 +73,8 @@ from ._core import (
     to_pcoll,
     to_tcoll,
     to_mcoll,
-    to_frozenarray,
+    freezearray,
     frozenarray,
-    unbroadcast_index,
     lazykeymap,
     lazyvalmap,
     lazyitemmap,
@@ -82,10 +89,16 @@ from ._core import (
     assoc,
     dissoc,
     lambdadict,
+    args,
     argfilter,
-    unitregistry)
+    unitregistry,
+    to_pathcache,
+    to_lrucache,
+    identfn)
 
 from ._numeric import (
+    checktorch,
+    alttorch,
     is_numberdata,
     is_booldata,
     is_intdata,
@@ -94,6 +107,12 @@ from ._numeric import (
     is_numpydtype,
     like_numpydtype,
     to_numpydtype,
+    sparse_layout,
+    sparse_find,
+    sparse_tolayout,
+    sparse_haslayout,
+    sparse_data,
+    sparse_indices,
     is_array,
     to_array,
     is_torchdtype,
@@ -107,14 +126,17 @@ from ._numeric import (
     to_sparse,
     is_dense,
     to_dense,
-    is_number,
     is_bool,
     is_integer,
     is_real,
     is_complex,
     is_number,
     like_number,
-    to_number)
+    to_number,
+    numapi,
+    tensor_args,
+    array_args,
+    numeric_args)
 
 from ._quantity import (
     is_ureg,
@@ -134,14 +156,17 @@ from ._url import (
     url_download)
 
 __all__ = (
+    #"checktorch",
+    #"alttorch",
     #"is_numpydtype",
     #"like_numpydtype",
     #"to_numpydtype",
-    "is_array",
-    "to_array",
     #"is_torchdtype",
     #"like_torchdtype",
     #"to_torchdtype",
+    "sparse_find",
+    "is_array",
+    "to_array",
     "is_tensor",
     "to_tensor",
     "is_numeric",
@@ -150,7 +175,6 @@ __all__ = (
     "to_sparse",
     "is_dense",
     "to_dense",
-    "is_number",
     "like_number",
     "to_number",
     "is_str",
@@ -203,9 +227,14 @@ __all__ = (
     "can_hash",
     "itersafe",
     "can_iter",
-    "to_frozenarray",
+    "is_pcoll",
+    "is_tcoll",
+    "is_mcoll",
+    "to_pcoll",
+    "to_tcoll",
+    "to_mcoll",
+    "freezearray",
     "frozenarray",
-    "unbroadcast_index",
     "is_number",
     "is_bool",
     "is_integer",
@@ -216,6 +245,10 @@ __all__ = (
     "is_intdata",
     "is_realdata",
     "is_complexdata",
+    "numapi",
+    "tensor_args",
+    "array_args",
+    "numeric_args",
     "default_ureg",
     "like_unit",
     "alike_units",
@@ -237,18 +270,14 @@ __all__ = (
     "assoc",
     "dissoc",
     "lambdadict",
+    "args",
+    "argfilter",
     "is_url",
     "url_download")
 
 # Mark all the imported functions as belonging to this module instead of the
-# hidden submodules:
-from sys import modules
-thismod = modules[__name__]
-for k in dir():
-    if k[0] == '_':
-        continue
-    obj = getattr(thismod, k)
-    if getattr(obj, '__module__', __name__) == __name__:
-        continue
-    obj.__module__ = __name__
-del obj, thismod, modules, k
+# hidden submodules. Most of these will later get claimed by the immlib primary
+# module, but any that aren't belong here in immlib.util.
+reclaim(__name__, del_reclaim=False)
+# We also want to claim the `reclaim` function for util.
+reclaim.__module__ = __name__
