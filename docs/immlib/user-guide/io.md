@@ -51,6 +51,19 @@ Once this load function has been registered, the `il.load()` function can be
 used to load `json` data automatically. `il.load` accepts paths, including
 non-local paths such as S3 paths.
 
+For example:
+
+```{code-cell}
+import immlib as il
+
+filename = il.doc.__file__
+print("Catting file", filename, "...")
+
+lines = il.load(filename, 'text')
+for ln in lines:
+    print(ln)
+```
+
 
 ## `immlib.save`: Exporting Data
 
@@ -76,6 +89,28 @@ Note that in this example and the previous example, additional keyword arguments
 are accepted after the `stream` argument (and the `obj` object that is being
 saved). Any arguments given to the `save` or `load` functions are passed along.
 
+Here is an example of using save and load together to first save a YAML file and
+then to load and print it out:
+
+```{code-cell}
+import immlib as il
+from tempfile import TemporaryDirectory
+from pathlib import Path
+
+yaml_data = [{'header1': [1, 2, 3], 'header2': [{'a': 10, 'b': 20}, 'end']}]
+
+# Do these operations in a temporary directory:
+with TemporaryDirectory() as tmpdir:
+    tmpdir = Path(tmpdir)
+
+    # Save the YAML data out to a file:
+    il.save(tmpdir / 'file.yaml', yaml_data)
+    
+    # Now load it as text and print it line by line:
+    lines = il.load(tmpdir / 'file.yaml')
+    for ln in lines:
+        print(ln)
+```
 
 ## Predefined Formats
 

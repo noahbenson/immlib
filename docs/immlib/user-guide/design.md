@@ -24,7 +24,10 @@ the important aspects in brief are:
 
 ## Functions should expose their parameters but be smart about default values.
 
-A common tradeoff in the design of scientific software orients around the extent to which a function exposes its parameters to the user. To explain this tradeoff, consider the following example of a function for calculating the values of a Gaussian function:
+A common tradeoff in the design of scientific software orients around the extent
+to which a function exposes its parameters to the user. To explain this
+tradeoff, consider the following example of a function for calculating the
+values of a Gaussian function:
 
 ```python
 def gaussian(x):
@@ -78,7 +81,8 @@ unless one is very familiar with Gaussian distributions to begin with. A
 programmer who comes along a function call like `gaussian(x, mu, sig, 2, True)`
 will likely wonder what the `2` and `True` in the parameter list are about. A
 compromise between making functions overly complex and making them overly
-situational is the common strategy of giving some of the parameters default values that are reasonable in most situations.
+situational is the common strategy of giving some of the parameters default
+values that are reasonable in most situations.
 
 
 ```python
