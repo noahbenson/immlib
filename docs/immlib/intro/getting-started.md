@@ -63,7 +63,7 @@ distance_plan = il.plan(
     calculate_step=point_vec_intersection)
                 
 # Make a plandict of the results:
-pd = distance_plan(x=[0.0, 1.0], y=[2.0, 1.0])
+pd = distance_plan(x=[0.0, -10.0], y=[2.0, 2.0])
 
 print('xlen:',     pd['xlen'])
 print('distance:', pd['distance'])
