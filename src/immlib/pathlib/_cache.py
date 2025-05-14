@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-################################################################################
+###############################################################################
 # immlib/pathlib/_cache.py
 
 
-# Dependencies #################################################################
+# Dependencies ################################################################
 
 import os, sys
 from pathlib      import (Path, PurePath)
@@ -14,7 +14,7 @@ from cloudpathlib import CloudPath
 from   ..doc      import docwrap
 
 
-# CloudCachePath ###############################################################
+# CloudCachePath ##############################################################
 
 _pymajor = int(sys.version.split('.')[0])
 _pyminor = int(sys.version.split('.')[1])

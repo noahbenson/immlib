@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-################################################################################
+###############################################################################
 # immlib/pathlib/__init__.py
 
 """Core implementation of the classes for exploring and managing cached paths.

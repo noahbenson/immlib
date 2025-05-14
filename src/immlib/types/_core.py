@@ -1,5 +1,5 @@
 # -*- Coding: utf-8 -*-
-################################################################################
+###############################################################################
 # pimms/types/_core.py
 
 """The pimms subpackage containing various utility types.
@@ -14,7 +14,7 @@ The utility types included in pimms are:
 """
 
 
-# Dependencies #################################################################
+# Dependencies ################################################################
 
 import math
 import operator as op
@@ -45,7 +45,7 @@ from ..util import (
 from ..workflow import *
 
 
-# MetaObject ###################################################################
+# MetaObject ##################################################################
 
 class MetaObject(planobject):
     """Base planobject type for objects that keep track of metadata.
@@ -54,8 +54,8 @@ class MetaObject(planobject):
     ----------
     metadata : None or Mapping, optional
         The dictionary of metadata that is to be attached to the object. If the
-        argument `None` is provided (the default), then the empty dictionary is
-        used.
+        argument ``None`` is provided (the default), then the empty dictionary
+        is used.
 
     Attributes
     ----------
@@ -72,7 +72,7 @@ class MetaObject(planobject):
     def withmeta(self, *args, **kwargs):
         """Return a duplicate object with updated metadata.
 
-        The arguments and keyword arguments to `withmeta` are merged,
+        The arguments and keyword arguments to ``withmeta`` are merged,
         left-to-right, into the current metadata; this new dictionary is used
         as the metadata parameter of the new object.
         """
@@ -103,17 +103,17 @@ class MetaObject(planobject):
         return self.copy(metadata=None)
 
 
-# Immutable ####################################################################
+# Immutable ###################################################################
 
 class ImmutableType(type):
     """A meta-class for types that are immutable.
 
-    When this metaclass is used in a class, objects of the type become immutable
-    immediately after the `__init__` method is run. Such types should not
-    overload the `__new__` classmethod and instead should see to their
-    initialization in `__init__` as usual. Once the `__init__` method has
-    finished, the `__setattr__`, `__delattr__`, `__setitem__`, and `__delitem__`
-    methods will raise `TypeError`s.
+    When this metaclass is used in a class, objects of the type become
+    immutable immediately after the ``__init__`` method is run. Such types
+    should not overload the ``__new__`` classmethod and instead should see to
+    their initialization in ``__init__`` as usual. Once the ``__init__`` method
+    has finished, the ``__setattr__``, ``__delattr__``, ``__setitem__``, and
+    ``__delitem__`` methods will raise a ``TypeError``.
     """
     class ImmutableBase:
         "The base class of all immlib immutable classes."
@@ -156,15 +156,15 @@ class ImmutableType(type):
 class Immutable(ImmutableType.ImmutableBase, metaclass=ImmutableType):
     """A type that becomes immutable immediately after initialization.
 
-    Any class that inherits from `Immutable` should implement an `__init__`
-    method, within which it is allowed to change the attributes of the `self`
-    object normally. After the `__init__` method terminates, the object becomes
-    read-only and can no longer be updated.
+    Any class that inherits from ``Immutable`` should implement an ``__init__``
+    method, within which it is allowed to change the attributes of the ``self``
+    object normally. After the ``__init__`` method terminates, the object
+    becomes read-only and can no longer be updated.
     """
     __slots__ = ()
 
 
-# ArrayIndex ###################################################################
+# ArrayIndex ##################################################################
 
 ArrayIndexFlatData = namedtuple(
     'ArrayIndexFlatData',
@@ -182,13 +182,13 @@ ArrayIndexFlatData.__doc__ = \
 class ArrayIndex:
     """A type that indexes the elements of an array for easy searching.
 
-    The `ArrayIndex` class is a class that stores a (typically read-only) numpy
-    array whose elements must all be unique and that creates an index of that
-    array's elements. `ArrayIndex` objects primarily support a a `find` method
-    that can be used to look up object indices.
+    The ``ArrayIndex`` class is a class that stores a (typically read-only)
+    numpy array whose elements must all be unique and that creates an index of
+    that array's elements. ``ArrayIndex`` objects primarily support a a
+    ``find`` method that can be used to look up object indices.
 
-    `ArrayIndex` objects require that the arrays they are given contain unique
-    objects that are sortable and hashable.
+    ``ArrayIndex`` objects require that the arrays they are given contain
+    unique objects that are sortable and hashable.
 
     Examples
     --------
@@ -202,7 +202,7 @@ class ArrayIndex:
     >>> index.find(['r2c2', 'r2c1', 'r1c2'], ravel=True)
         array([3, 1, 2])
     """
-    # Class Methods ------------------------------------------------------------
+    # Class Methods -----------------------------------------------------------
     @classmethod
     def _make_flatdata(cls, array):
         flatins = np.argsort(array.flat)
@@ -210,7 +210,7 @@ class ArrayIndex:
         freezearray(flatins)
         freezearray(flatids)
         return ArrayIndexFlatData(flatids, flatins)
-    # Construction -------------------------------------------------------------
+    # Construction ------------------------------------------------------------
     __slots__ = ('array', '_flatdata')
     def __new__(cls, array, freeze=True):
         if not freeze and is_array(array, frozen=True):
@@ -226,9 +226,9 @@ class ArrayIndex:
     def find(self, ids, *, ravel=False, **kw):
         """Finds and returns the indices of the given identities.
         
-        `index.find(id)` returns the index, in the original array on which
-        `index` is based, of the identity `id`. If `id` is not in the original
-        array, then a `KeyError` is raised.
+        ``index.find(id)`` returns the index, in the original array on which
+        ``index`` is based, of the identity ``id``. If ``id`` is not in the
+        original array, then a ``KeyError`` is raised.
         
         Parameters
         ----------
@@ -237,8 +237,8 @@ class ArrayIndex:
         ravel : boolean, optional
             Whether the return value should be an array representing a raveled
             index into the flattened version of the original indexed array
-            (`True`) or a tuple representing an unraveled multi-index into the
-            original indexed array (`False`). The default is `False`.
+            (``True``) or a tuple representing an unraveled multi-index into
+            the original indexed array (``False``). The default is ``False``.
         default : object, optional
             If `default` is not given, then an error is raised when an identity
             is not found. If `default` is given, however, the default value is
@@ -250,7 +250,7 @@ class ArrayIndex:
         indices
             The indices, into the original indexed array, of the given
             identities, `ids`.
-       """
+        """
         if len(kw) == 1:
             try:
                 default = kw.pop('default')
@@ -302,13 +302,13 @@ class ArrayIndex:
     @property
     def flatdata(self):
         """Returns a named tuple containing the flattened data used by the
-        `ArrayIndex` type to lookup identities.
+        ``ArrayIndex`` type to lookup identities.
 
-        `index.flatdata` returns a named 2-tuple with keys `ident` and
-        `index`. The `ident` element is a read-only numpy array containing the
-        sorted and flattened identities represented in the original array. The
-        `index` element is a read-only numpy array containing the argsort of the
-        flattened original array object.
+        ``index.flatdata`` returns a named 2-tuple with keys ``ident`` and
+        ``index``. The ``ident`` element is a read-only numpy array containing
+        the sorted and flattened identities represented in the original
+        array. The ``index`` element is a read-only numpy array containing the
+        argsort of the flattened original array object.
         """
         flatdata = self._flatdata
         if isinstance(flatdata, LockType):
@@ -322,7 +322,7 @@ class ArrayIndex:
                     flatdata = self._make_flatdata(self.array)
                     object.__setattr__(self, '_flatdata', flatdata)
         return flatdata
-    # Disabled Methods ---------------------------------------------------------
+    # Disabled Methods --------------------------------------------------------
     def __setattr__(self, k, v):
         raise TypeError(f"{type(self)} is immutable")
     def __delattr__(self, k):

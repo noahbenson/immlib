@@ -21,27 +21,27 @@ from ._core import (calc, plan, plandict, tplandict, is_calcfn)
 class plantype(type):
     """A metaclass that allows one to create lazy types from calculation plans.
 
-    The `plantype` metaclass handles classes with the base-class `planobject`.
-    In general, one should create a plan-object by inheriting from
-    `planobject`, not by providing the `plantype` metaclass, but passing
-    `plantype` has the same effect (all classes created with metaclass
-    `plantype` will inherit from `planobject`).
+    The ``plantype`` metaclass handles classes with the base-class
+    ``planobject``.  In general, one should create a plan-object by inheriting
+    from ``planobject``, not by providing the ``plantype`` metaclass, but
+    passing ``plantype`` has the same effect (all classes created with
+    metaclass ``plantype`` will inherit from ``planobject``).
 
-    See `planobject` for more information.
+    See ``planobject`` for more information.
     """
     __slots__ = ()
     class planobject_base:
-        """The base-class for the `immlib.planobject` class.
+        """The base-class for the ``immlib.planobject`` class.
 
-        `plantype.planobject_base` is a simple class that implements the basic
-        features of the `planobject` class. The separation for certain methods
-        from the `planobject` type itself is required due to details of how the
-        `planobject` class, which has the `plantype` meta-class, gets
-        initialized while the `plantype.__new__` method depends on methods in
-        the `planobject` class (which hasn't been initialized/defined at the
-        time that the `planobject.__new__` method is called. This class
-        shouldn't be used directly and shouldn't be inherited. Use the
-        `planobject` class instead.
+        ``plantype.planobject_base`` is a simple class that implements the
+        basic features of the ``planobject`` class. The separation for certain
+        methods from the ``planobject`` type itself is required due to details
+        of how the ``planobject`` class, which has the ``plantype`` meta-class,
+        gets initialized while the ``plantype.__new__`` method depends on
+        methods in the ``planobject`` class (which hasn't been
+        initialized/defined at the time that the ``planobject.__new__`` method
+        is called. This class shouldn't be used directly and shouldn't be
+        inherited. Use the ``planobject`` class instead.
         """
         __slots__ = ('_plandict_',)
         def __getattr__(self, k):
@@ -92,19 +92,20 @@ class plantype(type):
                 setattr(self, k, v)
         @staticmethod
         def _init_wrapper(cls, self, *args, **kwargs):
-            """Manages the initialization (`__init__`) for `planobject` types.
+            """Manages the initialization (``__init__``) for ``planobject``
+            types.
 
-            The `planobject` type, and any types that inherit from it, is
-            generally immutable; however, When a `planobject` is first created,
-            it is allowed to set its inputs, as if they were mutable
-            attributes, during the `__init__()` method. In order to facilitate
-            this, a reorganization of the initialization code for each
-            `planobject` subclass is performed when that class is defined. The
-            class's true `__init__` method is stored in the method
-            `__planobject_init__`, while the
-            `plantype.planobject_base._init_wrapper` method is stored in the
-            type's `__init__` method. This method calls the type's
-            `__planobject_init__` method then makes the initialized object
+            The ``planobject`` type, and any types that inherit from it, is
+            generally immutable; however, When a ``planobject`` is first
+            created, it is allowed to set its inputs, as if they were mutable
+            attributes, during the ``__init__()`` method. In order to
+            facilitate this, a reorganization of the initialization code for
+            each ``planobject`` subclass is performed when that class is
+            defined. The class's true ``__init__`` method is stored in the
+            method ``__planobject_init__``, while the
+            ``plantype.planobject_base._init_wrapper`` method is stored in the
+            type's ``__init__`` method. This method calls the type's
+            ``__planobject_init__`` method then makes the initialized object
             immutable.
 
             This method should not be called directly by the user.
@@ -196,35 +197,36 @@ class plantype(type):
         return cls
 
 
-# #planobject ##################################################################
+# #planobject #################################################################
 
 class planobject(plantype.planobject_base, metaclass=plantype):
     """Base class for objects that are based on lazy calculation plans.
 
-    `planobject` is the base-class for all objects that use `immlib` `plan`
-    objects as their base type. Objects that inherit from `planobject` (which
-    uses metaclass `plantype`) are defined in the same way that calculation
+    ``planobject`` is the base-class for all objects that use ``immlib.plan``
+    objects as their base type. Objects that inherit from ``planobject`` (which
+    uses metaclass ``plantype``) are defined in the same way that calculation
     plans are defined. Any attributes of the class (including those inherited
-    from base classes) that are calculations (see `immlib.calc` and
-    `immlib.plan`) are turned into a plan. The inputs of the plan are the
+    from base classes) that are calculations (see ``immlib.calc`` and
+    ``immlib.plan``) are turned into a plan. The inputs of the plan are the
     required parameters for the class, and the outputs of the plan become the
-    attributes of the class, which are resolved lazily like in `plandict`s.
+    attributes of the class, which are resolved lazily like in ``plandict`` s.
 
-    The `__init__` function of a `planobject` is special. During the `__init__`
-    function only, the parameters of a `planobject` function can be set using
-    the usual `setattr` interface. All `planobject`s are immutable once they
-    have been initialized, however. At the end of the `__init__` function, the
-    object must have all of its parameters set, otherwise an error is raised. If
-    no `__init__` function is defined, then the `planobject` default init
-    function calls `merge` on its arguments and keywords; the resulting dict
-    must be a dictionary of the class's parameters.
+    The ``__init__`` function of a ``planobject`` is special. During the
+    ``__init__`` function only, the parameters of a ``planobject`` function can
+    be set using the usual ``setattr`` interface. All ``planobject``s are
+    immutable once they have been initialized, however. At the end of the
+    ``__init__`` function, the object must have all of its parameters set,
+    otherwise an error is raised. If no ``__init__`` function is defined, then
+    the ``planobject`` default init function calls ``merge`` on its arguments
+    and keywords; the resulting dict must be a dictionary of the class's
+    parameters.
 
-    `planobject` types must not overload the following methods, as they are used
-    by the `planobject` / `plantype` system. These are:
-      * `__new__`
-      * `__setattr__`
-      * `__getattr__ `
-      * `__dir__`
+    ``planobject`` types must not overload the following methods, as they are
+    used by the ``planobject`` / ``plantype`` system. These are:
+    * ``__new__``
+    * ``__setattr__``
+    * ``__getattr__``
+    * ``__dir__``
     """
     __slots__ = ()
     def __str__(self):
@@ -296,8 +298,9 @@ class planobject(plantype.planobject_base, metaclass=plantype):
         object.__setattr__(c, '_plandict_', pd.persistent())
         return c
     def is_persistent(self):
-        """Returns `True` if the planobject is persistent and `False` if it is
-        transient."""
+        """Returns ``True`` if the planobject is persistent and ``False`` if it
+        is transient.
+        """
         pd = self._plandict_
         if pd is None or isinstance(pd, dict):
             return type(self).init_transient
@@ -305,26 +308,27 @@ class planobject(plantype.planobject_base, metaclass=plantype):
             return isinstance(pd, plandict)
 
 
-# Utilities ####################################################################
+# Utilities ###################################################################
 
 @docwrap
 def is_planobject(obj):
-    '''Determines if an object is an instance of a `immlib` `plantype` object.
+    '''Determines if an object is an instance of a ``immlib.plantype`` object.
     
-    `is_planobject(obj)` returns `True` if `obj` is an instance of a `immlib`
-    `plantype` class and `False` otherwise.
+    ``is_planobject(obj)`` returns ``True`` if ``obj`` is an instance of a
+    ``immlib.plantype`` class and ``False`` otherwise.
 
-    See also: `plantype`, `is_plantype`
+    See also: ``plantype``, ``is_plantype``
     '''
     return isinstance(obj, planobject)
 @docwrap
 def is_plantype(obj):
-    '''Determines if an object is a `immlib` `plantype`.
+    '''Determines if an object is a ``immlib.plantype``.
     
-    `is_plantype(obj)` returns `True` if `obj` is a `immlib` `plantype` class
-    and `False` otherwise. Note that this works for the type but not instances
-    of the type, for which you should use `is_planobject`.
+    ``is_plantype(obj)`` returns ``True`` if ``obj`` is a ``immlib``
+    ``plantype`` class and ``False`` otherwise. Note that this works for the
+    type but not instances of the type, for which you should use
+    ``is_planobject``.
 
-    See also: `is_planobject`, `plantype`
+    See also: ``is_planobject``, ``plantype``
     '''
     return isinstance(obj, plantype)
