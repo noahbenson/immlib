@@ -258,14 +258,15 @@ class calc:
             fndoc = fn.__doc__
             dp = make_docproc()
             fn = docwrap('fn', indent=indent, proc=dp)(fn)
-            input_docs  = {k[10:]: doc
-                           for (k,doc) in dp.params.items()
-                           if (k.startswith('fn.inputs.') or
-                               k.startswith('fn.parameters.'))}
-            output_docs = {k[11:]: doc
-                           for (k,doc) in dp.params.items()
-                           if (k.startswith('fn.outputs.') or
-                               k.startswith('fn.returns.'))}
+            input_docs = tdict()
+            output_docs = tdict()
+            for (k,doc) in dp.params.items():
+                if k.startswith('fn.inputs.'):
+                    input_docs[k[10:]] = doc
+                elif k.startswith('fn.parameters.'):
+                    input_docs[k[14:]] = doc
+                elif k.startswith('fn.outputs.'):
+                    output_docs[k[11:]] = doc
             input_docs  = pdict(input_docs)
             output_docs = pdict(output_docs)
         else:
@@ -1144,13 +1145,13 @@ class plan(pdict):
             if len(inputs) == 0:
                 inps = "None"
             else:
-                inps = textwrap.wrap('``' + '``, ``'.join(inputs) + '``', 68)
+                inps = textwrap.wrap('``'+'``, ``'.join(c.inputs)+'``', 68)
                 inps = (' '*11).join(inps)
             calcstr.append(f"  Inputs:  {inps}  ")
             if len(outputs) == 0:
                 outs = "None"
             else:
-                outs = textwrap.wrap('``' + '``, ``'.join(outputs) + '``', 68)
+                outs = textwrap.wrap('``'+'``, ``'.join(c.outputs)+'``', 68)
                 outs = (' '*11).join(outs)
             calcstr.append(f"  Outputs: {outs}  ")
         calcstr = '\n'.join(calcstr)
@@ -1359,7 +1360,6 @@ class plandict(ldict):
         The parameters that fulfill the plan. Note that these are the only keys
         in the ``plandict`` that can be updated using methods like ``set`` and
         ``setdefault``.
-
     """
     __slots__ = ('plan', 'inputs', '_calcdata', '_inputdata')
     def __new__(cls, *args, **kwargs):
