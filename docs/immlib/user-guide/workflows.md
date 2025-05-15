@@ -184,8 +184,3 @@ calculations.
 ```{code-cell}
 print(stats_plan.__doc__)
 ```
-
-
-
-
-
