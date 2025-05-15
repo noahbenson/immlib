@@ -661,7 +661,8 @@ pathtypes = dict(
     gs=PathTypeRecord(gspath, is_gspath, like_gspath, _cloudtofspath),
     az=PathTypeRecord(azpath, is_azpath, like_azpath, _cloudtofspath),
     osf=PathTypeRecord(osfpath, is_osfpath, like_osfpath, _cloudtofspath),
-    file=PathTypeRecord(filepath, is_filepath, like_filepath, lambda path:path))
+    file=PathTypeRecord(
+        filepath, is_filepath, like_filepath, lambda path:path))
 scheme_sep = '://'
 @docwrap
 def pathtype(path, default='file', encoding='utf-8'):
@@ -866,3 +867,4 @@ def pathdict(arg, all=False, filter=None, ondir=None, onfile=None):
         return root
     else:
         return onfile(root)
+}
