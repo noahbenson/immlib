@@ -730,7 +730,7 @@ def is_path(p):
     """
     try:
         pt = pathtype(p)
-    except KeyError:
+    except (KeyError, TypeError):
         return False
     return pt.isfn(p)
 @docwrap

@@ -132,3 +132,15 @@ class TestPathlibCore(TestCase):
                         self.assertFalse(tt(ps))
                         self.assertFalse(lk(p))
                         self.assertFalse(lk(ps))
+    def test_misc(self):
+        from immlib.pathlib import (is_path, like_path, pathdict, path)
+        import immlib as il
+        p = path('osf://tery8/')
+        self.assertTrue(is_path(p))
+        self.assertTrue(like_path(p))
+        self.assertFalse(is_path(10))
+        self.assertFalse(like_path('blarg://nothing'))
+        d = pathdict(path(il.__file__).parent)
+        for k in ('util', 'doc', 'types', 'workflow'):
+            self.assertIn(k, d)
+        self.assertTrue(path(d['util']['__init__.py']).is_file())
