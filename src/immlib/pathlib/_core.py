@@ -867,4 +867,3 @@ def pathdict(arg, all=False, filter=None, ondir=None, onfile=None):
         return root
     else:
         return onfile(root)
-}
