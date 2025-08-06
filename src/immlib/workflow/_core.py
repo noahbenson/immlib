@@ -1534,9 +1534,10 @@ class tplandict(tldict):
             pd = obj.persistent()
         else:
             pd = obj
-        if not isinstance(obj, plandict):
+        if not isinstance(pd, plandict):
             raise TypeError(
-                "tplandict(obj, ...) requires that obj be a plan or plandict")
+                f"tplandict(obj, ...) requires that obj be a plan or plandict;"
+                f" god {type(obj)}")
         plan = pd.plan
         calcdata = plan.calcdata
         # First, merge from left-to-right, respecting laziness.

@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-################################################################################
+###############################################################################
 # immlib/_version.py
 
 
-# Dependencies #################################################################
+# Dependencies ################################################################
 
 from ast import literal_eval
 from collections import namedtuple
@@ -11,7 +11,7 @@ from pathlib import Path
 from warnings import warn
 
 
-# Version Type #################################################################
+# Version Type ################################################################
 
 VersionTuple = namedtuple(
     'VersionTuple',
@@ -20,50 +20,53 @@ class Version(VersionTuple):
     """A type that represents a Python package version.
 
     Python packages are represented simultaneously as version strings, version
-    tuples, and by the version components `major`, `minor`, `micro`, and
-    `stage`.
+    tuples, and by the version components ``major``, ``minor``, ``micro``, and
+    ``stage``.
 
     Parameters
     ----------
     string : str or None, optional
         The version string to be represented. If this argument is not provided,
-        then one or both of the `package_name` and `pyproject_path` options must
-        be provided so that the version string can be obtained via the package
-        version or the `pyproject.toml` file.
+        then one or both of the ``package_name`` and ``pyproject_path`` options
+        must be provided so that the version string can be obtained via the
+        package version or the ``pyproject.toml`` file.
     package_name : str or None, optional
-        If the first argument (`string`) is provided, then this argument is
+        If the first argument (``string``) is provided, then this argument is
         ignored; otherwise, the version string is first searched for by this
-        package name using the `importlib` or `importlib_metadata` packages. If
-        found, then this version string is represented in the `Version` object.
+        package name using the ``importlib`` or ``importlib_metadata``
+        packages. If found, then this version string is represented in the
+        ``Version`` object.
     pyproject_path : path-like or None, optional
-        If the first argument (`string`) is not given and the `package_name` is
-        not given, then the version is searched for in the `pyproject.toml` file
-        given by this path. In order for such a file to be valid, it must
-        contain a line that, when stripped of whitespace, begins with the string
-        `'version='` followed by a string representation (e.g.,
-        `'version="1.12.5"'`). If such a line is found in the `[project]`
-        section of the TOM: file pointed to by this argument, then it is
-        represented as the version string in the `Version` object.
+        If the first argument (``string``) is not given and the
+        ``package_name`` is not given, then the version is searched for in the
+        ``pyproject.toml`` file given by this path. In order for such a file to
+        be valid, it must contain a line that, when stripped of whitespace,
+        begins with the string ``'version='`` followed by a string
+        representation (e.g., ``'version="1.12.5"'``). If such a line is found
+        in the ``[project]`` section of the TOM: file pointed to by this
+        argument, then it is represented as the version string in the
+        ``Version`` object.
     on_error : {'warn' | 'ignore' | 'raise'}, optional
         How to handle failures to deduce or parse the version number. If
-        `'raise'` is given, then the errors are allowed to be raised. If
-        `'warn'`, then a warning is raised and a null version is returned. If
-        `'ignore'`, then errors are ignored and a null version is returned. The
-        default is `'raise'`.
+        ``'raise'`` is given, then the errors are allowed to be raised. If
+        ``'warn'``, then a warning is raised and a null version is returned. If
+        ``'ignore'``, then errors are ignored and a null version is
+        returned. The default is ``'raise'``.
+    
     tag_prefixes : tuple of str, optional
         An optional tuple of strings that can appear as the prefixes of stage
-        tagss at the end of the version string. By default, this is `('rc', 'a',
-        'b')`, so version strings like `'1.1.12a6'` and `'1.1.12rc6'` are valid
-        but `'1.1.12c6'` is not.
+        tagss at the end of the version string. By default, this is ``('rc',
+        'a', 'b')``, so version strings like ``'1.1.12a6'`` and ``'1.1.12rc6'``
+        are valid but ``'1.1.12c6'`` is not.
     
     Attributes
     ----------
     string : str
-        The string representing the package version. For example `"1.2.15"` or
-        `"0.2.2.dev1"`.
+        The string representing the package version. For example ``"1.2.15"``
+        or ``"0.2.2.dev1"``.
     tuple : tuple of int and str
-        The components of the version string, for example, `(1, 2, 15)` or
-        `(0, 2, 2, 'dev1')`. Any missing component is excluded.
+        The components of the version string, for example, ``(1, 2, 15)`` or
+        ``(0, 2, 2, 'dev1')``. Any missing component is excluded.
     major : int
         The major version number, typically indicates major API version.
     minor : int
@@ -71,22 +74,23 @@ class Version(VersionTuple):
     micro : int
         The micro version number, typically indicates patch increment number.
     stage : str
-        The development stage of the version. For example `'dev1'` or `'rc2'`.
+        The development stage of the version. For example ``'dev1'`` or
+        ``'rc2'``.
     """
 
-    # Static Methods -----------------------------------------------------------
+    # Static Methods ----------------------------------------------------------
     def getstring(package_name=None, pyproject_path=None):
         """Returns the current version string for the given package name.
         
-        `Version.getstring(package_name)` returns the version string of the
+        ``Version.getstring(package_name)`` returns the version string of the
         package with the given package name.
         
-        `Version.getstring(pyproject_path=path)` returns the version string
-        found in the pyproject.toml file found at the given `path`.
+        ``Version.getstring(pyproject_path=path)`` returns the version string
+        found in the pyproject.toml file found at the given ``path``.
         
-        `Version.getstring(package_name, path)` returns
-        `Version.getstring(package_name)` if the given `package_name` is found,
-        otherwise returns `Version.getstring(pyproject_path=path)`.
+        ``Version.getstring(package_name, path)`` returns
+        ``Version.getstring(package_name)`` if the given ``package_name`` is
+        found, otherwise returns ``Version.getstring(pyproject_path=path)``.
         """
         if package_name is None and pyproject_path is None:
             raise ValueError("Version.getstring() requires 1 or 2 arguments")
@@ -131,7 +135,7 @@ class Version(VersionTuple):
                 f"Version.getstring() found no 'version = ...' line in file"
                 f" {path}")
 
-    # Construction -------------------------------------------------------------
+    # Construction ------------------------------------------------------------
     __slots__ = ()
     null = None
     def __new__(cls, string=None, /, *,
@@ -226,7 +230,7 @@ Version.null = VersionTuple.__new__(
     stage=None)
 
 
-# Variables ####################################################################
+# Variables ###################################################################
 
 # The path of immlib's pyproject.toml file.
 pyproject_path = Path(__file__).parent.parent.parent / 'pyproject.toml'

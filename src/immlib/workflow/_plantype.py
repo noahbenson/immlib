@@ -91,7 +91,7 @@ class plantype(type):
             for (k,v) in merge(*args, **kwargs).items():
                 setattr(self, k, v)
         @staticmethod
-        def _init_wrapper(cls, self, *args, **kwargs):
+        def _init_wrapper(cls, self, inittrans, *args, **kwargs):
             """Manages the initialization (``__init__``) for ``planobject``
             types.
 
@@ -137,7 +137,10 @@ class plantype(type):
                     f"bad parameters for plantype {type(self)};"
                     f" expected {tuple(theplan.inputs)} but found"
                     f" {tuple(params.keys())}")
-            pd = theplan(params)
+            if inittrans:
+                pd = tplandict(theplan, params)
+            else:
+                pd = theplan(params)
             object.__setattr__(self, '_plandict_', pd)
         # For the pickle module:
         def __getstate__(self):
@@ -170,7 +173,7 @@ class plantype(type):
         attrs['__planobject_init__'] = init
         def _initfn(self, *args, **kwargs):
             return plantype.planobject_base._init_wrapper(
-                _initfn.cls, self, *args,
+                _initfn.cls, self, inittrans, *args,
                 **kwargs)
         attrs['__init__'] = wraps(init)(_initfn)
         # (3) Go through the bases: see if there are planobject bases already,

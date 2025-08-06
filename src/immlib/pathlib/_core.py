@@ -122,14 +122,26 @@ def like_osfpath(obj):
         return True
     url = urlparse(pathstr(obj))
     return bool(url.scheme == 'osf' and url.netloc)
+def _interp_cache(local_cache_dir, cache_path, tag):
+    if local_cache_dir is not Ellipsis:
+        # If the local_cache_dir is provided exlicitly, we ignore the cache
+        # path and the client.
+        return local_cache_dir
+    elif cache_path is None:
+        # If there's not cache_path, we return None.
+        return None
+    else:
+        # Otherwise we make it a path and append the tag.
+        cache_path = Path(cache_path).expanduser()
+        return cache_path if tag is None else (cache_path / tag)
 @docwrap
-def osfpath(obj, *args,
+def osfpath(obj, /, *args,
             client=None,
-            cache_path=Ellipsis,
+            cache_path=None,
             file_cache_mode=Ellipsis,
             mkdir_mode=Ellipsis,
             pagesize=Ellipsis,
-            local_cache_dir=None):
+            local_cache_dir=Ellipsis):
     """Creates and returns an ``OSFPath`` representing an OSF.io repository.
 
     ``osfpath(p)`` creates and returns an ``OSFPath`` object, which is a type
@@ -169,10 +181,23 @@ def osfpath(obj, *args,
         ``None``, then an ``OSFClient`` object is created for the project using
         a temporary cache directory.
     cache_path : path-like or None, optional
-        The local directory in which cache files should be stored. This option
-        is ignored if ``client`` is not ``None``; otherwise it is passed to the
-        created client object. The cache directory is the root cache directory
-        for the entire OSF project.
+        The local directory in which cache files should be stored. If this
+        option is ``None`` (the default), then no cache directory is used.  If
+        a `cache_path` option is provided, it must be a path-like reference to
+        a local directory in which data is to be cached. The actual directory
+        used in this case is ``cache_path / 'osf'``.
+
+        The `cache_path` option is additionally related to the
+        `local_cache_dir` option, inherited from the ``CloudPath` type. When
+        the `local_cache_dir` option is provided and is not ``Ellipsis``, the
+        `cache_path` option is ignored and the `local_cache_dir` is used as the
+        cache directory. When `local_cache_dir` is not provided or is
+        ``Ellipsis``, then ``Path(cache_path) / 'osf'`` is used as the local
+        cache directory.
+
+        If the `client` option is not ``None`` or if the provided path-like
+        `obj` already has a client, then both the `cache_path` and
+        `local_cache_dir` options are ignored.
     file_cache_mode : cloudpathlib.enums.FileCacheMode, optional
         How often to clear the file cache; see [cloudpathlib's caching
         docs](https://cloudpathlib.drivendata.org/stable/caching/) for more
@@ -185,6 +210,10 @@ def osfpath(obj, *args,
         The number of items to include in a single page when paging directory
         contents from the OSF server. The default is 100. This option is
         ignored if the ``client`` option is not ``None``.
+    local_cache_dir : path-like or None or Ellipsis, optional
+        The local directory in which to store cache data for the given cloud
+        path. See the `cache_path` option for more information on how this
+        option is interpreted.
     """
     if isinstance(obj, OSFPath):
         # We may want to grab some options out of the argument in this case.
@@ -195,14 +224,8 @@ def osfpath(obj, *args,
         obj = pathstr(obj)
         if scheme_sep not in obj:
             obj = 'osf://' + obj
-    # If the cache_path is Ellipsis and there's no client provided, then we
-    # want to use pimm's default cache path
-    if local_cache_dir is None:
-        if client is None:
-            if cache_path is Ellipsis:
-                cache_path = None #TODO
-            if cache_path is not None:
-                local_cache_dir = Path(cache_path).expanduser() / 'osf'
+    # Interpret the local_cache_dir:
+    local_cache_dir = _interp_cache(local_cache_dir, cache_path, 'osf')
     # At this point we can go ahead and create the initial path.
     path = OSFPath(obj,
                    client=client,
@@ -297,7 +320,7 @@ def s3path(obj, *args, **kwargs):
     # Extract a few options.
     client = kwargs.pop('client', None)
     cache_path = kwargs.pop('cache_path', None)
-    lcd = kwargs.get('local_cache_dir', None)
+    lcd = kwargs.get('local_cache_dir', Ellipsis)
     # Do some initial configuration.
     if isinstance(obj, S3Path):
         # We may want to grab some options out of the argument in this case.
@@ -309,12 +332,9 @@ def s3path(obj, *args, **kwargs):
         if scheme_sep not in obj:
             obj = 's3://' + obj
     if client is None:
-        # If the cache_path is Ellipsis and there's no client provided, then we
-        # want to use pimm's default cache path.
-        if cache_path is Ellipsis and client is None:
-            cache_path = None #TODO
-        if cache_path is not None and 'local_cache_dir' not in kwargs:
-            kwargs['local_cache_dir'] = Path(cache_path).expanduser() / "s3"
+        # Interpret the local cache dir:
+        lcd = _interp_cache(lcd, cache_path, 's3')
+        kwargs['local_cache_dir'] = lcd
         # At this point we can go ahead and create the client object.
         client = S3Client(**kwargs)
     path = S3Path(obj, client=client)
@@ -407,7 +427,7 @@ def gspath(obj, *args, **kwargs):
     # Extract a few options.
     client = kwargs.pop('client', None)
     cache_path = kwargs.pop('cache_path', None)
-    lcd = kwargs.get('local_cache_dir', None)
+    lcd = kwargs.get('local_cache_dir', Ellipsis)
     # Do some initial configuration.
     if isinstance(obj, GSPath):
         # We may want to grab some options out of the argument in this case.
@@ -420,12 +440,9 @@ def gspath(obj, *args, **kwargs):
             obj = 'gs://' + obj
     # At this point we can go ahead and create the client object.
     if client is None:
-        # If the cache_path is Ellipsis and there's no client provided, then we
-        # want to use pimm's default cache path.
-        if cache_path is Ellipsis and client is None:
-            cache_path = None #TODO
-        if cache_path is not None and 'local_cache_dir' not in kwargs:
-            kwargs['local_cache_dir'] = Path(cache_path).expanduser() / "gs"
+        # Interpret the local cache dir:
+        lcd = _interp_cache(lcd, cache_path, 'gs')
+        kwargs['local_cache_dir'] = lcd
         client = GSClient(**kwargs)
     path = GSPath(obj, client=client)
     # If there were additional arguments, append them to the path now.
@@ -518,7 +535,7 @@ def azpath(obj, *args, **kwargs):
     # Extract a few options.
     client = kwargs.pop('client', None)
     cache_path = kwargs.pop('cache_path', None)
-    lcd = kwargs.get('local_cache_dir', None)
+    lcd = kwargs.get('local_cache_dir', Ellipsis)
     # Do some initial configuration.
     if isinstance(obj, AzureBlobPath):
         # We may want to grab some options out of the argument in this case.
@@ -530,12 +547,9 @@ def azpath(obj, *args, **kwargs):
         if scheme_sep not in obj:
             obj = 'az://' + obj
     if client is None:
-        # If the cache_path is Ellipsis and there's no client provided, then we
-        # want to use pimm's default cache path.
-        if cache_path is Ellipsis and client is None:
-            cache_path = None #TODO
-        if cache_path is not None and 'local_cache_dir' not in kwargs:
-            kwargs['local_cache_dir'] = Path(cache_path).expanduser() / "az"
+        # Interpret the local cache dir:
+        lcd = _interp_cache(lcd, cache_path, 'az')
+        kwargs['local_cache_dir'] = lcd
         # At this point we can go ahead and create the client object.
         client = AzureBlobClient(**kwargs)
     path = AzureBlobPath(obj, client=client)

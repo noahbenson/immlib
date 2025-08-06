@@ -74,7 +74,8 @@ def _docwrap_helper(f, fnname, indent=None, proc=Ellipsis):
         if len(v) == 0: continue
         for ln in v.split('\n'):
             # Skip lines that start with whitespace.
-            if ln[0].strip() == '': continue
+            if len(ln) == 0 or ln[0].strip() == '':
+                continue
             pname = ln.split(':')[0].strip()
             proc.keep_params(k, pname)
     return ff
