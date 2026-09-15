@@ -615,9 +615,47 @@ class Quantity(pint.Quantity):
         if self._units is None:
             return str(self._magnitude)
         return super().__str__()
+    def __repr__(self):
+        # Pint's own __repr__ unconditionally quotes the units part of the
+        # repr (`f"...'{self._units}'..."`), which, when self._units is
+        # None, renders it as the *string* "'None'"--indistinguishable at
+        # a glance from a real unit literally named "None". Swap in the
+        # bare (unquoted) None literal instead, without otherwise
+        # touching Pint's own (version-dependent) magnitude-formatting
+        # rules: fall back to Pint's raw repr unchanged if its format
+        # ever stops matching the trailing "'None')>" this expects.
+        body = super().__repr__()
+        if self._units is None and body.endswith("'None')>"):
+            return body[:-len("'None')>")] + 'None)>'
+        return body
+    # Pint's own format mini-language recognizes a handful of extra
+    # "format type" letters/modifiers, beyond Python's standard mini-
+    # language, that control how *units* are rendered ('Lx'/'L' for LaTeX,
+    # 'H' for HTML, 'P' for pretty, 'C' for compact, 'D' for the explicit
+    # default, plus the '~' short-unit modifier and the '#' compact-unit
+    # flag). None of these mean anything for a None-units quantity -- there
+    # are no units to render -- but Pint's own machinery still passes them
+    # in: notably, pint.util.PrettyIPython._repr_latex_ (inherited by
+    # Quantity, and invoked automatically by Jupyter/IPython whenever a
+    # quantity is displayed) always formats with spec 'L'. Passing 'L'
+    # straight through to a bare NumPy array or Python number raises
+    # TypeError ("unsupported format string"), since it isn't part of
+    # Python's own mini-language, so these flags must be stripped first.
+    # 'Lx' is listed before 'L' so it is removed as a whole rather than
+    # leaving a stray 'x' behind.
+    _PINT_FORMAT_FLAGS = ('Lx', 'L', 'H', 'P', 'C', 'D', '~', '#')
     def __format__(self, spec):
         if self._units is None:
-            return format(self._magnitude, spec)
+            mspec = spec
+            for flag in self._PINT_FORMAT_FLAGS:
+                mspec = mspec.replace(flag, '')
+            try:
+                return format(self._magnitude, mspec)
+            except (TypeError, ValueError):
+                # Fall back to a plain string if even the stripped spec
+                # doesn't apply to this magnitude (e.g. an exotic spec we
+                # didn't anticipate); this should be rare in practice.
+                return str(self._magnitude)
         return super().__format__(spec)
     def m_as(self, units):
         if units is None:
@@ -729,15 +767,48 @@ class Quantity(pint.Quantity):
         self_val = self._magnitude if self_none else self
         other_val = other._magnitude if other_none else other
         return op(self_val, other_val)
+    # Pint's own `__eq__`/`__ne__` contain a "compare to zero" shortcut
+    # (`eq(magnitude, 0, True)`, with the trailing `True` meaning "reduce
+    # the elementwise result to a single Python bool via `.all()`") that
+    # assumes any non-NumPy elementwise-comparison result can be so
+    # reduced. Pint's `is_duck_array_type` does not recognize a PyTorch
+    # tensor, so that reduction is skipped, and the un-reduced,
+    # multi-element boolean tensor is then used directly in a Python
+    # `and`--whose multi-element `Tensor.__bool__` raises "Boolean value
+    # of Tensor with more than one value is ambiguous". This happens
+    # regardless of whether either magnitude actually contains a zero, so
+    # comparing two ordinary, real-units, multi-element tensor-backed
+    # quantities via `==`/`!=` always crashes through Pint's own
+    # implementation. `compare()` (`<`/`<=`/`>`/`>=`, below) has no such
+    # shortcut and is not affected. `_binop_tensor_bool` bypasses Pint's
+    # `__eq__`/`__ne__` entirely whenever either operand's magnitude is a
+    # tensor and both operands are quantities, mirroring the same-units/
+    # convertible-units logic Pint itself otherwise uses.
+    def _binop_tensor_bool(self, other, op):
+        if self._units == other._units:
+            return op(self._magnitude, other._magnitude)
+        if not alike_units(self._units, other._units):
+            raise pint.DimensionalityError(
+                self._units, other._units,
+                self.dimensionality, other.dimensionality)
+        return op(self._magnitude, other.to(self._units)._magnitude)
     def __eq__(self, other):
         if self._units is None or (
                 isinstance(other, pint.Quantity) and other._units is None):
             return self._binop_none_bool(other, operator.eq)
+        if isinstance(other, pint.Quantity) and (
+                torch.is_tensor(self._magnitude)
+                or torch.is_tensor(other._magnitude)):
+            return self._binop_tensor_bool(other, operator.eq)
         return super().__eq__(other)
     def __ne__(self, other):
         if self._units is None or (
                 isinstance(other, pint.Quantity) and other._units is None):
             return self._binop_none_bool(other, operator.ne)
+        if isinstance(other, pint.Quantity) and (
+                torch.is_tensor(self._magnitude)
+                or torch.is_tensor(other._magnitude)):
+            return self._binop_tensor_bool(other, operator.ne)
         return super().__ne__(other)
     def __hash__(self):
         return super().__hash__()

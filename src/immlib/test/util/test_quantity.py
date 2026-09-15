@@ -897,6 +897,18 @@ class TestUtilQuantity(TestCase):
     def test_quantity_dunders_and_inplace(self):
         from immlib import quant
         import numpy as np
+        # repr() of a None-units quantity must show the bare None literal
+        # for its units, not the string "'None'" -- Pint's own __repr__
+        # unconditionally quotes the units part, which, given a real
+        # Python None, renders indistinguishably from a unit literally
+        # named "None".
+        n0 = quant(np.array([2.718281828, 7.389056099, 20.08553692]))
+        r = repr(n0)
+        self.assertTrue(r.endswith('None)>'))
+        self.assertNotIn("'None'", r)
+        # A real-units quantity's repr is untouched.
+        real = quant(5.0, 'm')
+        self.assertIn("'meter'", repr(real))
         # __int__/__float__/__complex__ on a None-units quantity convert
         # the bare magnitude directly, bypassing pint's own conversion
         # (which requires the quantity to be dimensionless, not merely
@@ -1020,3 +1032,49 @@ class TestUtilQuantity(TestCase):
         none_q = quant(5.0)
         with self.assertRaises(pint.DimensionalityError):
             none_q + plain_q
+
+
+    def test_quantity_tensor_eq_ne(self):
+        from immlib import quant
+        import torch, pint
+        # Regression test: Pint's own __eq__/__ne__ contain a "compare to
+        # zero" shortcut that reduces an elementwise comparison to a
+        # single Python bool via `.all()`, assuming the result is a NumPy
+        # array (or another type Pint's `is_duck_array_type` recognizes).
+        # It does not recognize a PyTorch tensor, so the un-reduced,
+        # multi-element boolean tensor ends up in a plain Python `and`,
+        # whose multi-element `Tensor.__bool__` raises RuntimeError. This
+        # previously crashed for *any* comparison between two ordinary,
+        # real-units, multi-element tensor-backed quantities, regardless
+        # of whether either magnitude actually contained a zero.
+        qa = quant(torch.tensor([1.0, 2.0, 3.0]), 'm')
+        qb = quant(torch.tensor([1.0, 2.0, 3.0]), 'm')
+        r = qa == qb
+        self.assertTrue(torch.is_tensor(r))
+        self.assertTrue(bool(r.all()))
+        qc = quant(torch.tensor([1.0, 2.0, 30.0]), 'm')
+        r = qa == qc
+        self.assertTrue(torch.is_tensor(r))
+        self.assertTrue(torch.equal(r, torch.tensor([True, True, False])))
+        r = qa != qc
+        self.assertTrue(torch.is_tensor(r))
+        self.assertTrue(torch.equal(r, torch.tensor([False, False, True])))
+        # Alike-but-different units convert before comparing, exactly as
+        # for the real-units arithmetic operators.
+        qcm = quant(torch.tensor([100.0, 200.0, 300.0]), 'cm')
+        r = qa == qcm
+        self.assertTrue(torch.is_tensor(r))
+        self.assertTrue(bool(r.all()))
+        # Dimensionally incompatible real units raise, rather than
+        # silently returning an elementwise False -- consistent with how
+        # immlib.math's own comparison helpers treat incompatible units
+        # (see _align_units in immlib/math/_core.py).
+        qs = quant(torch.tensor([1.0, 2.0, 3.0]), 's')
+        with self.assertRaises(pint.DimensionalityError):
+            qa == qs
+        # A tensor magnitude mixed with a NumPy-magnitude quantity of the
+        # same real units also works (no promotion crash).
+        import numpy as np
+        qnp = quant(np.array([1.0, 2.0, 3.0]), 'm')
+        r = qa == qnp
+        self.assertTrue(bool(torch.all(torch.as_tensor(r))))

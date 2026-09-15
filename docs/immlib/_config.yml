@@ -15,6 +15,15 @@ logo      : logo.svg
 # See https://jupyterbook.org/content/execute.html
 execute:
   execute_notebooks: force
+  # A handful of pages trigger a stderr FutureWarning on `import immlib`
+  # (from a google-api-core dependency pulled in by the optional Google
+  # Cloud Storage support in immlib.iolib, unrelated to anything the
+  # docs page itself is demonstrating). 'remove-warn' drops that stderr
+  # text from the rendered page while still emitting a Sphinx build-time
+  # warning, so a *genuine* problem surfacing on stderr in the future is
+  # still noticed by whoever runs the build, rather than being silently
+  # swallowed.
+  stderr_output: remove-warn
 
 latex:
   latex_documents:

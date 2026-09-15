@@ -289,12 +289,19 @@ class TestMath(TestCase):
             il.quant(np.array([1.0, 2.0]), 'm'),
             il.quant(torch.tensor([100.0, 200.0]), 'cm')])
         self.assertTrue(torch.is_tensor(r.m))
-        self.assertTrue(torch.allclose(r.m, torch.tensor([[1.0, 2.0], [1.0, 2.0]])))
+        # The NumPy array (float64) and the tensor (float32) legitimately
+        # promote to float64 (PyTorch's own type-promotion rule for
+        # stack/cat, per the "PyTorch controls dtype promotion" design
+        # invariant), so the expected tensor must match r.m's dtype rather
+        # than assume either input's original dtype.
+        self.assertTrue(torch.allclose(
+            r.m, torch.tensor([[1.0, 2.0], [1.0, 2.0]], dtype=r.m.dtype)))
         r = im.concatenate([
             il.quant(np.array([1.0, 2.0]), 'm'),
             il.quant(torch.tensor([100.0, 200.0]), 'cm')])
         self.assertTrue(torch.is_tensor(r.m))
-        self.assertTrue(torch.allclose(r.m, torch.tensor([1.0, 2.0, 1.0, 2.0])))
+        self.assertTrue(torch.allclose(
+            r.m, torch.tensor([1.0, 2.0, 1.0, 2.0], dtype=r.m.dtype)))
 
     # Linear algebra #############################################################
     def test_matmul(self):
