@@ -14,3 +14,4 @@ from .types    import *
 from .pathlib  import *
 from .iolib    import *
 from .workflow import *
+from .math     import *

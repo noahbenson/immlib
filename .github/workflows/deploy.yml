@@ -31,17 +31,17 @@ jobs:
     steps:
       # Check out the repository (goes to $GITHUB_WORKSPACE)
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: '2'
       # Setup the Python Environment.
       - name: Setup Python Environment
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.version }}
           architecture: ${{ matrix.arch }}
       - name: Setip Miniconda
-        uses: conda-incubator/setup-miniconda@v3
+        uses: conda-incubator/setup-miniconda@v4
         with:
           python-version: ${{ matrix.version }}
       - name: Install Numpy, Scipy, and PyTorch

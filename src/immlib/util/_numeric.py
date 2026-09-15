@@ -149,7 +149,7 @@ def _is_numtype(obj, numtype, dtypes):
     elif isinstance(obj, ndarray):
         return any(map(partial(np.issubdtype, obj.dtype), dtypes))
     elif torch.is_tensor(obj):
-        return any(map(partial(np.issubdtype, obj.numpy().dtype), dtypes))
+        return any(map(partial(np.issubdtype, to_numpydtype(obj.dtype)), dtypes))
     else:
         return False
 from numbers import Number
@@ -1378,21 +1378,39 @@ def to_array(obj, /, dtype=None, *,
     if quant is None:
         quant = (q if unit is Ellipsis else unit) is not None
     if quant is True:
-        if unit is None:
-            raise ValueError(
-                "to_array: cannot make a quantity (quant=True) without a unit"
-                " (unit=None)")
+        from ._quantity import unitregistry, Quantity
+        qcls = ureg.Quantity
         if q is None:
             if unit is Ellipsis:
                 raise ValueError(
                     "to_array(x): cannot make a quantity (quant=True) with the"
                     " same unit as x (unit=...) when the x is not a quantity")
-            return ureg.Quantity(arr, unit)
+            if unit is None and not issubclass(qcls, Quantity):
+                raise ValueError(
+                    "to_array(x, quant=True, unit=None): unit=None requires"
+                    " an immlib.UnitRegistry; the given unit registry is a"
+                    " plain pint.UnitRegistry, which cannot represent a"
+                    " unit-less quantity")
+            # unit may be None here, in which case this makes a quantity
+            # with no units at all (see immlib.Quantity).
+            return qcls(arr, unit)
         else:
-            from ._quantity import unitregistry
             if ureg is not unitregistry(q) or obj is not arr:
-                q = ureg.Quantity(arr, q.u)
-            if unit is not Ellipsis and ureg.Unit(unit) != q.u:
+                q = qcls(arr, q.u)
+            elif not isinstance(q, qcls):
+                q = qcls(q._magnitude, q._units)
+            if unit is None:
+                if not issubclass(qcls, Quantity):
+                    raise ValueError(
+                        "to_array(x, quant=True, unit=None): unit=None"
+                        " requires an immlib.UnitRegistry; the given unit"
+                        " registry is a plain pint.UnitRegistry, which"
+                        " cannot represent a unit-less quantity")
+                # Strip q's units, whatever they are; see immlib.Quantity.
+                return q.to(None)
+            elif unit is Ellipsis:
+                return q
+            elif ureg.Unit(unit) != q.u:
                 return q.to(unit)
             else:
                 return q
@@ -1406,11 +1424,11 @@ def to_array(obj, /, dtype=None, *,
             # unit).
             return arr
         elif unit is None:
-            raise ValueError(
-                "to_tensor: cannot extract unit None from quantity; to get the"
-                " native unit, use unit=Ellipsis")
+            # Strip q's units, whatever they are, and return the bare array.
+            return arr
         else:
             if obj is not arr:
+                from ._quantity import unitregistry
                 q = ureg.Quantity(arr, q.u)
             # We convert to the given unit and return that.
             return q.m_as(unit)
@@ -1872,22 +1890,40 @@ def to_tensor(obj, /, dtype=None, *,
     if quant is None:
         quant = (q if unit is Ellipsis else unit) is not None
     if quant is True:
-        if unit is None:
-            raise ValueError(
-                "to_tensor: cannot make a quantity (quant=True) without a unit"
-                " (unit=None)")
+        from ._quantity import unitregistry, Quantity
+        qcls = ureg.Quantity
         if q is None:
             if unit is Ellipsis:
                 raise ValueError(
                     "to_tensor(x): cannot make a quantity (quant=True) with"
                     " the same unit as x (unit=Ellipsis) when x is not a"
                     " quantity")
-            return ureg.Quantity(arr, unit)
+            if unit is None and not issubclass(qcls, Quantity):
+                raise ValueError(
+                    "to_tensor(x, quant=True, unit=None): unit=None requires"
+                    " an immlib.UnitRegistry; the given unit registry is a"
+                    " plain pint.UnitRegistry, which cannot represent a"
+                    " unit-less quantity")
+            # unit may be None here, in which case this makes a quantity
+            # with no units at all (see immlib.Quantity).
+            return qcls(arr, unit)
         else:
-            from ._quantity import unitregistry
             if ureg is not unitregistry(q) or obj is not arr:
-                q = ureg.Quantity(arr, q.u)
-            if unit is not Ellipsis and ureg.Unit(unit) != q.u:
+                q = qcls(arr, q.u)
+            elif not isinstance(q, qcls):
+                q = qcls(q._magnitude, q._units)
+            if unit is None:
+                if not issubclass(qcls, Quantity):
+                    raise ValueError(
+                        "to_tensor(x, quant=True, unit=None): unit=None"
+                        " requires an immlib.UnitRegistry; the given unit"
+                        " registry is a plain pint.UnitRegistry, which"
+                        " cannot represent a unit-less quantity")
+                # Strip q's units, whatever they are; see immlib.Quantity.
+                return q.to(None)
+            elif unit is Ellipsis:
+                return q
+            elif ureg.Unit(unit) != q.u:
                 return q.to(unit)
             else:
                 return q
@@ -1901,11 +1937,11 @@ def to_tensor(obj, /, dtype=None, *,
             # unit).
             return arr
         elif unit is None:
-            raise ValueError(
-                "to_tensor: cannot extract unit None from quantity; to get the"
-                " native unit, use unit=Ellipsis")
+            # Strip q's units, whatever they are, and return the bare tensor.
+            return arr
         else:
             if obj is not arr:
+                from ._quantity import unitregistry
                 q = ureg.Quantity(arr, q.u)
             # We convert to the given unit and return that.
             return q.m_as(unit)
@@ -2093,7 +2129,11 @@ def to_numeric(obj, /, dtype=None, *,
     --------
     to_array, to_tensor
     """
-    if torch.is_tensor(obj):
+    if isinstance(obj, pint.Quantity):
+        istns = torch.is_tensor(obj.m)
+    else:
+        istns = torch.is_tensor(obj)
+    if istns:
         return to_tensor(obj,
                          dtype=dtype, sparse=sparse,
                          quant=quant, unit=unit, ureg=ureg)

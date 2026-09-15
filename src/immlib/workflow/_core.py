@@ -985,10 +985,17 @@ class plan(pdict):
             res[u].add(v)
         return res
     # Construction ------------------------------------------------------------
+    # __dict__ is included here (in addition to the named slots below) only
+    # because __init__ needs to set a per-instance __doc__: __doc__ can't
+    # itself be listed in __slots__ without conflicting with plan's own
+    # class-level docstring (assigning `self.__doc__` on a fully slotted
+    # class raises "attribute '__doc__' is read-only" otherwise), so this
+    # grants each plan instance a (lazily-allocated) dict used for nothing
+    # but that one attribute; everything else here stays in a real slot.
     __slots__ = (
         'inputs', 'outputs', 'defaults', 'requirements',
         'input_docs', 'output_docs', 'docstr',
-        'calcdata', 'valsources', 'dependants')
+        'calcdata', 'valsources', 'dependants', '__dict__')
     def __new__(cls, *args, **kwargs):
         # We overload new just to parse the input arguments and convert any
         # values into calc objects. We then pass these down to pdict.

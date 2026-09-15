@@ -139,6 +139,8 @@ from ._numeric import (
     numeric_args)
 
 from ._quantity import (
+    Quantity,
+    UnitRegistry,
     is_ureg,
     is_unit,
     like_unit,
@@ -249,6 +251,8 @@ __all__ = (
     "tensor_args",
     "array_args",
     "numeric_args",
+    "Quantity",
+    "UnitRegistry",
     "default_ureg",
     "like_unit",
     "alike_units",

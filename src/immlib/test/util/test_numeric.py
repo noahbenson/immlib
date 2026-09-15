@@ -38,6 +38,12 @@ class TestUtilNumeric(TestCase):
         self.assertTrue(is_numberdata(torch.tensor([1,2,3])))
         self.assertTrue(is_numberdata(np.array([[-12.0]])))
         self.assertFalse(is_numberdata(np.array(['abc'])))
+        # A tensor's dtype must be inspectable without converting its actual
+        # data to a NumPy array (that conversion fails outright for tensors
+        # that require grad, and would force a device transfer for GPU
+        # tensors); see _is_numtype.
+        self.assertTrue(
+            is_numberdata(torch.tensor([1.0, 2.0], requires_grad=True)))
     def test_is_booldata(self):
         from immlib import is_booldata
         import torch, numpy as np
@@ -58,6 +64,10 @@ class TestUtilNumeric(TestCase):
         self.assertFalse(is_booldata(torch.tensor(10.0 + 2.0j)))
         self.assertTrue(is_booldata(torch.tensor([True,False,False])))
         self.assertFalse(is_booldata(np.array([[12.0]])))
+        # See the note in test_is_numberdata: dtype inspection must not
+        # require converting a grad-tracking tensor's data to NumPy.
+        self.assertFalse(
+            is_booldata(torch.tensor([1.0, 2.0], requires_grad=True)))
     def test_is_intdata(self):
         from immlib import is_intdata
         import torch, numpy as np
@@ -78,6 +88,10 @@ class TestUtilNumeric(TestCase):
         self.assertFalse(is_intdata(torch.tensor(10.0 + 2.0j)))
         self.assertTrue(is_intdata(torch.tensor([1,2,3])))
         self.assertFalse(is_intdata(np.array([[12.0]])))
+        # See the note in test_is_numberdata: dtype inspection must not
+        # require converting a grad-tracking tensor's data to NumPy.
+        self.assertFalse(
+            is_intdata(torch.tensor([1.0, 2.0], requires_grad=True)))
     def test_is_realdata(self):
         from immlib import is_realdata
         import torch, numpy as np
@@ -98,6 +112,10 @@ class TestUtilNumeric(TestCase):
         self.assertFalse(is_realdata(torch.tensor(10.0 + 2.0j)))
         self.assertTrue(is_realdata(torch.tensor([1,2,3])))
         self.assertTrue(is_realdata(np.array([[12.0]])))
+        # See the note in test_is_numberdata: dtype inspection must not
+        # require converting a grad-tracking tensor's data to NumPy.
+        self.assertTrue(
+            is_realdata(torch.tensor([1.0, 2.0], requires_grad=True)))
     def test_is_complexdata(self):
         from immlib import is_complexdata
         import torch, numpy as np
@@ -118,6 +136,11 @@ class TestUtilNumeric(TestCase):
         self.assertTrue(is_complexdata(torch.tensor(10.0 + 2.0j)))
         self.assertTrue(is_complexdata(torch.tensor([1,2,3])))
         self.assertTrue(is_complexdata(np.array([[12.0]])))
+        # See the note in test_is_numberdata: dtype inspection must not
+        # require converting a grad-tracking tensor's data to NumPy.
+        self.assertTrue(
+            is_complexdata(
+                torch.tensor([1.0+2.0j, 3.0+4.0j], requires_grad=True)))
     def test_is_number(self):
         from immlib import is_number
         import torch, numpy as np
@@ -717,10 +740,22 @@ class TestUtilNumeric(TestCase):
             np.array_equal(q_arr.m, to_array(arr, quant=True, unit='mm').m))
         with self.assertRaises(ValueError):
             to_array(arr, quant=True, unit=Ellipsis)
+        # unit=None succeeds against the default (immlib-aware) registry,
+        # producing a unit-less immlib.Quantity, whether or not the input
+        # was already a quantity.
+        none_q = to_array(arr, quant=True, unit=None)
+        self.assertTrue(is_quant(none_q))
+        self.assertIsNone(none_q.units)
+        self.assertTrue(np.array_equal(none_q.m, arr))
+        none_q2 = to_array(q_arr, quant=True, unit=None)
+        self.assertTrue(is_quant(none_q2))
+        self.assertIsNone(none_q2.units)
+        self.assertTrue(np.array_equal(none_q2.m, q_arr.m))
+        # unit=None still raises when the given unit registry isn't
+        # immlib-aware (a plain pint.UnitRegistry cannot represent a
+        # unit-less quantity).
         with self.assertRaises(ValueError):
-            to_array(arr, quant=True, unit=None)
-        with self.assertRaises(ValueError):
-            to_array(q_arr, quant=True, unit=None)
+            to_array(arr, quant=True, unit=None, ureg=pint.UnitRegistry())
         with self.assertRaises(ValueError):
             to_array(arr, quant=object())
         # We can also specify the units registry (Ellipsis means immlib.units).
@@ -738,9 +773,6 @@ class TestUtilNumeric(TestCase):
         # If we simply request an array with a unit, without specifying that it
         # not be a quantity, we get a quantity back.
         self.assertIsInstance(to_array(arr, unit='mm'), pint.Quantity)
-        # An error is raised if you try to request no units for a quantity.
-        with self.assertRaises(ValueError):
-            to_array(arr, quant=True, unit=None)
 
     # PyTorch Utilities ########################################################
     def test_is_torchdtype(self):
@@ -1013,8 +1045,19 @@ class TestUtilNumeric(TestCase):
             torch.equal(to_tensor(tns, sparse=True).to_dense(), tns))
         # The quant argument can be used to enforce the return of quantities or
         # non-quantities, but you can't force a quantity without a unit:
+        # unit=None succeeds against the default (immlib-aware) registry,
+        # producing a unit-less immlib.Quantity (arr itself is left
+        # untouched here, since later assertions in this test still expect
+        # it to be the plain, original tensor).
+        none_q = to_tensor(arr, quant=True, unit=None)
+        self.assertTrue(is_quant(none_q))
+        self.assertIsNone(none_q.units)
+        self.assertTrue(torch.equal(none_q.m, torch.as_tensor(arr)))
+        # unit=None still raises when the given unit registry isn't
+        # immlib-aware (a plain pint.UnitRegistry cannot represent a
+        # unit-less quantity).
         with self.assertRaises(ValueError):
-            arr = to_tensor(arr, quant=True, unit=None)
+            to_tensor(arr, quant=True, unit=None, ureg=pint.UnitRegistry())
         # The unit parameter can be used to specify what unit to use.
         self.assertTrue(
             torch.equal(q_tns.m, to_tensor(tns, quant=True, unit='mm').m))
@@ -1046,10 +1089,6 @@ class TestUtilNumeric(TestCase):
         with self.assertRaises(ValueError):
             to_tensor(tns, quant=True, unit=Ellipsis)
         with self.assertRaises(ValueError):
-            to_tensor(tns, quant=True, unit=None)
-        with self.assertRaises(ValueError):
-            to_tensor(q_tns, quant=True, unit=None)
-        with self.assertRaises(ValueError):
             to_tensor(tns, quant=object())
         # We can also specify the units registry (Ellipsis means immlib.units).
         self.assertTrue(
@@ -1066,9 +1105,6 @@ class TestUtilNumeric(TestCase):
         # If we simply request an tensor with a unit, without specifying that it
         # not be a quantity, we get a quantity back.
         self.assertIsInstance(to_tensor(tns, unit='mm'), pint.Quantity)
-        # An error is raised if you try to request no units for a quantity.
-        with self.assertRaises(ValueError):
-            to_tensor(tns, quant=True, unit=None)
         # If we change the parameters of the returned array, we will get
         # different (but typically equal) objects back.
         self.assertTrue(torch.equal(tns, to_tensor(tns, requires_grad=True)))
@@ -1113,6 +1149,15 @@ class TestUtilNumeric(TestCase):
         self.assertIs(sp_a, to_numeric(sp_a))
         self.assertIs(sp_t, to_numeric(sp_t))
         self.assertIsInstance(to_numeric([1,2,3]), np.ndarray)
+        # A quantity whose magnitude is a tensor must remain tensor-backed;
+        # to_numeric must not silently route it through to_array just
+        # because a bare pint.Quantity isn't itself a torch.Tensor instance.
+        from immlib import quant, is_quant, units
+        qt = quant(t, 'mm')
+        r = to_numeric(qt)
+        self.assertTrue(is_quant(r))
+        self.assertTrue(torch.is_tensor(r.m))
+        self.assertTrue(torch.equal(r.m, t))
     def test_is_sparse(self):
         from immlib import is_sparse
         import torch, numpy as np

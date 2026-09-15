@@ -56,6 +56,7 @@ from .pathlib  import *
 from .iolib    import *
 from .workflow import *
 from .types    import *
+from . import  math
 # Import the Global UnitRegistry object to the global immlib scope. This is the
 # value that gets updated when one runs `immlib.default_ureg()`, and this is
 # the UnitRegistry that is used as the default registry for all ``immlib``

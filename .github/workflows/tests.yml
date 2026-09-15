@@ -47,24 +47,30 @@ jobs:
           - '3.11'
           - '3.12'
           - '3.13'
+          - '3.14'
         os:
           - ubuntu-latest
         arch:
           - 'x64'
         include:
-          - {"os": "windows-latest", "arch": "x86", "version": "3.8"}
-          - {"os": "windows-latest", "arch": "x86", "version": "3.9"}
-          - {"os": "windows-latest", "arch": "x86", "version": "3.10"}
-          - {"os": "windows-latest", "arch": "x86", "version": "3.11"}
-          - {"os": "windows-latest", "arch": "x86", "version": "3.12"}
-          # The windows python-3.13 VM can't install pytorch currently.
-          #- {"os": "windows-latest", "arch": "x86", "version": "3.13"}
+          # Note: these are run as x64, not x86 (32-bit): PyTorch does not
+          # publish 32-bit/win32 wheels, so the x86 label used here
+          # previously was misleading (the actual install below happens in
+          # the 64-bit conda environment set up by Setup Miniconda anyway).
+          - {"os": "windows-latest", "arch": "x64", "version": "3.8"}
+          - {"os": "windows-latest", "arch": "x64", "version": "3.9"}
+          - {"os": "windows-latest", "arch": "x64", "version": "3.10"}
+          - {"os": "windows-latest", "arch": "x64", "version": "3.11"}
+          - {"os": "windows-latest", "arch": "x64", "version": "3.12"}
+          - {"os": "windows-latest", "arch": "x64", "version": "3.13"}
+          - {"os": "windows-latest", "arch": "x64", "version": "3.14"}
           - {"os": "macos-latest", "arch": "arm64", "version": "3.8"}
           - {"os": "macos-latest", "arch": "arm64", "version": "3.9"}
           - {"os": "macos-latest", "arch": "arm64", "version": "3.10"}
           - {"os": "macos-latest", "arch": "arm64", "version": "3.11"}
           - {"os": "macos-latest", "arch": "arm64", "version": "3.12"}
           - {"os": "macos-latest", "arch": "arm64", "version": "3.13"}
+          - {"os": "macos-latest", "arch": "arm64", "version": "3.14"}
     # The job environment.
     env:
       OS: ${{ matrix.os }}
@@ -74,17 +80,17 @@ jobs:
     steps:
       # Check out the repository (goes to $GITHUB_WORKSPACE)
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: '2'
       # Setup the Python Environment.
       - name: Setup Python Environment
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.version }}
           architecture: ${{ matrix.arch }}
       - name: Setup Miniconda
-        uses: conda-incubator/setup-miniconda@v3
+        uses: conda-incubator/setup-miniconda@v4
         with:
           python-version: ${{ matrix.version }}
       - name: Install Numpy, Scipy, and PyTorch

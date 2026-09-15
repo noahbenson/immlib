@@ -31,7 +31,10 @@ The utilities provided by `immlib` fall into several categories:
    the `pint` library to represent physical units. Quantities with units are
    generally handled seamlessly my `immlib`'s functions, including the
    numerical utilities, but the library provides various helper functions as
-   well.
+   well. This includes support for quantities that have no units at all (as
+   opposed to `pint`'s own `dimensionless`), and broadened support for
+   calling a curated subset of NumPy and PyTorch functions directly on a
+   quantity.
  * [Functional Programming Utilities](/user-guide/utils/functional.md).
    Although `immlib` generally uses a functional and immutable style, there are
    a number of helper functions included that make certain functional
