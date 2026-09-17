@@ -29,7 +29,7 @@ Examples
 >>> im.sum(q)
 <Quantity(6.0, 'meter')>
 >>> im.exp(il.quant([1.0, 2.0, 3.0]))
-<Quantity([ 2.71828183  7.3890561  20.08553692], 'None')>
+<Quantity([ 2.71828183  7.3890561  20.08553692], None)>
 """
 
 from ._core import (

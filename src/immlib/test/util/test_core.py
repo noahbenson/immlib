@@ -630,6 +630,13 @@ class TestUtilCore(TestCase):
         self.assertEqual(d['c'], 3)
         self.assertTrue(d.is_ready('c'))
         self.assertEqual(d, dict(a=1, b=2, c=3))
+        # A lazy dict argument keeps its lazy values uncomputed.
+        d0 = lambdadict(a=1, b=lambda a: a + 1)
+        d = lambdadict(d0, c=lambda b: b * 10)
+        self.assertIsInstance(d, ldict)
+        self.assertFalse(d0.is_ready('b'))
+        self.assertEqual(d['c'], 20)
+        self.assertEqual(d, dict(a=1, b=2, c=20))
     def test_args(self):
         from immlib.util import args, argfilter
         # First test the args type:

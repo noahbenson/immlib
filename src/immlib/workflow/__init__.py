@@ -16,6 +16,8 @@ from ._core import (
     is_plan,
     plandict,
     is_plandict,
+    PlanError,
+    save_ready,
     is_tplandict)
 
 from ._plantype import (
@@ -36,6 +38,8 @@ __all__ = (
     "is_plan",
     "plandict",
     "is_plandict",
+    "PlanError",
+    "save_ready",
     "is_tplandict",
     "plantype",
     "planobject",

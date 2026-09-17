@@ -164,6 +164,18 @@ unit-less (`units=None`) quantity by default--*not* a `dimensionless` one.
 The same is true of `il.quant(obj, None)`, which strips whatever units `obj`
 previously had.
 
+`il.quant()` only accepts numerical values. NumPy arrays, PyTorch tensors, and
+SciPy sparse arrays are used as the magnitude exactly as given (`il.quant()`
+never converts between NumPy and PyTorch or moves a tensor to another
+device), while Python numbers, NumPy scalars, and lists of numbers are
+converted into NumPy arrays--scalars become 0-dimensional arrays. Strings and
+other non-numerical values raise a `TypeError` (use
+`il.units.Quantity('5 mm')` to parse a quantity from a string).
+
+```{code-cell}
+(type(il.quant(5).m), il.quant(5).m.ndim)
+```
+
 ```{code-cell}
 none_q
 ```
@@ -185,10 +197,13 @@ none_q + il.quant([1.0, 1.0, 1.0])
 ```
 
 Combining a unit-less quantity with a quantity that *does* have real units
-defers entirely to the real-unit quantity's own rules. This means addition
-and subtraction, which require compatible units, raise an error, while
-multiplication and division, which do not, succeed by treating the
-unit-less side as a plain scalar or array:
+works exactly as if the unit-less quantity were replaced by its bare
+magnitude: for any supported operator `op`, `op(il.quant(x), il.quant(y,
+u))` is equivalent to `(x, y) = il.promote(x, y); op(x, il.quant(y, u))`.
+`pint` treats a bare value as dimensionless, so addition and subtraction
+with a quantity whose units have dimensions raise an error, while
+multiplication and division succeed by treating the unit-less side as a
+plain scalar or array:
 
 ```{code-cell}
 real_q = il.quant([1.0, 2.0, 3.0], 'mm')
@@ -204,7 +219,13 @@ none_q * real_q
 
 Comparisons follow the same rule: a unit-less quantity compares equal to
 another unit-less quantity based on their bare magnitudes, and compares
-*unequal* (rather than raising) to a quantity with real units:
+*unequal* (an all-false result, rather than an error) to a quantity with
+real dimensions--just as a quantity with real units compares unequal to one
+with incompatible units. (As in `pint`, a bare value that is entirely zero
+or NaN is the one exception: it is compared by magnitude alone.) Ordering
+comparisons (`<`, `>=`, etc.) between a unit-less quantity and a quantity
+with real dimensions raise an error. These rules are the same for NumPy
+and PyTorch magnitudes.
 
 ```{code-cell}
 (il.quant(5.0) == il.quant(5.0), il.quant(5.0) == il.quant(5.0, 'm'))
@@ -218,15 +239,16 @@ print(none_q)
 print(f'{il.quant(3.5)}')
 ```
 
+Unit-less quantities can be pickled (they are restored, like every
+`immlib.Quantity`, in the `immlib.units` registry, since unit registries
+themselves are not pickled), and a unit-less quantity with a 0-dimensional
+magnitude hashes like the number it contains.
+
 ```{note}
-Because an `immlib.UnitRegistry`'s `Quantity` type interprets `units=None` as
-"no units" rather than `pint`'s own `dimensionless`, a few of `pint`'s own
-internal code paths that construct a quantity without specifying any unit at
-all--such as parsing the literal string `"dimensionless"` or an empty unit
-expression--are affected by this too: on an `immlib.UnitRegistry`, such a
-quantity comes back with `units` of `None` rather than `pint`'s real
-`dimensionless` unit. This is scoped to `immlib.UnitRegistry`; a plain
-`pint.UnitRegistry` is entirely unaffected.
+Only an explicit `units=None` means "no units". Quantities that `pint` itself
+creates without being given units--for example, by parsing the string
+`"dimensionless"`--have `pint`'s real `dimensionless` unit, even in an
+`immlib.UnitRegistry`.
 ```
 
 
@@ -299,14 +321,26 @@ t2 = il.quant(torch.tensor([[1.0, 2.0], [3.0, 4.0]]), 'm')
 torch.var(t2, dim=0, correction=0)
 ```
 
-This support covers only a deliberately curated, tested subset of NumPy's
-and PyTorch's functions--the same set of operations `immlib.math` covers, plus
-the ordinary arithmetic/comparison operators. A function that falls outside
-this subset behaves exactly as it always has: it either falls back to
-`pint`'s own existing (real-units-only) handling, or, if `pint` doesn't
-implement it either, raises the same error it would without any of this
-support (`immlib` never silently guesses at unit semantics for an
-unsupported function).
+For NumPy, every other function that `pint` supports also works with
+unit-less quantities: if all of a function's quantity arguments are
+unit-less, `pint` computes the result as though they were dimensionless and
+the result is returned without units (`pint` still decides which results are
+quantities, so `np.argmax` returns a plain index); if some arguments have real
+units, the unit-less ones are treated as bare values. NumPy ufunc methods
+such as `np.add.reduce` and `np.multiply.outer`, and the `out=` argument, are
+supported when every quantity argument is unit-less (`pint` does not support
+them for quantities with real units).
+
+```{code-cell}
+(np.cumsum(il.quant([1.0, 2.0, 3.0])), np.add.reduce(il.quant([1.0, 2.0, 3.0])))
+```
+
+For PyTorch, support covers a deliberately curated, tested subset of
+functions--the same set of operations `immlib.math` covers, plus the ordinary
+arithmetic/comparison operators. A function that falls outside this subset,
+or outside what `pint` supports for NumPy, raises the same error it would
+without any of this support (`immlib` never silently guesses at unit
+semantics for an unsupported function).
 
 ```{code-cell}
 try:

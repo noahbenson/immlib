@@ -436,15 +436,22 @@ def save_text(stream, lines, append_nls=False):
         for ln in lines:
             stream.write(ln)
 @save.register('pickle', '.pickle', '.pkl', '.pcl', mode='b')
-def save_pickle(stream, obj, protocol=None, **kwargs):
+def save_pickle(stream, obj, protocol=None, save_ready=False, **kwargs):
     """Saves a pickled object to a destination path or stream.
 
-    All keyword options are forwarded to the `pickle.dump` function. The
-    `protocol` keyword option is provided as the `protocol` positional argument
-    to the `pickle.dump` function.
+    All keyword options other than `save_ready` are forwarded to the
+    `pickle.dump` function. The `protocol` keyword option is provided as the
+    `protocol` positional argument to the `pickle.dump` function.
+
+    If `save_ready` is ``True``, then any ``immlib.plandict`` objects being
+    pickled also include the results of the calculations that they have
+    already computed (see ``immlib.save_ready``); otherwise, only their plans
+    and inputs are saved.
     """
     import pickle
-    pickle.dump(obj, stream, protocol, **kwargs)
+    from ..workflow import save_ready as save_ready_ctx
+    with save_ready_ctx(save_ready):
+        pickle.dump(obj, stream, protocol, **kwargs)
 @save.register('numpy', '.npy', '.np', '.numpy', mode='b', gzip_suffix='.npz')
 def save_numpy(stream, obj, **kwargs):
     """Saves a numpy object to a destination path or stream.

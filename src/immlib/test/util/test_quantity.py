@@ -1065,16 +1065,301 @@ class TestUtilQuantity(TestCase):
         r = qa == qcm
         self.assertTrue(torch.is_tensor(r))
         self.assertTrue(bool(r.all()))
-        # Dimensionally incompatible real units raise, rather than
-        # silently returning an elementwise False -- consistent with how
-        # immlib.math's own comparison helpers treat incompatible units
-        # (see _align_units in immlib/math/_core.py).
+        # Dimensionally incompatible real units compare unequal elementwise,
+        # matching Pint's behavior for NumPy magnitudes.
         qs = quant(torch.tensor([1.0, 2.0, 3.0]), 's')
-        with self.assertRaises(pint.DimensionalityError):
-            qa == qs
+        r = qa == qs
+        self.assertTrue(torch.is_tensor(r))
+        self.assertTrue(torch.equal(r, torch.tensor([False, False, False])))
+        r = qa != qs
+        self.assertTrue(torch.equal(r, torch.tensor([True, True, True])))
         # A tensor magnitude mixed with a NumPy-magnitude quantity of the
         # same real units also works (no promotion crash).
         import numpy as np
         qnp = quant(np.array([1.0, 2.0, 3.0]), 'm')
         r = qa == qnp
         self.assertTrue(bool(torch.all(torch.as_tensor(r))))
+    def test_none_units_binop_rule(self):
+        """Tests that ``op(quant(x, None), quant(y, u))`` is equivalent to
+        ``(x, y) = promote(x, y); op(x, quant(y, u))``."""
+        from immlib import quant, promote
+        import numpy as np, torch, pint, operator
+        xs = [np.array([0.5, 2.0, 3.0]), torch.tensor([0.5, 2.0, 3.0])]
+        ys = [np.array([1.0, 2.0, 4.0]), torch.tensor([1.0, 2.0, 4.0])]
+        units = ['m', 'dimensionless', 'm/km']
+        ops = [operator.add, operator.sub, operator.mul, operator.truediv,
+               operator.eq, operator.ne, operator.lt, operator.le,
+               operator.gt, operator.ge]
+        def run(f):
+            try:
+                return ('ok', f())
+            except pint.DimensionalityError:
+                return ('dimerr', None)
+            except ValueError:
+                # Pint raises ValueError when ordering a bare value against
+                # a quantity with real dimensions.
+                return ('valerr', None)
+        def same(r1, r2):
+            self.assertEqual(r1[0], r2[0])
+            if r1[0] != 'ok':
+                return
+            (a, b) = (r1[1], r2[1])
+            self.assertEqual(isinstance(a, pint.Quantity),
+                             isinstance(b, pint.Quantity))
+            if isinstance(a, pint.Quantity):
+                self.assertEqual(a.units, b.units)
+                (a, b) = (a.m, b.m)
+            self.assertEqual(torch.is_tensor(a), torch.is_tensor(b))
+            a = np.asarray(a.detach().cpu() if torch.is_tensor(a) else a)
+            b = np.asarray(b.detach().cpu() if torch.is_tensor(b) else b)
+            self.assertTrue(np.allclose(a.astype(float), b.astype(float)))
+        for x in xs:
+            for y in ys:
+                for u in units:
+                    for op in ops:
+                        with self.subTest(x=type(x), y=type(y), u=u, op=op):
+                            (px, py) = promote(x, y)
+                            expected = run(lambda: op(px, quant(py, u)))
+                            got = run(lambda: op(quant(x), quant(y, u)))
+                            same(got, expected)
+                            # And the reflected order.
+                            expected = run(lambda: op(quant(py, u), px))
+                            got = run(lambda: op(quant(y, u), quant(x)))
+                            same(got, expected)
+        # Tensor results stay on the tensor side and are Quantities.
+        r = quant(np.array([1.0, 2.0])) * quant(torch.tensor([1.0, 2.0]), 'm')
+        self.assertTrue(torch.is_tensor(r.m))
+        self.assertEqual(str(r.units), 'meter')
+        # A unit-less value is unequal to a quantity with real dimensions.
+        r = quant(torch.tensor([1.0, 2.0])) == quant(torch.tensor([1.0, 2.0]), 'm')
+        self.assertTrue(torch.equal(r, torch.tensor([False, False])))
+        r = quant(np.array([1.0, 2.0])) == quant(np.array([1.0, 2.0]), 'm')
+        self.assertTrue(np.array_equal(r, [False, False]))
+        # Addition of a unit-less value and a dimensioned one is an error.
+        with self.assertRaises(pint.DimensionalityError):
+            quant(np.array([1.0])) + quant(np.array([1.0]), 'm')
+        # Both unit-less: the result is unit-less and tensor-backed if either
+        # operand is a tensor.
+        r = quant(np.array([1.0, 2.0])) + quant(torch.tensor([1.0, 2.0]))
+        self.assertIsNone(r.units)
+        self.assertTrue(torch.is_tensor(r.m))
+        r = 2.0 ** quant(torch.tensor([1.0, 2.0]))
+        self.assertIsNone(r.units)
+        self.assertTrue(torch.allclose(r.m, torch.tensor([2.0, 4.0])))
+    def test_quantity_pickle_hash(self):
+        import pickle
+        import immlib
+        from immlib import quant, Quantity
+        import numpy as np, torch
+        for q in [quant(np.array([1.0, 2.0])),
+                  quant(np.array([1.0, 2.0]), 'mm'),
+                  quant(torch.tensor([1.0, 2.0])),
+                  quant(torch.tensor([1.0, 2.0]), 'mm/s'),
+                  quant(5.0, 'm')]:
+            with self.subTest(q=q):
+                r = pickle.loads(pickle.dumps(q))
+                self.assertIsInstance(r, Quantity)
+                self.assertIs(r._REGISTRY, immlib.units)
+                self.assertEqual(r.units, q.units)
+                self.assertEqual(type(r.m), type(q.m))
+                if torch.is_tensor(q.m):
+                    self.assertTrue(torch.equal(r.m, q.m))
+                else:
+                    self.assertTrue(np.array_equal(r.m, q.m))
+        # Units of None hash like their magnitude.
+        self.assertEqual(hash(quant(5)), hash(5))
+        self.assertEqual(hash(quant(np.array(2.5))), hash(2.5))
+        self.assertEqual(hash(quant(1.0, 'dimensionless')), hash(1.0))
+        self.assertEqual(hash(quant(1.0, 'm')), hash(quant(100.0, 'cm')))
+        self.assertEqual(hash(quant(np.array(1.0), 'm')),
+                         hash(quant(1.0, 'm')))
+        with self.assertRaises(TypeError):
+            hash(quant(np.array([1.0, 2.0])))
+    def test_alike_units_none(self):
+        from immlib import quant, alike_units
+        self.assertFalse(alike_units(quant(1.0), quant(1.0, 'm')))
+        self.assertFalse(alike_units(quant(1.0, 'm'), quant(1.0)))
+        self.assertTrue(alike_units(quant(1.0), quant(1.0, 'dimensionless')))
+        self.assertTrue(alike_units(quant(1.0), quant(1.0)))
+        self.assertTrue(alike_units(quant(1.0), 5))
+        self.assertFalse(alike_units(quant(1.0), 'm'))
+    def test_real_units_bare_tensor(self):
+        """Tests arithmetic and comparisons between a quantity with real units
+        and a bare tensor or a quantity of the other backend."""
+        from immlib import quant
+        import numpy as np, torch, pint
+        t = torch.tensor([1.0, 2.0, 3.0])
+        q = quant(torch.tensor([1.0, 2.0, 3.0]), 'm')
+        # Adding zeros is allowed for any units (as in Pint).
+        r = q + torch.zeros(3)
+        self.assertEqual(str(r.units), 'meter')
+        self.assertTrue(torch.equal(r.m, q.m))
+        with self.assertRaises(pint.DimensionalityError):
+            q + t
+        with self.assertRaises(pint.DimensionalityError):
+            t - q
+        r = quant(t, 'dimensionless') + t
+        self.assertTrue(torch.equal(r.m, 2 * t))
+        r = quant(t, 'm/km') + t
+        self.assertEqual(r.units, quant(1, 'm/km').units)
+        self.assertTrue(torch.allclose(r.m, 1001 * t))
+        with self.assertRaises(ValueError):
+            q < t
+        self.assertTrue(bool((q > torch.zeros(3)).all()))
+        # NumPy and tensor magnitudes are promoted to tensors.
+        qn = quant(np.array([1.0, 2.0, 3.0]), 'm')
+        for r in (qn * t, t * qn, qn + q, q - qn, qn / q):
+            self.assertTrue(torch.is_tensor(r.m))
+        self.assertEqual(str((qn * q).units), 'meter ** 2')
+        self.assertTrue(bool((qn <= q).all()))
+        qi = quant(np.array([1.0, 2.0, 3.0]), 'm')
+        qi *= t
+        self.assertTrue(torch.is_tensor(qi.m))
+        self.assertTrue(torch.allclose(qi.m.double(), torch.tensor([1.0, 4.0, 9.0]).double()))
+        qi = quant(np.array([1.0, 2.0, 3.0]), 'm')
+        qi += q
+        self.assertTrue(torch.is_tensor(qi.m))
+        self.assertTrue(torch.allclose(qi.m.double(), 2 * t.double()))
+        qi = quant(torch.tensor([1.0, 2.0, 3.0]), 'm')
+        qi -= torch.zeros(3)
+        self.assertTrue(torch.equal(qi.m, t))
+        # torch.cat reconciles units like immlib.math.concatenate.
+        r = torch.cat([quant(t, 'm'), quant(np.array([100.0]), 'cm')])
+        self.assertTrue(torch.allclose(r.m.double(), torch.tensor([1.0, 2.0, 3.0, 1.0]).double()))
+        with self.assertRaises(pint.DimensionalityError):
+            torch.cat([quant(t), quant(t, 'm')])
+    def test_quant_magnitudes(self):
+        """Tests which magnitudes quant() accepts and how it stores them."""
+        from immlib import quant, units, is_array
+        import numpy as np, torch, pint, scipy.sparse as sps
+        # Scalars become 0-dimensional arrays.
+        for (x, dt) in [(5, np.int64), (2.5, np.float64), (1j, np.complex128),
+                        (np.float32(1.5), np.float32), (True, np.bool_)]:
+            with self.subTest(x=x):
+                q = quant(x)
+                self.assertIsInstance(q.m, np.ndarray)
+                self.assertEqual(q.m.ndim, 0)
+                self.assertEqual(q.m.dtype, dt)
+                self.assertTrue(is_array(q))
+                q = quant(x, 'm')
+                self.assertIsInstance(q.m, np.ndarray)
+                self.assertEqual(q.m.ndim, 0)
+        # Lists and tuples become arrays.
+        q = quant([1, 2, 3], 'mm')
+        self.assertIsInstance(q.m, np.ndarray)
+        self.assertEqual(q.m.shape, (3,))
+        self.assertIsInstance(quant((1.0, 2.0)).m, np.ndarray)
+        # Arrays, tensors, and sparse matrices are kept as they are.
+        a = np.arange(3)
+        self.assertIs(quant(a).m, a)
+        a0 = np.array(3.0)
+        self.assertIs(quant(a0, 'm').m, a0)
+        t = torch.arange(3)
+        self.assertIs(quant(t).m, t)
+        sp = sps.eye(3, format='csr')
+        self.assertIs(quant(sp).m, sp)
+        # Quantities are not re-wrapped, and unit=None converts scalars.
+        pq = units.Quantity(5, 'm')
+        self.assertIs(quant(pq), pq)
+        q = quant(pq, None)
+        self.assertIsNone(q.units)
+        self.assertIsInstance(q.m, np.ndarray)
+        # Non-numerical values are rejected.
+        for x in ['5 mm', b'5', ['a', 'b'], [1, None], {'a': 1}, None,
+                  np.array([object()]), np.array(['x']), [[1], [1, 2]]]:
+            with self.subTest(x=x):
+                with self.assertRaises(TypeError):
+                    quant(x)
+                with self.assertRaises(TypeError):
+                    quant(x, 'm')
+        # Strings can still be parsed by the unit registry.
+        self.assertEqual(units.Quantity('5 mm'), quant(5, 'mm'))
+    def test_quant_0d_behavior(self):
+        """Tests that 0-dimensional magnitudes behave like scalars."""
+        from immlib import quant
+        import numpy as np, torch
+        q = quant(5, 'm')
+        # Display uses the scalar, not a matrix.
+        self.assertEqual(q._repr_latex_(), '$5\\ \\mathrm{meter}$')
+        self.assertEqual(f"{quant(2.5):.3f}", '2.500')
+        self.assertEqual(f"{quant(2.5, 'm'):.1f~P}", '2.5 m')
+        self.assertEqual(str(q), '5 meter')
+        # In-place operators rebind rather than modify the array, so integer
+        # magnitudes can become floats and other references are unchanged.
+        m = q.m
+        q *= 2.5
+        self.assertEqual(float(q.m_as('m')), 12.5)
+        self.assertEqual(int(m), 5)
+        q = quant(5, 'm')
+        q.ito('mm')
+        self.assertEqual(float(q.m), 5000.0)
+        self.assertEqual(str(q.units), 'millimeter')
+        n = quant(5)
+        n += 2.5
+        self.assertIsNone(n.units)
+        self.assertEqual(float(n), 7.5)
+        p = quant(2, 'm')
+        p **= 2
+        self.assertEqual(str(p.units), 'meter ** 2')
+        self.assertEqual(int(p.m), 4)
+        r = quant(5, 'm')
+        r -= quant(torch.tensor(1.0), 'm')
+        self.assertTrue(torch.is_tensor(r.m))
+        # In-place operators on arrays with dimensions still work in place.
+        a = np.array([1.0, 2.0])
+        qa = quant(a, 'm')
+        qa *= 2
+        self.assertTrue(np.array_equal(a, [2.0, 4.0]))
+        # round() works.
+        self.assertEqual(round(quant(2.5, 'm')), quant(2, 'm'))
+        self.assertEqual(float(round(quant(2.567, 'm'), 2).m), 2.57)
+        self.assertTrue(np.allclose(round(quant([2.567], 'm'), 2).m, [2.57]))
+        # bool(), float(), int(), and hash() work.
+        self.assertFalse(bool(quant(0)))
+        self.assertTrue(bool(quant(3, 'm')))
+        self.assertEqual(float(quant(2.5)), 2.5)
+        self.assertEqual(int(quant(3)), 3)
+        self.assertEqual(hash(quant(3)), hash(3))
+    def test_numpy_dispatch_none_units(self):
+        """NumPy functions and ufunc methods work for quantities whose units
+        are None."""
+        from immlib import quant, Quantity
+        import numpy as np
+        a = np.array([1.0, 2.0, 3.0])
+        n = quant(a)
+        r = quant(a, 'm')
+        def check(res, expected):
+            self.assertIsInstance(res, Quantity)
+            self.assertIsNone(res.units)
+            self.assertTrue(np.allclose(res.m, expected))
+        check(np.add.reduce(n), 6.0)
+        check(np.add.accumulate(n), np.cumsum(a))
+        check(np.multiply.outer(n, n), np.multiply.outer(a, a))
+        check(np.cumsum(n), np.cumsum(a))
+        check(np.cumprod(n), np.cumprod(a))
+        check(np.dot(n, n), 14.0)
+        check(np.diff(n), np.diff(a))
+        check(np.linalg.norm(n), np.linalg.norm(a))
+        check(np.log1p(n), np.log1p(a))
+        check(np.hypot(n, n), np.hypot(a, a))
+        check(np.sort(n), a)
+        (frac, whole) = np.modf(n)
+        check(frac, np.modf(a)[0])
+        check(whole, np.modf(a)[1])
+        out = quant(np.zeros(3))
+        self.assertIs(np.add(n, n, out=out), out)
+        check(out, 2 * a)
+        # Boolean and index results are plain.
+        self.assertIsInstance(np.isfinite(n), np.ndarray)
+        self.assertNotIsInstance(np.argmax(n), Quantity)
+        self.assertTrue(np.allclose(n, n))
+        # With real units present, unit-less values act as bare values.
+        res = np.dot(n, r)
+        self.assertEqual(str(res.units), 'meter')
+        self.assertEqual(float(res.m), 14.0)
+        import pint
+        with self.assertRaises(pint.DimensionalityError):
+            np.hypot(n, r)
+        # Real dimensionless quantities keep their units.
+        res = np.cumsum(quant(a, 'dimensionless'))
+        self.assertEqual(res.units, quant(1, 'dimensionless').units)

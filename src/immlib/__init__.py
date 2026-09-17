@@ -90,6 +90,8 @@ submodules = (
     'immlib.workflow',
     'immlib.types._core',
     'immlib.types',
+    'immlib.math._core',
+    'immlib.math',
     'immlib._version')
 def reload_immlib():
     """Reload and return the entire ``immlib`` package.

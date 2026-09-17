@@ -154,6 +154,78 @@ print("The standard deviation is", stats['std'])
 ```
 
 
+## Errors
+
+When a calculation raises an exception, requesting any value that depends on
+it raises an `il.PlanError`. Its message names the value that was requested
+and the calculation that failed (including where that calculation's function
+was defined), and its `__cause__` is the exception that the calculation
+raised, so the traceback shows the error in your own code. A failed
+calculation is not run again: requesting the value again raises the same
+error. (`PlanError` is a subclass of `pcollections.LazyError`.)
+
+```{code-cell}
+@il.calc('ratio')
+def calc_ratio(mean, std):
+    """Calculates the ratio of the mean to the standard deviation.
+
+    Outputs
+    -------
+    ratio : number
+        The mean divided by the standard deviation.
+    """
+    if std == 0:
+        raise ValueError("the data do not vary")
+    return mean / std
+
+ratio_plan = il.plan(
+    check_step=check_data,
+    sums_step=calc_sums,
+    mean_step=calc_mean_etc,
+    ratio_step=calc_ratio)
+flat = ratio_plan(data=[2.0, 2.0, 2.0])
+try:
+    flat['ratio']
+except il.PlanError as e:
+    print(e)
+    print(repr(e.__cause__))
+```
+
+A failure in a required (`lazy=False`) calculation, such as `check_data`
+above, raises a `PlanError` when the `plandict` is created.
+
+## Saving Plandicts
+
+A `plandict` can be pickled (for example, with `il.save(path, pd)` using the
+`'pickle'` format, or with Python's `pickle` module). By default, only its
+plan and its inputs are saved; when it is loaded, its values are computed
+again as they are requested. Calculations are saved by reference to their
+functions (by module and name, as `pickle` saves any function), so they must
+be defined at the top level of a module, and loading a `plandict` uses the
+current version of each calculation's code. As with any pickle, only load
+files that you trust.
+
+Calculations that cache their results on disk (`il.calc(..., pathcache=True)`)
+take a `cache_path` input, which is saved with the other inputs, so a loaded
+`plandict` reads from the same cache directory; `pd.set('cache_path', path)`
+reads from a different one.
+
+To also save the values that have already been computed, pass
+`save_ready=True` to `il.save`, or pickle the `plandict` inside a
+`with il.save_ready():` block. These values are restored as they were saved,
+even if a calculation's code has changed since.
+
+```{code-cell}
+import pickle
+
+stats = stats_plan(data=[1.0, 2.0, 3.0, 4.0])
+stats['mean']
+with il.save_ready():
+    saved = pickle.dumps(stats)
+# The saved mean is restored rather than recalculated:
+pickle.loads(saved)['mean']
+```
+
 ## Calculation Metadata
 
 The `@calc` decorator attaches metadata to the calculation functions by

@@ -2188,8 +2188,9 @@ def lambdadict(*args, **kwargs):
     """
     d = merge(*args, **kwargs)
     finals = d.transient()
-    if isinstance(d, ldict):
-        d = d.as_pdict()
+    # Read the values without computing any lazy ones (holdlazy returns an
+    # ldict's items as a pdict whose lazy values are left uncomputed).
+    d = holdlazy(d)
     for (k,v) in d.items():
         if isinstance(v, LambdaType):
             finals[k] = lazy(_lambdadict_call, finals, v)

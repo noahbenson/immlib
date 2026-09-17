@@ -536,3 +536,12 @@ class OSFPath(CloudPath):
     @property
     def key(self):
         return self._no_prefix_no_drive
+# CloudPath's metaclass replaces the docstrings of these methods with
+# pathlib's, whose indentation Sphinx cannot parse, so we set them here.
+OSFPath.is_dir.__doc__ = "Returns ``True`` if this path is a directory on OSF."
+OSFPath.is_file.__doc__ = "Returns ``True`` if this path is a file on OSF."
+OSFPath.stat.__doc__ = """Returns an ``os.stat_result`` for this file on OSF.
+
+Only the size and the modification and creation times are filled in.
+Directories have no stats, so a ``NoStatError`` is raised for them.
+"""

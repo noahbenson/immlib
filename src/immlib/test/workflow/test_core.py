@@ -415,4 +415,305 @@ class TestWorkflowCore(TestCase):
         self.assertIsInstance(pd['u'], np.ndarray)
     def test_tplandict(self):
         "Tests the tplandict type."
-        pass
+        from immlib.workflow import calc, plan, plandict, is_tplandict
+        @calc('y')
+        def add_one(x):
+            return x + 1
+        @calc('z')
+        def double_y(y):
+            return 2 * y
+        pd = plan(step1=add_one, step2=double_y)(x=1)
+        td = pd.transient()
+        self.assertTrue(is_tplandict(td))
+        self.assertEqual(td['z'], 4)
+        # Setting an input updates the downstream values.
+        td['x'] = 2
+        self.assertEqual(td['y'], 3)
+        self.assertEqual(td['z'], 6)
+        self.assertEqual(td.get('z'), 6)
+        # Only inputs may be set.
+        with self.assertRaises(ValueError):
+            td['y'] = 10
+        # Items can't be removed.
+        with self.assertRaises(TypeError):
+            del td['x']
+        for method in ('clear', 'popitem'):
+            with self.assertRaises(TypeError):
+                getattr(td, method)()
+        with self.assertRaises(TypeError):
+            td.pop('x')
+        # Converting back gives a plandict with the updated values.
+        pd2 = td.persistent()
+        self.assertIsInstance(pd2, plandict)
+        self.assertEqual(dict(pd2), {'x': 2, 'y': 3, 'z': 6})
+        # The original plandict is unchanged.
+        self.assertEqual(dict(pd), {'x': 1, 'y': 2, 'z': 4})
+    def test_plandict_no_delete(self):
+        "Tests that items can't be removed from a plandict."
+        from immlib.workflow import calc, plan
+        @calc('y')
+        def add_one(x):
+            return x + 1
+        pd = plan(step1=add_one)(x=1)
+        with self.assertRaises(TypeError):
+            pd.delete('x')
+        with self.assertRaises(TypeError):
+            pd.pop('y')
+        with self.assertRaises(TypeError):
+            pd.popitem()
+        with self.assertRaises(TypeError):
+            pd.clear()
+        self.assertEqual(dict(pd), {'x': 1, 'y': 2})
+    def test_plan_error(self):
+        "Tests that failed plan calculations raise PlanError."
+        from immlib.workflow import calc, plan, PlanError
+        from pcollections import lazy, LazyError
+        @calc('y')
+        def checked_add_one(x):
+            if x < 0:
+                raise ValueError("x must be non-negative")
+            return x + 1
+        @calc('z')
+        def double_y(y):
+            return 2 * y
+        @calc('w', lazy=False)
+        def required_y(y):
+            return y
+        p = plan(step1=checked_add_one, step2=double_y)
+        pd = p(x=-1)
+        # The error names the requested key and the failing calc, and its
+        # cause is the original exception.
+        for _ in range(2):
+            with self.assertRaises(PlanError) as cm:
+                pd['z']
+            err = cm.exception
+            self.assertIsInstance(err, LazyError)
+            self.assertIsInstance(err.__cause__, ValueError)
+            self.assertIsInstance(err.root_cause, ValueError)
+            self.assertTrue(err.__suppress_context__)
+            self.assertEqual(err.key, 'z')
+            self.assertIs(err.calc, checked_add_one.calc)
+            msg = str(err)
+            self.assertIn("'z'", msg)
+            self.assertIn(checked_add_one.calc.name, msg)
+            self.assertIn("test_core.py", msg)
+            self.assertIn("x must be non-negative", msg)
+        # get, items, and dict() raise the same way.
+        with self.assertRaises(PlanError):
+            pd.get('y')
+        with self.assertRaises(PlanError):
+            dict(pd)
+        with self.assertRaises(PlanError):
+            list(pd.values())
+        # Values that don't depend on the failure are still available.
+        self.assertEqual(pd['x'], -1)
+        self.assertEqual(pd.get('missing', 10), 10)
+        # A failing lazy input is reported as an input failure.
+        pd = p(x=lazy(lambda: 1/0))
+        with self.assertRaises(PlanError) as cm:
+            pd['z']
+        self.assertIsNone(cm.exception.calc)
+        self.assertIn("input 'x'", str(cm.exception))
+        self.assertIsInstance(cm.exception.__cause__, ZeroDivisionError)
+        with self.assertRaises(PlanError) as cm:
+            pd['x']
+        self.assertIsInstance(cm.exception.__cause__, ZeroDivisionError)
+        # Required (non-lazy) calculations fail at construction.
+        p = plan(step1=checked_add_one, step2=required_y)
+        with self.assertRaises(PlanError) as cm:
+            p(x=-1)
+        self.assertIsNone(cm.exception.key)
+        self.assertIs(cm.exception.calc, checked_add_one.calc)
+        pd = p(x=1)
+        with self.assertRaises(PlanError):
+            pd.set('x', -1)
+        td = pd.transient()
+        with self.assertRaises(PlanError):
+            td['x'] = -1
+        # tplandict reads raise PlanError too.
+        td = plan(step1=checked_add_one, step2=double_y)(x=1).transient()
+        td['x'] = -2
+        with self.assertRaises(PlanError) as cm:
+            td['z']
+        self.assertIsInstance(cm.exception.__cause__, ValueError)
+    def test_plan_error_filtered_plan(self):
+        "Tests PlanError for plans whose calcs are renamed internally."
+        from immlib.workflow import calc, plan, PlanError
+        @calc('data', lazy=False)
+        def filter_data(data):
+            return (list(data),)
+        @calc('first')
+        def first_over_second(data):
+            if data[1] == 0:
+                raise ZeroDivisionError("second element is zero")
+            return data[0] / data[1]
+        pd = plan(filt=filter_data, ratio=first_over_second)(data=[1, 0])
+        with self.assertRaises(PlanError) as cm:
+            pd['first']
+        # The error reports the calc the user created, not the plan's
+        # internal copy of it.
+        self.assertIs(cm.exception.calc, first_over_second.calc)
+        self.assertNotIn('.rename', str(cm.exception))
+        self.assertIn(first_over_second.calc.name, str(cm.exception))
+    def test_calc_with_caches(self):
+        "Tests calc.with_lrucache and calc.with_pathcache."
+        import tempfile
+        from immlib.workflow import calc
+        runs = []
+        @calc('y')
+        def add_one(x):
+            runs.append(x)
+            return x + 1
+        c = add_one.calc
+        c2 = c.with_lrucache(10)
+        self.assertIsInstance(c2, calc)
+        self.assertIsNotNone(c2.lrucache)
+        self.assertEqual(c2.eager_call(x=1)['y'], 2)
+        self.assertEqual(c2.eager_call(x=1)['y'], 2)
+        self.assertEqual(runs, [1])
+        self.assertIs(c.with_pathcache(None), c)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            c3 = c.with_pathcache(tmpdir)
+            self.assertIsInstance(c3, calc)
+            self.assertIsNotNone(c3.pathcache)
+            self.assertEqual(c3.eager_call(x=5)['y'], 6)
+            self.assertEqual(c3.eager_call(x=5)['y'], 6)
+            self.assertEqual(runs, [1, 5])
+        # The original calc is unchanged.
+        self.assertIsNone(c.lrucache)
+        self.assertIsNone(c.pathcache)
+    def test_pickle_plandict(self):
+        "Tests pickling calcs, plans, plandicts, and tplandicts."
+        import pickle, tempfile, os
+        from pcollections import lazy
+        from immlib import save, load
+        from immlib.workflow import (calc, plan, plandict, is_tplandict,
+                                     save_ready, PlanError)
+        # Calcs and plans are pickled by reference to their functions.
+        c = pickle.loads(pickle.dumps(_pickle_add_one.calc))
+        self.assertIs(c, _pickle_add_one.calc)
+        p = pickle.loads(pickle.dumps(_pickle_plan))
+        self.assertIsInstance(p, plan)
+        self.assertEqual(dict(p), dict(_pickle_plan))
+        # Calc copies and locally defined calcs can't be pickled.
+        with self.assertRaises(pickle.PicklingError):
+            pickle.dumps(_pickle_add_one.calc.rename_keys(x='u'))
+        @calc('v')
+        def local_calc(u):
+            return u
+        with self.assertRaises((pickle.PicklingError, AttributeError)):
+            pickle.dumps(local_calc.calc)
+        # By default, only the plan and inputs are saved, so values are
+        # recomputed after unpickling.
+        _PICKLE_RUNS.clear()
+        pd = _pickle_plan(x=1)
+        self.assertEqual(pd['z'], 4.0)
+        self.assertEqual(_PICKLE_RUNS, ['check_x', 'add_one', 'double'])
+        data = pickle.dumps(pd)
+        _PICKLE_RUNS.clear()
+        pd2 = pickle.loads(data)
+        self.assertIsInstance(pd2, plandict)
+        self.assertEqual(pd2.inputs, pd.inputs)
+        self.assertFalse(pd2.is_ready('z'))
+        self.assertEqual(dict(pd2), dict(pd))
+        self.assertEqual(_PICKLE_RUNS, ['check_x', 'add_one', 'double'])
+        # With save_ready, computed values are restored, not recomputed.
+        _PICKLE_RUNS.clear()
+        pd = _pickle_plan(x=3)
+        pd['y']
+        _PICKLE_RUNS.clear()
+        with save_ready():
+            data = pickle.dumps(pd)
+        pd2 = pickle.loads(data)
+        self.assertEqual(_PICKLE_RUNS, [])
+        self.assertTrue(pd2.is_ready('y'))
+        self.assertEqual(pd2['y'], 4.0)
+        self.assertEqual(_PICKLE_RUNS, [])
+        self.assertEqual(pd2['z'], 8.0)
+        self.assertEqual(_PICKLE_RUNS, ['double'])
+        # Unpickled plandicts can be updated as usual.
+        self.assertEqual(pd2.set('x', 0)['z'], 2.0)
+        # Outside of save_ready, values are not saved.
+        pd2 = pickle.loads(pickle.dumps(pd))
+        self.assertFalse(pd2.is_ready('y'))
+        # Failed calculations are not saved; they fail again when requested.
+        pd = _pickle_plan(x=-1)
+        with self.assertRaises(PlanError):
+            pd['z']
+        with save_ready():
+            data = pickle.dumps(pd)
+        pd2 = pickle.loads(data)
+        with self.assertRaises(PlanError):
+            pd2['z']
+        # Lazy inputs are computed when pickled.
+        pd = _pickle_plan(x=lazy(lambda: 2))
+        pd2 = pickle.loads(pickle.dumps(pd))
+        self.assertEqual(pd2['z'], 6.0)
+        # tplandicts are pickled as tplandicts.
+        td = _pickle_plan(x=1).transient()
+        td['x'] = 10
+        td2 = pickle.loads(pickle.dumps(td))
+        self.assertTrue(is_tplandict(td2))
+        self.assertEqual(dict(td2.persistent()),
+                         {'x': 10.0, 'y': 11.0, 'z': 22.0})
+        td2['x'] = 5
+        self.assertEqual(td2['z'], 12.0)
+        # immlib.save's pickle format supports save_ready.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            flnm = os.path.join(tmpdir, 'pd.pkl')
+            pd = _pickle_plan(x=1)
+            pd['z']
+            save(flnm, pd, 'pickle', save_ready=True)
+            _PICKLE_RUNS.clear()
+            pd2 = load(flnm)
+            self.assertEqual(dict(pd2), dict(pd))
+            self.assertEqual(_PICKLE_RUNS, [])
+            save(flnm, pd, 'pickle')
+            pd2 = load(flnm)
+            self.assertEqual(dict(pd2), dict(pd))
+            self.assertEqual(_PICKLE_RUNS, ['check_x', 'add_one', 'double'])
+    def test_pickle_plandict_cache_path(self):
+        "Tests that unpickled plandicts read from their cache path."
+        import pickle, tempfile
+        _PICKLE_RUNS.clear()
+        with tempfile.TemporaryDirectory() as dir1, \
+             tempfile.TemporaryDirectory() as dir2:
+            pd = _pickle_cache_plan(x=2, cache_path=dir1)
+            self.assertEqual(pd['y'], 4)
+            self.assertEqual(_PICKLE_RUNS, ['cached_square'])
+            pd2 = pickle.loads(pickle.dumps(pd))
+            self.assertEqual(pd2.inputs['cache_path'], dir1)
+            self.assertEqual(pd2['y'], 4)
+            # The value was read from the cache, not recomputed.
+            self.assertEqual(_PICKLE_RUNS, ['cached_square'])
+            # A different cache path does not have the value.
+            pd3 = pd2.set('cache_path', dir2)
+            self.assertEqual(pd3['y'], 4)
+            self.assertEqual(_PICKLE_RUNS, ['cached_square'] * 2)
+
+
+# Module-level calcs and plans for the pickling tests (calcs are pickled by
+# reference to their functions, so they can't be defined inside a test).
+from immlib.workflow import calc as _calc, plan as _plan
+_PICKLE_RUNS = []
+@_calc('x', lazy=False)
+def _pickle_check_x(x):
+    _PICKLE_RUNS.append('check_x')
+    return (float(x),)
+@_calc('y')
+def _pickle_add_one(x):
+    _PICKLE_RUNS.append('add_one')
+    if x < 0:
+        raise ValueError("x must be non-negative")
+    return x + 1
+@_calc('z')
+def _pickle_double(y):
+    _PICKLE_RUNS.append('double')
+    return 2 * y
+_pickle_plan = _plan(
+    check=_pickle_check_x, add=_pickle_add_one, double=_pickle_double)
+@_calc('y', pathcache=True)
+def _pickle_cached_square(x):
+    _PICKLE_RUNS.append('cached_square')
+    return x * x
+_pickle_cache_plan = _plan(square=_pickle_cached_square)

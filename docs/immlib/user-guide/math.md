@@ -38,7 +38,7 @@ The functions in `immlib.math` exist mainly so that code written against
 names and conventions) at every call site--`immlib.math` picks the backend
 and the translation for you. Ordinary Python operators (`+`, `-`, `*`, `/`,
 `**`, comparisons, `@`) and the curated subset of NumPy/PyTorch functions
-described in [Utilities for Physical Units](/user-guide/utils/units.md#using-numpy-and-pytorch-functions-directly)
+described in [Using NumPy and PyTorch Functions Directly](#using-numpy-and-pytorch-functions-directly)
 remain the more natural choice for anything they already cover.
 
 
@@ -75,6 +75,17 @@ A few rules apply consistently across every function in this module:
   so gradients flow through `immlib.math` calls exactly as they would
   through the equivalent raw PyTorch code, for any function whose
   underlying operation is itself differentiable.
+* **Sparse data stays sparse when it can.** SciPy sparse arrays and matrices
+  remain sparse through operations that preserve sparsity (arithmetic,
+  `abs`, `sqrt`, `floor`, `ceil`, `round`, `sin`, `tan`, `arcsin`, `arctan`,
+  `maximum`, `minimum`, `reshape`, `transpose`, 2-D `concatenate`, and
+  `matmul`). Reductions (`sum`, `mean`, `min`, `max`, `std`, `var`, `prod`,
+  `any`, `all`) are computed without densifying the input and return a dense
+  NumPy array (or a scalar, for a full reduction); reductions of sparse
+  PyTorch tensors likewise return dense tensors. A function whose result
+  would be dense (`exp`, `log`, `log10`, `cos`, `arccos`, `where`) raises a
+  `TypeError` rather than silently allocating a dense array; convert the
+  input with `il.to_dense` first if that is what you want.
 * **A function whose NumPy and PyTorch semantics differ too materially to
   unify is simply not provided.** `numpy.dot`, for example, behaves like
   broadcasting matrix multiplication for 2-D-and-higher input, while
@@ -112,7 +123,16 @@ im.less(il.quant([1.0, 2.0, 3.0], 'm'), il.quant([150.0, 150.0, 150.0], 'cm'))
 
 `maximum`, `minimum`, and `where` are also comparison-adjacent, but return a
 `Quantity` (an elementwise choice between two quantities, not a boolean
-result), and require their quantity arguments to share compatible units.
+result). Their arguments must have compatible units: if either argument has
+real units, the result has the units of the first such argument, and a
+unit-less argument is treated as a bare, dimensionless value (so, exactly as
+with `np.maximum(x, il.quant(y, 'm'))`, combining a unit-less value with a
+length raises `pint.DimensionalityError`).
+
+The comparisons compare unit-less values the same way: a unit-less value is
+unequal to a quantity with real dimensions, and quantities with
+incompatible units are unequal (the result is all `False`) rather than an
+error, on both backends.
 
 ```{code-cell}
 im.maximum(il.quant([1.0, 5.0], 'm'), il.quant([300.0, 300.0], 'cm'))
@@ -140,8 +160,8 @@ except TypeError as e:
     print(f'{type(e).__name__}: {e}')
 ```
 
-`arctan2(y, x)` (matching NumPy's own `y, x` argument order) requires `y`
-and `x` to share compatible units and always returns a unit-less result,
+`arctan2(y, x)` (matching NumPy's own `y, x` argument order) aligns the
+units of `y` and `x` as `maximum` does and always returns a unit-less result,
 since an angle has no unit of its own here.
 
 `floor`, `ceil`, and `round` all preserve the input's units. `round` takes
@@ -164,6 +184,14 @@ were multiplied together.
 
 ```{code-cell}
 im.sum(il.quant([[1.0, 2.0], [3.0, 4.0]], 's'), axis=0)
+```
+
+Reductions of SciPy sparse arrays return dense NumPy arrays:
+
+```{code-cell}
+import scipy.sparse as sps
+
+im.sum(il.quant(sps.eye(3, format='csr'), 'm'), axis=0)
 ```
 
 ```{important}
@@ -195,9 +223,10 @@ PyTorch has no direct equivalent to NumPy's axis-reversal default for
 `transpose`).
 
 `stack` and `concatenate` combine a sequence of quantities along a new or
-existing axis respectively; every element of the sequence must share
-compatible units (elements are converted to the first element's unit if
-they match dimensionally but aren't already identical).
+existing axis respectively. If any element has real units, the result has
+the units of the first such element, and every element is converted into
+them (unit-less elements are treated as dimensionless values, as in
+`maximum`); if every element is unit-less, so is the result.
 
 ```{code-cell}
 im.stack([il.quant([1.0, 2.0], 'm'), il.quant([300.0, 400.0], 'cm')])

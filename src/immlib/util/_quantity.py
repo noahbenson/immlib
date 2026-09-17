@@ -223,7 +223,7 @@ _omitted = object()
 
 def _immlib_matmul(a, b):
     """Computes ``a @ b`` for a matmul in which at least one side has a
-    PyTorch tensor magnitude.
+    PyTorch tensor or SciPy sparse magnitude.
 
     This is handled separately from ordinary multiplication because
     ``torch.matmul`` cannot be routed through pint's own NumPy-oriented
@@ -254,11 +254,14 @@ def _immlib_matmul(a, b):
             b_mag = to_tensor(b_mag, device=a_mag.device, dtype=a_mag.dtype)
         elif b_mag.device != a_mag.device:
             b_mag = b_mag.to(device=a_mag.device)
-    else:
-        # The caller guarantees that at least one side is a tensor, so
-        # b_mag must be one here.
+        result_mag = torch.matmul(a_mag, b_mag)
+    elif torch.is_tensor(b_mag):
         a_mag = to_tensor(a_mag, device=b_mag.device, dtype=b_mag.dtype)
-    result_mag = torch.matmul(a_mag, b_mag)
+        result_mag = torch.matmul(a_mag, b_mag)
+    else:
+        # At least one side is a SciPy sparse array/matrix, which NumPy's
+        # matmul (used by Pint) does not accept; SciPy's own @ does.
+        result_mag = a_mag @ b_mag
     # Units combine the same way they do for ordinary multiplication: a
     # None-units quantity or a non-quantity contributes no units at all
     # (see immlib.Quantity's None-unit semantics).
@@ -454,6 +457,91 @@ def _numpy_math_dispatch(name, args, kwargs):
     return fn(*args, **kwargs)
 
 
+def _map_quantities(obj, fn):
+    """Returns a copy of `obj` in which every ``pint.Quantity`` found inside
+    (possibly nested) lists, tuples, and dicts is replaced by ``fn(q)``."""
+    if isinstance(obj, pint.Quantity):
+        return fn(obj)
+    elif isinstance(obj, (list, tuple)):
+        res = [_map_quantities(x, fn) for x in obj]
+        if isinstance(obj, tuple):
+            return type(obj)(*res) if hasattr(obj, '_fields') else tuple(res)
+        return res
+    elif isinstance(obj, dict):
+        return {k: _map_quantities(v, fn) for (k,v) in obj.items()}
+    else:
+        return obj
+def _none_ufunc(ufunc, method, inputs, kwargs):
+    """Applies a NumPy ufunc (with any method: ``__call__``, ``reduce``,
+    ``accumulate``, ``outer``, etc., and any keywords, including ``out``)
+    directly to the magnitudes of its arguments when every quantity among
+    them has units of ``None``; returns ``NotImplemented`` otherwise.
+
+    Numerical results are returned as quantities with units of ``None``,
+    except for boolean results, which are returned as plain arrays (as for
+    the comparisons in ``immlib.math``). If ``out`` is given, the output
+    quantities themselves are returned.
+    """
+    quants = []
+    _map_quantities((inputs, kwargs), quants.append)
+    if not quants or any(q._units is not None for q in quants):
+        return NotImplemented
+    unwrap = lambda q: q._magnitude
+    mags = _map_quantities(inputs, unwrap)
+    kw = _map_quantities(kwargs, unwrap)
+    result = getattr(ufunc, method)(*mags, **kw)
+    out = kwargs.get('out')
+    if out is not None:
+        if isinstance(out, tuple):
+            return out[0] if len(out) == 1 else out
+        return out
+    qcls = quants[0].__class__
+    def wrap(r):
+        if isinstance(r, (np.ndarray, np.generic)):
+            if r.dtype == np.bool_:
+                return r
+            return qcls(r, None)
+        return r
+    if isinstance(result, tuple):
+        return tuple(wrap(r) for r in result)
+    return wrap(result)
+def _pint_numpy_dispatch(call, args, kwargs):
+    """Calls Pint's own NumPy dispatch, ``call(args, kwargs)``, after
+    adapting any quantities with units of ``None``, which Pint does not
+    understand.
+
+    If every quantity among the arguments has units of ``None``, they are
+    passed to Pint as dimensionless quantities, and every dimensionless
+    quantity in Pint's result is converted back to units of ``None`` (so
+    Pint still decides which results are quantities, e.g. ``np.cumsum``
+    versus ``np.argmax``). Otherwise, the quantities with units of ``None``
+    are also passed to Pint as dimensionless quantities, which is how Pint
+    treats bare values (the same rule as for ``immlib.Quantity``'s
+    operators), and the result is returned as Pint computes it. (Passing
+    bare arrays instead would be equivalent, but some Pint versions' NumPy
+    functions, e.g. ``np.dot`` in Pint 0.24, fail when given a bare array
+    alongside a quantity.)
+    """
+    quants = []
+    _map_quantities((args, kwargs), quants.append)
+    nones = [q for q in quants if q._units is None]
+    if not nones:
+        return call(args, kwargs)
+    def to_dimless(q):
+        if q._units is None:
+            return q._REGISTRY.Quantity(q._magnitude, 'dimensionless')
+        return q
+    (args, kwargs) = _map_quantities((args, kwargs), to_dimless)
+    result = call(args, kwargs)
+    if len(nones) < len(quants):
+        return result
+    def to_none(q):
+        if isinstance(q, Quantity) and q._units == q.UnitsContainer():
+            return q.__class__(q._magnitude, None)
+        return q
+    return _map_quantities(result, to_none)
+
+
 # NumPy ufunc names that should behave exactly like the corresponding
 # Python operator applied to the Quantity objects themselves--the NumPy
 # analogue of _TORCH_OPERATOR_METHODS above, and for exactly the same
@@ -496,6 +584,34 @@ _NUMPY_UNARY_OPERATOR_METHODS = {
     'positive': '__pos__',
     'absolute': '__abs__',
 }
+
+
+_REFLECTED_COMPARISONS = {
+    operator.lt: operator.gt, operator.le: operator.ge,
+    operator.gt: operator.lt, operator.ge: operator.le,
+    operator.eq: operator.eq, operator.ne: operator.ne}
+
+def _promote_mags(xm, ym):
+    """Promotes two bare magnitudes as ``immlib.promote`` does (a non-tensor
+    becomes a tensor on the tensor's device when the other is a tensor)."""
+    if torch.is_tensor(xm):
+        if not torch.is_tensor(ym):
+            ym = to_tensor(ym, device=xm.device)
+    elif torch.is_tensor(ym):
+        xm = to_tensor(xm, device=ym.device)
+    return (xm, ym)
+
+def _hashable_mag(mag):
+    if isinstance(mag, np.ndarray) and mag.ndim == 0:
+        return mag.item()
+    return mag
+
+def _unpickle_quantity(mag, units):
+    import immlib
+    ureg = immlib.units
+    if not issubclass(ureg.Quantity, Quantity):
+        ureg = _initial_global_ureg
+    return ureg.Quantity(mag, units)
 
 
 class Quantity(pint.Quantity):
@@ -605,7 +721,7 @@ class Quantity(pint.Quantity):
             return self.__class__(self._magnitude, other)
         return super().to(other, *contexts, **ctx_kwargs)
     def ito(self, other=None, *contexts, **ctx_kwargs):
-        if self._units is None or other is None:
+        if self._units is None or other is None or self._is_0d():
             new = self.to(other, *contexts, **ctx_kwargs)
             self._magnitude = new._magnitude
             self._units = new._units
@@ -645,6 +761,10 @@ class Quantity(pint.Quantity):
     # leaving a stray 'x' behind.
     _PINT_FORMAT_FLAGS = ('Lx', 'L', 'H', 'P', 'C', 'D', '~', '#')
     def __format__(self, spec):
+        if self._is_0d():
+            # See the note on 0-dimensional magnitudes, below.
+            return format(
+                self.__class__(self._magnitude[()], self._units), spec)
         if self._units is None:
             mspec = spec
             for flag in self._PINT_FORMAT_FLAGS:
@@ -668,6 +788,22 @@ class Quantity(pint.Quantity):
                 "m_as: quantity has no units (units is None); use .to() to"
                 " attach units or .magnitude/.m to obtain the raw value")
         return super().m_as(units)
+    def __bool__(self):
+        if self._units is None:
+            return bool(self._magnitude)
+        return super().__bool__()
+    __nonzero__ = __bool__
+    def __round__(self, ndigits=None):
+        mag = self._magnitude
+        if self._is_0d():
+            mag = np.asarray(round(mag[()], ndigits))
+        elif isinstance(mag, np.ndarray):
+            mag = np.round(mag, 0 if ndigits is None else ndigits)
+        elif torch.is_tensor(mag):
+            mag = torch.round(mag, decimals=0 if ndigits is None else ndigits)
+        else:
+            mag = round(mag, ndigits)
+        return self.__class__(mag, self._units)
     def __int__(self):
         if self._units is None:
             return int(self._magnitude)
@@ -680,6 +816,56 @@ class Quantity(pint.Quantity):
         if self._units is None:
             return complex(self._magnitude)
         return super().__complex__()
+    # 0-dimensional magnitudes -------------------------------------------
+    # quant() stores scalars as 0-dimensional NumPy arrays. Pint treats any
+    # ndarray magnitude as an array, which is wrong for a few scalar-like
+    # behaviors: in-place operators and ito() modify the array in place
+    # (which fails under NumPy's casting rules for an integer array, e.g.
+    # ``q *= 2.5``, and would also modify any other reference to the
+    # array), round() is not defined for arrays, and Pint's LaTeX/HTML
+    # formatting renders the array as an (empty) matrix. For a 0-d magnitude
+    # we therefore behave as Pint does for a Python scalar: in-place
+    # operators compute a new magnitude and rebind it, and formatting uses
+    # the scalar the array contains.
+    def _is_0d(self):
+        mag = self._magnitude
+        return isinstance(mag, np.ndarray) and mag.ndim == 0
+    def _inplace_0d(self, op, other):
+        result = op(self, other)
+        if result is NotImplemented:
+            return result
+        if isinstance(result, pint.Quantity):
+            self._magnitude = result._magnitude
+            self._units = result._units
+        else:
+            self._magnitude = result
+            self._units = None
+        return self
+    def __iadd__(self, other):
+        if self._is_0d():
+            return self._inplace_0d(operator.add, other)
+        return super().__iadd__(other)
+    def __isub__(self, other):
+        if self._is_0d():
+            return self._inplace_0d(operator.sub, other)
+        return super().__isub__(other)
+    def __imul__(self, other):
+        if self._is_0d():
+            return self._inplace_0d(operator.mul, other)
+        return super().__imul__(other)
+    def __itruediv__(self, other):
+        if self._is_0d():
+            return self._inplace_0d(operator.truediv, other)
+        return super().__itruediv__(other)
+    __idiv__ = __itruediv__
+    def __ifloordiv__(self, other):
+        if self._is_0d():
+            return self._inplace_0d(operator.floordiv, other)
+        return super().__ifloordiv__(other)
+    def __imod__(self, other):
+        if self._is_0d():
+            return self._inplace_0d(operator.mod, other)
+        return super().__imod__(other)
     # Arithmetic -----------------------------------------------------------
     # When self or other has units of None, we delegate directly to the
     # magnitude(s): a None-unit quantity behaves exactly like its magnitude
@@ -694,44 +880,132 @@ class Quantity(pint.Quantity):
     # all funnel through `compare()`, which is overloaded once for all four.
     # (`@` is handled separately, above `__torch_function__` below; NumPy and
     # PyTorch dispatch protocol None-awareness are left to a later phase.)
-    def _binop_none(self, other, op):
-        self_none = self._units is None
+    def _none_operands(self, other):
+        """Returns the operands ``(x, y)`` to use for ``op(self, other)`` when
+        either operand has units of ``None``.
+
+        A quantity whose units are ``None`` is replaced by its bare magnitude,
+        and the bare magnitudes are promoted together (see
+        ``immlib.promote``) so that a NumPy value meeting a tensor becomes a
+        tensor on that tensor's device. Thus ``op(quant(x, None), q)`` is
+        equivalent to ``(x, y) = promote(x, q.m); op(x, quant(y, q.u))``. A
+        quantity with real units keeps them (with its promoted magnitude).
+        """
         other_is_q = isinstance(other, pint.Quantity)
-        other_none = other_is_q and other._units is None
-        self_val = self._magnitude if self_none else self
-        other_val = other._magnitude if other_none else other
-        result = op(self_val, other_val)
+        xm = self._magnitude
+        ym = other._magnitude if other_is_q else other
+        if torch.is_tensor(xm) != torch.is_tensor(ym) and (
+                is_numeric(ym) or isinstance(ym, (list, tuple))):
+            (xm, ym) = _promote_mags(xm, ym)
+        if self._units is None:
+            x = xm
+        elif xm is self._magnitude:
+            x = self
+        else:
+            x = self.__class__(xm, self._units)
+        if not other_is_q or other._units is None:
+            y = ym
+        elif ym is other._magnitude:
+            y = other
+        else:
+            y = other.__class__(ym, other._units)
+        return (x, y)
+    def _binop_none(self, other, op):
+        (x, y) = self._none_operands(other)
+        result = op(x, y)
+        if result is NotImplemented:
+            return result
         if isinstance(result, pint.Quantity):
             if isinstance(result, type(self)):
                 return result
-            qcls = result._REGISTRY.Quantity
+            qcls = self._REGISTRY.Quantity
             return qcls(result._magnitude, result._units)
         return self.__class__(result, None)
+    # Real-units operations involving a PyTorch tensor. Pint's arithmetic and
+    # comparison code checks a bare operand with `zero_or_nan(other, True)`,
+    # which cannot reduce a tensor to a single bool (Pint's
+    # `is_duck_array_type` does not recognize tensors) and so fails with
+    # "only one element tensors can be converted to Python scalars". We
+    # therefore promote NumPy/tensor magnitudes (as immlib.promote does) and
+    # replace a bare tensor operand with an equivalent quantity before
+    # deferring to Pint: an all-zero/NaN tensor takes this quantity's units
+    # (Pint allows e.g. `q + 0` for any units) and any other tensor is
+    # dimensionless (as Pint treats bare values).
+    def _real_tensor_operands(self, other, compare=False):
+        other_is_q = isinstance(other, pint.Quantity)
+        xm = self._magnitude
+        ym = other._magnitude if other_is_q else other
+        if torch.is_tensor(xm) == torch.is_tensor(ym):
+            if not torch.is_tensor(xm):
+                return None
+            promoted = False
+        elif is_numeric(ym) or isinstance(ym, (list, tuple)):
+            (xm, ym) = _promote_mags(xm, ym)
+            promoted = True
+        else:
+            return None
+        x = self.__class__(xm, self._units) if promoted else self
+        if other_is_q:
+            y = other.__class__(ym, other._units) if promoted else other
+        else:
+            if bool(((ym == 0) | torch.isnan(ym)).all()) and (
+                    self._is_multiplicative):
+                y = self.__class__(ym, self._units)
+            elif compare and not self.dimensionless:
+                raise ValueError(
+                    f"Cannot compare PlainQuantity and {type(other)}")
+            else:
+                y = self.__class__(ym, self.UnitsContainer())
+        return (x, y, promoted)
+    _INPLACE_OPS = {
+        operator.iadd: operator.add, operator.isub: operator.sub,
+        operator.imul: operator.mul, operator.itruediv: operator.truediv,
+        operator.ifloordiv: operator.floordiv}
+    def _inplace_result(self, result):
+        self._magnitude = result._magnitude
+        self._units = result._units
+        return self
     def _add_sub(self, other, op):
         if self._units is None or (
                 isinstance(other, pint.Quantity) and other._units is None):
             return self._binop_none(other, op)
+        ops = self._real_tensor_operands(other)
+        if ops is not None:
+            (x, y, _) = ops
+            return pint.Quantity._add_sub(x, y, op)
         return super()._add_sub(other, op)
     def _iadd_sub(self, other, op):
         if self._units is None or (
                 isinstance(other, pint.Quantity) and other._units is None):
-            result = self._binop_none(other, op)
-            self._magnitude = result._magnitude
-            self._units = result._units
-            return self
+            return self._inplace_result(self._binop_none(other, op))
+        ops = self._real_tensor_operands(other)
+        if ops is not None:
+            (x, y, promoted) = ops
+            if promoted:
+                op = self._INPLACE_OPS.get(op, op)
+                return self._inplace_result(pint.Quantity._add_sub(x, y, op))
+            return super()._iadd_sub(y, op)
         return super()._iadd_sub(other, op)
     def _mul_div(self, other, magnitude_op, units_op=None):
         if self._units is None or (
                 isinstance(other, pint.Quantity) and other._units is None):
             return self._binop_none(other, magnitude_op)
+        ops = self._real_tensor_operands(other)
+        if ops is not None and ops[2]:
+            (x, y, _) = ops
+            return pint.Quantity._mul_div(x, y, magnitude_op, units_op)
         return super()._mul_div(other, magnitude_op, units_op)
     def _imul_div(self, other, magnitude_op, units_op=None):
         if self._units is None or (
                 isinstance(other, pint.Quantity) and other._units is None):
-            result = self._binop_none(other, magnitude_op)
-            self._magnitude = result._magnitude
-            self._units = result._units
-            return self
+            return self._inplace_result(self._binop_none(other, magnitude_op))
+        ops = self._real_tensor_operands(other)
+        if ops is not None and ops[2]:
+            (x, y, _) = ops
+            mop = self._INPLACE_OPS.get(magnitude_op, magnitude_op)
+            uop = self._INPLACE_OPS.get(units_op, units_op)
+            return self._inplace_result(
+                pint.Quantity._mul_div(x, y, mop, uop))
         return super()._imul_div(other, magnitude_op, units_op)
     def __pow__(self, other):
         if self._units is None or (
@@ -739,6 +1013,8 @@ class Quantity(pint.Quantity):
             return self._binop_none(other, operator.pow)
         return super().__pow__(other)
     def __ipow__(self, other):
+        if self._is_0d():
+            return self._inplace_0d(operator.pow, other)
         if self._units is None or (
                 isinstance(other, pint.Quantity) and other._units is None):
             result = self._binop_none(other, operator.pow)
@@ -748,7 +1024,11 @@ class Quantity(pint.Quantity):
         return super().__ipow__(other)
     def __rpow__(self, other):
         if self._units is None:
-            return other ** self._magnitude
+            (x, y) = self._none_operands(other)
+            result = y ** x
+            if isinstance(result, pint.Quantity):
+                return result
+            return self.__class__(result, None)
         return super().__rpow__(other)
     # Comparisons ------------------------------------------------------------
     # As with arithmetic above, a None-unit operand on either side bypasses
@@ -761,66 +1041,114 @@ class Quantity(pint.Quantity):
     # quantity--e.g. a None-unit 5 compared to 5 meters is simply unequal
     # rather than an error).
     def _binop_none_bool(self, other, op):
-        self_none = self._units is None
+        (x, y) = self._none_operands(other)
+        if isinstance(x, pint.Quantity) or isinstance(y, pint.Quantity):
+            # Exactly one side has real units; compare exactly as the bare
+            # value would compare with that quantity.
+            if isinstance(x, pint.Quantity):
+                (q, v, qop) = (x, y, op)
+            else:
+                (q, v, qop) = (y, x, _REFLECTED_COMPARISONS[op])
+            if qop is operator.eq:
+                return q.__eq__(v)
+            elif qop is operator.ne:
+                return q.__ne__(v)
+            return q.compare(v, qop)
+        return op(x, y)
+    # Pint's own `__eq__`/`__ne__` produce an elementwise result for a NumPy
+    # magnitude, but for a PyTorch magnitude they misbehave: Pint's
+    # `is_duck_array_type` does not recognize tensors, so its "compare to
+    # zero" shortcut leaves a multi-element boolean tensor un-reduced and then
+    # uses it in a Python `and` (raising "Boolean value of Tensor with more
+    # than one value is ambiguous"), and its "incompatible units" result is a
+    # scalar `False` rather than an all-false tensor. `_tensor_eq` reproduces
+    # Pint's NumPy semantics for tensor magnitudes: a comparison with a bare
+    # value treats the value as dimensionless (all-false unless this quantity
+    # is dimensionless, except that an all-zero/NaN value is compared by
+    # magnitude, as Pint does); a comparison between quantities converts
+    # compatible units and is all-false for incompatible units.
+    def _tensor_eq(self, other, ne):
         other_is_q = isinstance(other, pint.Quantity)
-        other_none = other_is_q and other._units is None
-        self_val = self._magnitude if self_none else self
-        other_val = other._magnitude if other_none else other
-        return op(self_val, other_val)
-    # Pint's own `__eq__`/`__ne__` contain a "compare to zero" shortcut
-    # (`eq(magnitude, 0, True)`, with the trailing `True` meaning "reduce
-    # the elementwise result to a single Python bool via `.all()`") that
-    # assumes any non-NumPy elementwise-comparison result can be so
-    # reduced. Pint's `is_duck_array_type` does not recognize a PyTorch
-    # tensor, so that reduction is skipped, and the un-reduced,
-    # multi-element boolean tensor is then used directly in a Python
-    # `and`--whose multi-element `Tensor.__bool__` raises "Boolean value
-    # of Tensor with more than one value is ambiguous". This happens
-    # regardless of whether either magnitude actually contains a zero, so
-    # comparing two ordinary, real-units, multi-element tensor-backed
-    # quantities via `==`/`!=` always crashes through Pint's own
-    # implementation. `compare()` (`<`/`<=`/`>`/`>=`, below) has no such
-    # shortcut and is not affected. `_binop_tensor_bool` bypasses Pint's
-    # `__eq__`/`__ne__` entirely whenever either operand's magnitude is a
-    # tensor and both operands are quantities, mirroring the same-units/
-    # convertible-units logic Pint itself otherwise uses.
-    def _binop_tensor_bool(self, other, op):
+        xm = self._magnitude
+        ym = other._magnitude if other_is_q else other
+        (xm, ym) = _promote_mags(xm, ym)
+        def full(value):
+            shape = torch.broadcast_shapes(tuple(xm.shape), tuple(ym.shape))
+            return torch.full(shape, value != ne, dtype=torch.bool,
+                              device=xm.device)
+        op = operator.ne if ne else operator.eq
+        if not other_is_q:
+            if bool(((ym == 0) | torch.isnan(ym)).all()):
+                if not self._is_multiplicative:
+                    xm = self.to_base_units()._magnitude
+                return op(xm, ym)
+            if self.dimensionless:
+                q = self.__class__(xm, self._units)
+                return op(
+                    q._convert_magnitude_not_inplace(self.UnitsContainer()),
+                    ym)
+            return full(False)
         if self._units == other._units:
-            return op(self._magnitude, other._magnitude)
-        if not alike_units(self._units, other._units):
-            raise pint.DimensionalityError(
-                self._units, other._units,
-                self.dimensionality, other.dimensionality)
-        return op(self._magnitude, other.to(self._units)._magnitude)
+            return op(xm, ym)
+        if not alike_units(self.units, other.units, ureg=self._REGISTRY):
+            return full(False)
+        q = self.__class__(xm, self._units)
+        return op(q._convert_magnitude_not_inplace(other._units), ym)
+    def _is_tensor_op(self, other):
+        if torch.is_tensor(self._magnitude):
+            return True
+        if isinstance(other, pint.Quantity):
+            return torch.is_tensor(other._magnitude)
+        return torch.is_tensor(other)
     def __eq__(self, other):
         if self._units is None or (
                 isinstance(other, pint.Quantity) and other._units is None):
             return self._binop_none_bool(other, operator.eq)
-        if isinstance(other, pint.Quantity) and (
-                torch.is_tensor(self._magnitude)
-                or torch.is_tensor(other._magnitude)):
-            return self._binop_tensor_bool(other, operator.eq)
+        if self._is_tensor_op(other):
+            return self._tensor_eq(other, False)
         return super().__eq__(other)
     def __ne__(self, other):
         if self._units is None or (
                 isinstance(other, pint.Quantity) and other._units is None):
             return self._binop_none_bool(other, operator.ne)
-        if isinstance(other, pint.Quantity) and (
-                torch.is_tensor(self._magnitude)
-                or torch.is_tensor(other._magnitude)):
-            return self._binop_tensor_bool(other, operator.ne)
+        if self._is_tensor_op(other):
+            return self._tensor_eq(other, True)
         return super().__ne__(other)
     def __hash__(self):
-        return super().__hash__()
+        # Mirrors pint.Quantity.__hash__, except that a quantity with units of
+        # None hashes like its magnitude (just as it compares equal to its
+        # magnitude), and a 0-dimensional NumPy magnitude hashes like the
+        # scalar it contains (so quant(5) hashes like 5). Magnitudes that are
+        # themselves unhashable (arrays with dimensions) remain unhashable.
+        if self._units is None:
+            return hash(_hashable_mag(self._magnitude))
+        base = self.to_base_units()
+        mag = _hashable_mag(base._magnitude)
+        if base.dimensionless:
+            return hash(mag)
+        return hash((pint.Quantity, mag, base._units))
+    def __reduce__(self):
+        # Pint pickles a quantity as a plain pint.Quantity attached to Pint's
+        # application registry, which would lose both the immlib.Quantity type
+        # and units of None. We instead reattach unpickled quantities to the
+        # global immlib registry (unit registries themselves are not pickled,
+        # just as in Pint).
+        return (_unpickle_quantity, (self._magnitude, self._units))
     def compare(self, other, op):
         if self._units is None or (
                 isinstance(other, pint.Quantity) and other._units is None):
             return self._binop_none_bool(other, op)
+        ops = self._real_tensor_operands(other, compare=True)
+        if ops is not None:
+            (x, y, _) = ops
+            return pint.Quantity.compare(x, y, op)
         return super().compare(other, op)
     def __matmul__(self, other):
         other_mag = (
             other._magnitude if isinstance(other, pint.Quantity) else other)
-        if torch.is_tensor(self._magnitude) or torch.is_tensor(other_mag):
+        if (torch.is_tensor(self._magnitude) or torch.is_tensor(other_mag)
+                or scipy__is_sparse(self._magnitude)
+                or scipy__is_sparse(other_mag)):
             return _immlib_matmul(self, other)
         return super().__matmul__(other)
     def __rmatmul__(self, other):
@@ -828,17 +1156,23 @@ class Quantity(pint.Quantity):
         # __matmul__ above.
         other_mag = (
             other._magnitude if isinstance(other, pint.Quantity) else other)
-        if torch.is_tensor(self._magnitude) or torch.is_tensor(other_mag):
+        if (torch.is_tensor(self._magnitude) or torch.is_tensor(other_mag)
+                or scipy__is_sparse(self._magnitude)
+                or scipy__is_sparse(other_mag)):
             return _immlib_matmul(other, self)
         return super().__rmatmul__(other)
     # NumPy dispatch ----------------------------------------------------------
     def __array_ufunc__(self, ufunc, method, *inputs, **kwargs):
-        """Extends Pint's own NumPy ufunc dispatch with the curated,
-        None-units-aware ``immlib.math``-backed subset described by
-        ``_numpy_math_dispatch``, falling back to Pint's ordinary
-        (real-units-only) behavior--unchanged--for anything outside that
-        subset, or for any ufunc method other than a plain call (e.g.
-        ``np.add.reduce``, which is not handled here).
+        """Extends Pint's own NumPy ufunc dispatch to support units of None.
+
+        If every quantity among the arguments has units of ``None``, the
+        ufunc (with any method, e.g. ``np.add.reduce``, and any keywords,
+        e.g. ``out``) is applied directly to the magnitudes (see
+        ``_none_ufunc``). Otherwise, the curated ``immlib.math``-backed subset
+        described by ``_numpy_math_dispatch`` is used when it applies, and
+        Pint's own behavior is used for everything else, with any unit-less
+        quantities passed to Pint as bare values (see
+        ``_pint_numpy_dispatch``).
 
         Operator-mirroring and comparison ufuncs (see
         _NUMPY_OPERATOR_METHODS/_NUMPY_UNARY_OPERATOR_METHODS) are
@@ -846,6 +1180,9 @@ class Quantity(pint.Quantity):
         calling the Quantity operand's own dunder method directly--see
         the comment above _NUMPY_MATH_DELEGATE_FUNCS for why.
         """
+        result = _none_ufunc(ufunc, method, inputs, kwargs)
+        if result is not NotImplemented:
+            return result
         if method == '__call__' and not kwargs:
             name = ufunc.__name__
             if name in _NUMPY_OPERATOR_METHODS and len(inputs) == 2:
@@ -867,15 +1204,24 @@ class Quantity(pint.Quantity):
             result = _numpy_math_dispatch(ufunc.__name__, inputs, kwargs)
             if result is not NotImplemented:
                 return result
-        return super().__array_ufunc__(ufunc, method, *inputs, **kwargs)
+        return _pint_numpy_dispatch(
+            lambda a, k: super(Quantity, self).__array_ufunc__(
+                ufunc, method, *a, **k),
+            inputs, kwargs)
     def __array_function__(self, func, types, args, kwargs):
         """Extends Pint's own NumPy function dispatch (``np.concatenate``,
-        ``np.sum``, etc.) the same way as ``__array_ufunc__`` above.
+        ``np.sum``, etc.) to support units of None: the curated
+        ``immlib.math``-backed subset is used when it applies, and Pint's own
+        implementation otherwise (see ``_pint_numpy_dispatch`` for how
+        unit-less quantities are passed to Pint).
         """
         result = _numpy_math_dispatch(func.__name__, args, kwargs)
         if result is not NotImplemented:
             return result
-        return super().__array_function__(func, types, args, kwargs)
+        return _pint_numpy_dispatch(
+            lambda a, k: super(Quantity, self).__array_function__(
+                func, types, a, k),
+            args, kwargs)
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         """Implements a deliberately minimal subset of PyTorch's
@@ -949,10 +1295,9 @@ class Quantity(pint.Quantity):
         return NotImplemented
     @classmethod
     def _torch_concat(cls, func, args, kwargs):
-        """Implements ``torch.cat``/``torch.stack``-style dispatch: every
-        quantity in the input sequence must share compatible units (a
-        non-quantity element is only accepted when the result is
-        unit-less); see ``__torch_function__``.
+        """Implements ``torch.cat``/``torch.stack``-style dispatch; units are
+        reconciled exactly as by ``immlib.math.concatenate`` (see
+        ``__torch_function__``).
         """
         if not args:
             return NotImplemented
@@ -960,24 +1305,11 @@ class Quantity(pint.Quantity):
         quants = [a for a in seq if isinstance(a, pint.Quantity)]
         if not quants:
             return NotImplemented
-        unit0 = quants[0]._units
-        mags = []
-        for a in seq:
-            if isinstance(a, pint.Quantity):
-                if a._units is None and unit0 is None:
-                    mags.append(a._magnitude)
-                elif a._units is None or unit0 is None:
-                    return NotImplemented
-                elif a._units == unit0:
-                    mags.append(a._magnitude)
-                else:
-                    mags.append(a.m_as(unit0))
-            elif unit0 is None:
-                mags.append(a)
-            else:
-                return NotImplemented
+        from ..math._core import _reconcile_seq
+        (mags, u) = _reconcile_seq(seq, func.__name__)
+        mags = promote(*mags)
         result_mag = func(mags, *rest, **kwargs)
-        return quants[0].__class__(result_mag, unit0)
+        return quants[0]._REGISTRY.Quantity(result_mag, u)
 
 
 class UnitRegistry(pint.UnitRegistry):
@@ -1006,17 +1338,12 @@ class UnitRegistry(pint.UnitRegistry):
     unit-less (``unit=None``) quantity from one raises an error, since a
     plain ``pint.UnitRegistry`` has no way to represent "no units".
 
-    .. Note:: Because an ``immlib.UnitRegistry``'s ``Quantity`` type accepts
-        ``units=None`` to mean "no units" rather than pint's own
-        "dimensionless", a handful of pint's own internal code paths that
-        construct a quantity without specifying units at all--such as
-        parsing the literal word ``"dimensionless"`` or an empty expression
-        string--are affected by this reinterpretation too: on an
-        ``immlib.UnitRegistry``, such a quantity comes back with ``units``
-        of ``None`` rather than pint's real ``dimensionless`` unit. This is
-        a deliberate, documented consequence of ``immlib.UnitRegistry``'s
-        design, and it is scoped to registries of this type; a plain
-        ``pint.UnitRegistry`` is entirely unaffected.
+    .. Note:: An ``immlib.UnitRegistry``'s ``Quantity`` type interprets only
+        an explicit ``units=None`` as "no units". Pint's own internal code
+        paths that construct a quantity without passing units at all--such
+        as parsing the literal word ``"dimensionless"`` or an empty
+        expression string--still produce Pint's real ``dimensionless``
+        unit.
     """
     Quantity = type('ImmlibQuantity', (Quantity, pint.UnitRegistry.Quantity), {})
 
@@ -1125,8 +1452,9 @@ def alike_units(a, b, /, *, ureg=None):
     ``alike_units(a, b)`` returns ``True`` if `a` and `b` can be cast to
     each other in terms of units and ``False`` otherwise. Both `a` and `b`
     can either be units, unit names, or quantities with units. If either `a`
-    or `b` is neither a unit nor a quantity, then it is considered equivalent
-    to having units of ``None``, i.e., no units.
+    or `b` is neither a unit nor a quantity, or is a quantity whose units are
+    ``None``, then it is treated as a bare number, which (as in Pint's own
+    arithmetic) is alike only to dimensionless units.
 
     Parameters
     ----------
@@ -1152,11 +1480,48 @@ def alike_units(a, b, /, *, ureg=None):
         ureg = unitregistry(a, None)
         if ureg is None:
             ureg = unitregistry(b, Ellipsis)
-    if not isinstance(a, _unitlike_types):
+    # A non-unit-like object, or a quantity whose units are None, is treated
+    # like a bare number (i.e., as dimensionless), as in Pint's arithmetic.
+    if not isinstance(a, _unitlike_types) or (
+            isinstance(a, pint.Quantity) and a._units is None):
         a = 'dimensionless'
-    if not isinstance(b, _unitlike_types):
+    if not isinstance(b, _unitlike_types) or (
+            isinstance(b, pint.Quantity) and b._units is None):
         b = 'dimensionless'
     return ureg.is_compatible_with(a, b)
+def _quant_magnitude(mag):
+    """Returns the magnitude that ``quant()`` stores for the non-quantity
+    `mag`, or raises ``TypeError`` if `mag` is not numerical.
+
+    PyTorch tensors, NumPy arrays, and SciPy sparse arrays/matrices are kept
+    as they are (so ``quant()`` never changes an existing array's or tensor's
+    backend or device). Anything else (Python and NumPy scalars, lists,
+    tuples, and other array-like values) is converted with
+    ``numpy.asarray``, so scalars become 0-dimensional arrays. Arrays must
+    have a numeric (or boolean) dtype.
+    """
+    if torch.is_tensor(mag):
+        return mag
+    if isinstance(mag, (str, bytes)):
+        raise TypeError(
+            f"quant: magnitude must be numerical, not {type(mag).__name__}"
+            " (to parse a quantity from a string, use the unit registry,"
+            " e.g. immlib.units.Quantity('5 mm'))")
+    if isinstance(mag, np.ndarray) or scipy__is_sparse(mag):
+        arr = mag
+    else:
+        try:
+            arr = np.asarray(mag)
+        except Exception as e:
+            raise TypeError(
+                f"quant: magnitude of type {type(mag).__name__} could not be"
+                " converted into a numerical array") from e
+    dt = arr.dtype
+    if not (np.issubdtype(dt, np.number) or np.issubdtype(dt, np.bool_)):
+        raise TypeError(
+            f"quant: magnitude must be numerical, but it has dtype {dt}"
+            f" (type {type(mag).__name__})")
+    return arr
 @docwrap('immlib.quant')
 def quant(mag, /, unit=Ellipsis, *, ureg=None):
     """Returns a ``pint.Quantity`` object with the given magnitude and unit.
@@ -1167,6 +1532,14 @@ def quant(mag, /, unit=Ellipsis, *, ureg=None):
     only if necessary); if the units of `mag` in this case are not compatible
     with `unit`, then an error is raised. If `mag` is not a quantity, then the
     given `unit` is used to create the quantity.
+
+    If `mag` is not a quantity, it must be numerical. NumPy arrays, PyTorch
+    tensors, and SciPy sparse arrays/matrices are used as the magnitude
+    as-is (``quant()`` never converts an array into a tensor or vice versa,
+    and never moves a tensor between devices; see ``immlib.to_array`` and
+    ``immlib.to_tensor`` for that). Other numerical values, including Python
+    and NumPy scalars and lists of numbers, are converted into NumPy arrays;
+    scalars become 0-dimensional arrays.
 
     ``quant(mag)`` is equivalent to ``quant(mag, Ellipsis)``. If `mag` is
     already a ``pint.Quantity`` object (of any kind, ``immlib.Quantity`` or
@@ -1213,6 +1586,10 @@ def quant(mag, /, unit=Ellipsis, *, ureg=None):
 
     Raises
     ------
+    TypeError
+        If `mag` is not a quantity and is not numerical: strings, and arrays
+        whose dtype is neither numeric nor boolean (such as object arrays),
+        are rejected.
     ValueError
         If a unit-less (``unit=None``) quantity is requested using a unit
         registry that is not an ``immlib.UnitRegistry``.
@@ -1235,7 +1612,7 @@ def quant(mag, /, unit=Ellipsis, *, ureg=None):
             # regardless of what units mag previously had--there is no
             # meaningful "conversion" from a real unit (or from no unit) to
             # having no units at all, so we never invoke mag's own to().
-            return qcls(mag.magnitude, None)
+            return qcls(_quant_magnitude(mag.magnitude), None)
         elif unit is Ellipsis:
             # mag is returned exactly as given, in its own unit registry;
             # a plain pint.Quantity is not promoted to immlib.Quantity here.
@@ -1258,7 +1635,7 @@ def quant(mag, /, unit=Ellipsis, *, ureg=None):
                 "quant: unit=None requires an immlib.UnitRegistry; the given"
                 " (or default) unit registry is a plain pint.UnitRegistry,"
                 " which cannot represent a unit-less quantity")
-        q = qcls(mag, unit)
+        q = qcls(_quant_magnitude(mag), unit)
     q_ureg = unitregistry(q)
     if q_ureg is not ureg:
         # The caller explicitly requested a different registry than the one

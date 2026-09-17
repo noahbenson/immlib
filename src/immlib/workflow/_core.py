@@ -5,7 +5,8 @@
 
 # Dependencies ################################################################
 
-import copy, textwrap
+import copy, textwrap, pickle
+from contextvars import ContextVar
 from collections.abc import (Callable, Mapping)
 from collections import (defaultdict, namedtuple)
 from functools import (reduce, wraps, partial, update_wrapper)
@@ -16,7 +17,7 @@ from pathlib import Path
 import numpy as np
 from pcollections import (
     pdict, tdict, ldict, tldict,
-    lazy, holdlazy,
+    lazy, holdlazy, LazyError,
     pset, tset,
     plist)
 
@@ -567,6 +568,20 @@ class calc:
         """
         if self.lazy: return self.lazy_mapcall(*args, **kwargs)
         else:         return self.eager_mapcall(*args, **kwargs)
+    def __reduce__(self):
+        # A calc is pickled by reference to the (module-level) function that
+        # it decorates, whose `calc` attribute is the calc itself; unpickling
+        # imports the function's module and returns that attribute. Copies
+        # made by rename_keys, with_lrucache, or with_pathcache are not
+        # referenced by any function and can't be pickled this way.
+        fn = self.base_function
+        if getattr(fn, 'calc', None) is not self:
+            raise pickle.PicklingError(
+                f"calc {self.name!r} cannot be pickled because it is not the"
+                f" calc attached to its function (calc copies made by"
+                f" rename_keys, with_lrucache, or with_pathcache cannot be"
+                f" pickled)")
+        return (getattr, (fn, 'calc'))
     def __setattr__(self, k, v):
         if self.function is Ellipsis:
             # We're still initializing, so setattr is allowed.
@@ -672,27 +687,36 @@ class calc:
         wrapfn = wraps(self.function)(_tr_fn_wrapper)
         object.__setattr__(tr, 'function', wrapfn)
         return tr
+    def _copy(self):
+        # copy.copy can't be used: it would call calc.__new__ with no
+        # arguments, which returns a decorator rather than a calc.
+        new_calc = object.__new__(calc)
+        for k in calc.__slots__:
+            object.__setattr__(new_calc, k, getattr(self, k))
+        return new_calc
     def with_lrucache(self, new_cache):
         "Returns a copy of a calc with a different in-memory cache strategy."
         new_cache = to_lrucache(new_cache)
         if new_cache is self.lrucache:
             return self
-        new_calc = copy.copy(self)
+        new_calc = self._copy()
         object.__setattr__(new_calc, 'lrucache', new_cache)
         fn = self.base_function
-        new_fn = calc._apply_caching(fn, new_cache, self.pathcache)
+        new_fn = calc._apply_caching(
+            fn, signature(fn), new_cache, self.pathcache)
         if fn is not new_fn:
             object.__setattr__(new_calc, 'function', new_fn)
         return new_calc
     def with_pathcache(self, new_path):
         """Returns a copy of a calc with a different cache directory."""
-        new_path = self._interpret_pathcache(new_path)
+        new_cache = self._interpret_pathcache(new_path)
         if new_cache is self.pathcache:
             return self
-        new_calc = copy.copy(self)
+        new_calc = self._copy()
         object.__setattr__(new_calc, 'pathcache', new_cache)
         fn = self.base_function
-        new_fn = calc._apply_caching(fn, self.lrucache, new_cache)
+        new_fn = calc._apply_caching(
+            fn, signature(fn), self.lrucache, new_cache)
         if fn is not new_fn:
             object.__setattr__(new_calc, 'function', new_fn)
         return new_calc
@@ -861,13 +885,22 @@ class plan(pdict):
         return plan._source_lookup(inputtup, calctup, calcdata.sources[key])
     @staticmethod
     def _call_calc(inputtup, calctup, c, args):
-        argvals = map(partial(plan._source_lookup, inputtup, calctup), args)
+        c = to_calc(c)
+        params = tuple(c.signature.parameters.values())
+        # We evaluate the arguments before calling the calculation so that a
+        # failure of an upstream value can be told apart from a failure of
+        # this calculation (see PlanError).
+        argvals = []
+        for (p,src) in zip(params, args):
+            try:
+                argvals.append(plan._source_lookup(inputtup, calctup, src))
+            except LazyError as e:
+                raise _UpstreamError(p.name, c) from e
         args = []
         kwargs = {}
-        c = to_calc(c)
-        for (p,arg) in zip(c.signature.parameters.values(), argvals):
+        for (p,arg) in zip(params, argvals):
             if p.kind == p.POSITIONAL_ONLY:
-                args.append[arg]
+                args.append(arg)
             else:
                 kwargs[p.name] = arg
         r = c.eager_call(*args, **kwargs)
@@ -876,13 +909,18 @@ class plan(pdict):
         else:
             return tuple(r)
     @staticmethod
-    def _make_calctup(calcdata, inputtup):
+    def _make_calctup(calcdata, inputtup, ready=None):
+        # If given, ready maps calc indices to the (already computed) results
+        # of those calcs; see plandict pickling.
         f = plan._call_calc
+        ready = {} if ready is None else ready
         # We take advantage of Python's weak closures here:
         calctup = ()
         calctup = tuple(
-            lazy(lambda c,args: f(inputtup, calctup, c, args), c, args)
-            for (c,args) in zip(calcdata.calcs, calcdata.args))
+            (lazy._from_value(ready[cidx]) if cidx in ready else
+             lazy(lambda c,args: f(inputtup, calctup, c, args), c, args))
+            for (cidx,(c,args)) in enumerate(
+                zip(calcdata.calcs, calcdata.args)))
         return calctup
     @staticmethod
     def _update_calctup(calcdata, inputtup, calctup, cidx):
@@ -1307,6 +1345,10 @@ class plan(pdict):
     def __call__(self, *args, **kwargs):
         # Make and return a plandict with these parameters.
         return plandict(self, *args, **kwargs)
+    def __reduce__(self):
+        # A plan is rebuilt from its calcs (which are pickled by reference to
+        # their functions; see calc.__reduce__).
+        return (plan, (dict(self),))
     def __str__(self):
         n = len(self.calcdata.calcs)
         m = len(self.inputs)
@@ -1323,6 +1365,147 @@ def is_plan(arg):
     ``False`` otherwise.
     """
     return isinstance(arg, plan)
+
+
+# PlanError ###################################################################
+
+calc_type = calc
+class PlanError(LazyError):
+    """The error raised when a value of a ``plandict`` cannot be computed.
+
+    The values of a ``plandict`` are computed lazily, and a calculation that
+    fails does so inside a chain of ``pcollections.lazy`` objects, one for each
+    calculation or value that depends on it. Rather than exposing that chain,
+    ``plandict`` and ``tplandict`` raise a ``PlanError`` whose message names
+    the value that was requested and the calculation that failed (with the
+    file and line where the calculation's function was defined), and whose
+    ``__cause__`` is the exception that the calculation originally raised.
+
+    Because ``PlanError`` is a subclass of ``pcollections.LazyError``, code
+    that catches ``LazyError`` continues to catch it. As with any lazy value,
+    a failed calculation is not rerun: requesting the value again raises a new
+    ``PlanError`` with the same cause.
+
+    Attributes
+    ----------
+    key : str or None
+        The ``plandict`` key whose value was requested, or ``None`` if the
+        failure occurred while running one of the plan's required (non-lazy)
+        calculations.
+    calc : immlib.calc or None
+        The calculation that raised the original exception, or ``None`` if
+        the failure did not originate in a calculation (for example, if a lazy
+        input value failed).
+    """
+    def __init__(self, message, key=None, calc=None):
+        super().__init__(message)
+        self.key = key
+        self.calc = calc
+def _calc_location(c):
+    """Returns ``'filename:lineno'`` for a calc's function, or ``None``."""
+    import inspect
+    fn = getattr(c, 'base_function', None)
+    try:
+        fn = inspect.unwrap(fn)
+        code = fn.__code__
+        return f"{code.co_filename}:{code.co_firstlineno}"
+    except Exception:
+        return None
+class _UpstreamError(LazyError):
+    """Raised inside a calculation's lazy value when one of its inputs could
+    not be computed; used by ``_plan_error`` to walk past calculations that
+    did not themselves fail."""
+    def __init__(self, param, calc):
+        super().__init__(
+            f"input {param!r} of calc {calc.name!r} could not be computed")
+        self.param = param
+        self.upstream_calc = calc
+def _plan_error(err, key=None, inputs=()):
+    """Converts a ``LazyError`` raised while computing a plan value into a
+    ``PlanError`` whose ``__cause__`` is the original exception.
+
+    `err` is the ``LazyError`` and `key` is the requested ``plandict`` key
+    (or ``None`` when a required calculation failed); `inputs` are the names
+    of the plan's inputs.
+    """
+    root = err.root_cause
+    calc = None
+    # Walk the chain of LazyErrors to find the calc that raised the original
+    # exception: a calc's lazy value whose failure was not caused by one of
+    # its inputs failing (which _call_calc marks with an _UpstreamError).
+    # If no such calc is found, the failure came from an input value.
+    param = None
+    e = err
+    seen = set()
+    while isinstance(e, LazyError) and id(e) not in seen:
+        seen.add(id(e))
+        if isinstance(e, _UpstreamError):
+            param = e.param
+        else:
+            ecalc = next(
+                (a for a in (e.func_args or ()) if isinstance(a, calc_type)),
+                None)
+            if ecalc is not None and not isinstance(e.__cause__,
+                                                    _UpstreamError):
+                calc = ecalc
+                break
+        e = e.__cause__
+    if key is None:
+        what = "a required calculation of the plan"
+    else:
+        what = f"{key!r}"
+    if calc is not None:
+        # Plans use renamed copies of their calcs; report the calc object
+        # that the user created (which its function refers to).
+        calc = getattr(calc.base_function, 'calc', calc)
+    if calc is None:
+        if param is None and key in inputs:
+            param = key
+        if param is None:
+            where = "an input value raised"
+        elif param == key:
+            where = "the input value raised"
+        else:
+            where = f"input {param!r} raised"
+    else:
+        loc = _calc_location(calc)
+        loc = "" if loc is None else f" (defined at {loc})"
+        where = f"calc {calc.name!r}{loc} raised"
+    if root is None:
+        msg = (f"could not compute {what}: {where} a LazyError with no cause"
+               f" (a lazy value may depend on itself): {err}")
+    else:
+        msg = f"could not compute {what}: {where} {type(root).__name__}"
+        rmsg = str(root)
+        if rmsg:
+            msg = f"{msg}: {rmsg}"
+    return PlanError(msg, key=key, calc=calc)
+def _plan_getitem(base, self, key):
+    try:
+        return base.__getitem__(self, key)
+    except LazyError as e:
+        pe = _plan_error(e, key=key, inputs=self.plan.inputs)
+        cause = e.root_cause
+    raise pe from cause
+def _plan_get(base, self, key, default):
+    try:
+        if not base.__contains__(self, key):
+            return default
+        return base.__getitem__(self, key)
+    except LazyError as e:
+        pe = _plan_error(e, key=key, inputs=self.plan.inputs)
+        cause = e.root_cause
+    raise pe from cause
+def _plan_run_requirements(plan, calctup):
+    calcdata = plan.calcdata
+    for r in plan.requirements:
+        cidx = calcdata.index[r]
+        try:
+            calctup[cidx]()
+        except LazyError as e:
+            pe = _plan_error(e)
+            cause = e.root_cause
+            raise pe from cause
 
 
 # plandict ####################################################################
@@ -1400,10 +1583,7 @@ class plandict(ldict):
         object.__setattr__(self, '_inputdata', inputtup)
         # At this point, the object should be entirely initialized, so we can
         # go ahead and run its required calculations.
-        calcdata = plan.calcdata
-        for r in plan.requirements:
-            cidx = calcdata.index[r]
-            calctup[cidx]()
+        _plan_run_requirements(plan, calctup)
         # That's all; just return the object.
         return self
     @classmethod
@@ -1411,6 +1591,9 @@ class plandict(ldict):
         # First, merge from left-to-right, respecting laziness. Then, run them
         # (lazily) through the filters.
         params = merge(plan.defaults, *args, **kwargs)
+        return cls._new_from_params(plan, params)
+    @classmethod
+    def _new_from_params(cls, plan, params, ready=None):
         given_params = set(params.keys())
         # Are we missing any parameters?
         missing_params = plan.inputs - given_params
@@ -1431,20 +1614,26 @@ class plandict(ldict):
                 inp.append(lazy(identfn, v))
         inputtup = tuple(inp)
         # We can also make a lazy object per calc for the calctup.
-        calctup = plan._make_calctup(plan.calcdata, inputtup)
+        calctup = plan._make_calctup(plan.calcdata, inputtup, ready)
         # Go ahead and do the initialization.
         items = ldict.empty.transient()
+        ready = {} if ready is None else ready
+        def lookup(src):
+            if src[0] in ready:
+                # This value's calc was already computed (see plandict
+                # pickling), so the value is ready too.
+                return lazy._from_value(ready[src[0]][src[1]])
+            return lazy(plan._source_lookup, inputtup, calctup, src)
         for k in plan.inputs:
             src = plan.valsources[k]
             # If this input gets filtered, we need a lazy lookup:
             if isinstance(src, tuple):
-                v = lazy(plan._source_lookup, inputtup, calctup, src)
+                v = lookup(src)
             else:
                 v = pparams[k]
             items[k] = v
         for k in plan.outputs:
-            src = plan.valsources[k]
-            items[k] = lazy(plan._source_lookup, inputtup, calctup, src)
+            items[k] = lookup(plan.valsources[k])
         # We can now make and return the object (this also runs requirements).
         return cls._new_plandict(items, plan, params, calctup, inputtup)
     @classmethod
@@ -1462,7 +1651,7 @@ class plandict(ldict):
         # There must only be parameters here.
         planins = plan.inputs
         if any(k not in planins for k in param_updates.keys()):
-            extras = set(params_updates.keys()) - plan.inputs
+            extras = set(param_updates.keys()) - plan.inputs
             raise ValueError(f"unrecognized inputs: {tuple(extras)}")
         # Make a new inputtup, calctup, and updates to the items dict.
         if len(param_updates) == 0:
@@ -1485,10 +1674,25 @@ class plandict(ldict):
         return self.set(k, v)
     def delete(self, k):
         raise TypeError("cannot delete from a plandict")
+    # Every method that removes items must be blocked: pcollections returns
+    # an instance of the subclass from these methods, which for a plandict
+    # would be missing its plan (clear) or silently lack plan values (pop).
+    def pop(self, *args):
+        raise TypeError("cannot delete from a plandict")
+    def popitem(self):
+        raise TypeError("cannot delete from a plandict")
+    def clear(self):
+        raise TypeError("cannot delete from a plandict")
+    def __getitem__(self, k):
+        return _plan_getitem(ldict, self, k)
+    def get(self, k, default=None):
+        return _plan_get(ldict, self, k, default)
     def transient(self):
         return tplandict(self)
     def __hash__(self):
         return hash(self.inputs) + hash(self.plan)
+    def __reduce__(self):
+        return (_unpickle_plandict, _plandict_pickle_args(self, False))
 
 class tplandict(tldict):
     """A transient dict type that follows an ``immlib`` plan.
@@ -1552,7 +1756,7 @@ class tplandict(tldict):
         # There must only be parameters here.
         planins = plan.inputs
         if any(k not in planins for k in param_updates.keys()):
-            extras = set(params_updates.keys()) - plan.inputs
+            extras = set(param_updates.keys()) - plan.inputs
             raise ValueError(f"unrecognized inputs: {tuple(extras)}")
         # Make a new inputtup, calctup, and update the items dict.
         (inputtup, calctup, items) = plan._update_dictdata(
@@ -1585,10 +1789,7 @@ class tplandict(tldict):
             tldict.__setitem__(self, k, v)
         # At this point, the object should be entirely initialized, so we can
         # go ahead and run its required calculations.
-        calcdata = plan.calcdata
-        for r in plan.requirements:
-            cidx = calcdata.index[r]
-            calctup[cidx]()
+        _plan_run_requirements(plan, calctup)
         # That's all; just return the object.
         return self
     def __setitem__(self, k, v):
@@ -1613,18 +1814,87 @@ class tplandict(tldict):
         object.__setattr__(self, '_inputdata', inputtup)
         object.__setattr__(self, '_calcdata', calctup)
         # Finally, we need to rerun any requirements that were changed.
-        calcdataidx = plan.calcdata.index
-        for r in plan.requirements:
-            cidx = calcdataidx[r]
-            calctup[cidx]()
+        _plan_run_requirements(plan, calctup)
     def __delitem__(self, k):
         raise TypeError("cannot delete items from tplandict objects")
+    def pop(self, *args):
+        raise TypeError("cannot delete items from tplandict objects")
+    def popitem(self):
+        raise TypeError("cannot delete items from tplandict objects")
+    def clear(self):
+        raise TypeError("cannot delete items from tplandict objects")
+    def __getitem__(self, k):
+        return _plan_getitem(tldict, self, k)
+    def get(self, k, default=None):
+        return _plan_get(tldict, self, k, default)
     def setdefault(self, k, default=None, /):
         # All possible keys to set are already set in a plandict, so just
         # return the current value of key k
         return self[k]
     def persistent(self):
         return plandict(self)
+    def __reduce__(self):
+        return (_unpickle_plandict, _plandict_pickle_args(self, True))
+
+
+# Pickling plandicts ##########################################################
+
+# When this is True, pickled plandicts and tplandicts include the results of
+# the calculations that have already been computed; see save_ready.
+_pickle_save_ready = ContextVar('immlib_pickle_save_ready', default=False)
+class save_ready:
+    """Context manager that includes computed values in pickled plandicts.
+
+    A ``plandict`` (or ``tplandict``) is normally pickled as its ``plan`` and
+    its inputs only; when it is unpickled, its values are computed again
+    (lazily) as they are requested, and calculations that use a cache path
+    (see ``calc``) read from that cache. Inside a ``with save_ready():``
+    block, pickled plandicts also include the results of every calculation
+    that has already been computed, and unpickling them restores those
+    results rather than recomputing them.
+
+    .. Warning:: Saved results are restored as they were computed; if a
+        calculation's code has changed since the plandict was pickled, the
+        restored results reflect the old code.
+
+    The same behavior is available via ``immlib.save(path, pd, 'pickle',
+    save_ready=True)``.
+
+    Examples
+    --------
+    >>> import pickle
+    >>> with save_ready():
+    ...     data = pickle.dumps(pd)
+    """
+    __slots__ = ('_value', '_token')
+    def __init__(self, value=True):
+        object.__setattr__(self, '_value', bool(value))
+        object.__setattr__(self, '_token', None)
+    def __enter__(self):
+        object.__setattr__(
+            self, '_token', _pickle_save_ready.set(self._value))
+        return self
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        _pickle_save_ready.reset(self._token)
+        return False
+def _plandict_pickle_args(pd, is_transient):
+    ready = None
+    if _pickle_save_ready.get():
+        ready = {}
+        for (cidx, lz) in enumerate(pd._calcdata):
+            if not lz.is_ready():
+                continue
+            try:
+                ready[cidx] = lz()
+            except LazyError:
+                # Failed calculations are not saved.
+                pass
+    return (pd.plan, pd.inputs, ready, is_transient)
+def _unpickle_plandict(plan, inputs, ready, is_transient):
+    pd = plandict._new_from_params(plan, inputs, ready)
+    return pd.transient() if is_transient else pd
+
+
 @docwrap
 def is_plandict(arg):
     """Determines if an object is a ``plandict`` instance.

@@ -91,6 +91,24 @@ class TestMath(TestCase):
         r = im.equal(a, b)
         self.assertTrue(torch.is_tensor(r))
         self.assertTrue(bool(r.all()))
+        # Incompatible units, or a unit-less value compared with a quantity
+        # that has real dimensions, give an all-false result on both
+        # backends.
+        import numpy as np
+        s = il.quant(torch.tensor([1.0, 2.0, 3.0]), 's')
+        n = il.quant(torch.tensor([1.0, 2.0, 3.0]))
+        for other in (s, n):
+            r = im.equal(a, other)
+            self.assertTrue(torch.equal(r, torch.zeros(3, dtype=torch.bool)))
+            r = im.equal(other, a)
+            self.assertTrue(torch.equal(r, torch.zeros(3, dtype=torch.bool)))
+            r = im.not_equal(a, other)
+            self.assertTrue(bool(r.all()))
+        anp = il.quant(np.array([1.0, 2.0, 3.0]), 'm')
+        for other in (il.quant(np.array([1.0, 2.0, 3.0]), 's'),
+                      il.quant(np.array([1.0, 2.0, 3.0]))):
+            r = im.equal(anp, other)
+            self.assertTrue(np.array_equal(r, [False, False, False]))
 
     def test_maximum_minimum_where(self):
         import immlib as il
@@ -106,9 +124,23 @@ class TestMath(TestCase):
         cond = np.array([True, False, True])
         r = im.where(cond, a, b)
         self.assertTrue(np.allclose(r.m, [1.0, 0.2, 3.0]))
-        # Mixing a unit-less quantity with a real-unit one is an error.
-        with self.assertRaises(TypeError):
+        # A unit-less quantity is treated like a bare (dimensionless) value,
+        # as numpy.maximum(x, quant(y, 'm')) treats x.
+        import pint
+        with self.assertRaises(pint.DimensionalityError):
             im.maximum(il.quant(1.0), il.quant(1.0, 'm'))
+        with self.assertRaises(pint.DimensionalityError):
+            np.maximum(il.quant(1.0), il.quant(1.0, 'm'))
+        with self.assertRaises(pint.DimensionalityError):
+            im.where(cond, il.quant(np.ones(3)), a)
+        r = im.maximum(il.quant(np.array([1.0, 2000.0])),
+                       il.quant(np.array([3.0, 1.0]), 'm/km'))
+        self.assertEqual(r.units, il.unit('m/km'))
+        self.assertTrue(np.allclose(r.m, [1000.0, 2000000.0]))
+        r = im.minimum(il.quant(np.array([3.0, 1.0]), 'm/km'),
+                       il.quant(np.array([1.0, 2000.0])))
+        self.assertEqual(r.units, il.unit('m/km'))
+        self.assertTrue(np.allclose(r.m, [3.0, 1.0]))
         # Dimensionally-incompatible real units raise, not silently combine.
         import pint
         with self.assertRaises(pint.DimensionalityError):
@@ -264,8 +296,14 @@ class TestMath(TestCase):
             il.quant(np.array([1.0, 2.0]), 'm'),
             il.quant(np.array([100.0, 200.0]), 'cm')])
         self.assertTrue(np.allclose(r.m, [1, 2, 1, 2]))
-        with self.assertRaises(TypeError):
+        import pint
+        with self.assertRaises(pint.DimensionalityError):
             im.stack([il.quant(np.array([1.0])), il.quant(np.array([1.0]), 'm')])
+        # The first real units win; unit-less elements are dimensionless.
+        r = im.concatenate([il.quant(np.array([1.0])),
+                            il.quant(np.array([2.0]), 'm/km')])
+        self.assertEqual(r.units, il.unit('m/km'))
+        self.assertTrue(np.allclose(r.m, [1000.0, 2.0]))
 
     def test_shape_combination_tensor(self):
         import immlib as il
@@ -327,3 +365,78 @@ class TestMath(TestCase):
         self.assertTrue(torch.is_tensor(r.m))
         r.m.sum().backward()
         self.assertIsNotNone(ta.grad)
+
+    def test_sparse_reductions(self):
+        """Reductions of SciPy sparse arrays return dense NumPy results that
+        match the reductions of the equivalent dense arrays."""
+        import immlib as il
+        import immlib.math as im
+        import numpy as np
+        import scipy.sparse as sps
+        dense = np.array([[1.0, 0.0, 2.0], [3.0, 4.0, 5.0], [0.0, 0.0, 0.0]])
+        reductions = [('sum', {}), ('mean', {}), ('min', {}), ('max', {}),
+                      ('any', {}), ('all', {}), ('std', {}), ('var', {}),
+                      ('std', {'ddof': 1}), ('prod', {})]
+        for fmt in (sps.csr_matrix, sps.csr_array, sps.coo_array):
+            sp = il.quant(fmt(dense), 'm')
+            dn = il.quant(dense, 'm')
+            for (name, kw) in reductions:
+                for axis in (None, 0, 1, -1, (0, 1)):
+                    for keepdims in (False, True):
+                        with self.subTest(fmt=fmt.__name__, fn=name,
+                                          axis=axis, keepdims=keepdims):
+                            fn = getattr(im, name)
+                            r = fn(sp, axis=axis, keepdims=keepdims, **kw)
+                            e = fn(dn, axis=axis, keepdims=keepdims, **kw)
+                            if name in ('any', 'all'):
+                                (rm, em) = (r, e)
+                            else:
+                                self.assertEqual(r.units, e.units)
+                                (rm, em) = (r.m, e.m)
+                            self.assertFalse(sps.issparse(rm))
+                            self.assertNotIsInstance(rm, np.matrix)
+                            self.assertIsInstance(rm, (np.ndarray, np.generic))
+                            self.assertEqual(np.shape(rm), np.shape(em))
+                            self.assertTrue(np.allclose(rm, em))
+        # Sparse PyTorch reductions are also returned dense.
+        import torch
+        t = torch.tensor(dense).to_sparse()
+        r = im.sum(il.quant(t, 'm'), axis=0)
+        self.assertEqual(r.m.layout, torch.strided)
+        self.assertTrue(torch.allclose(r.m, torch.tensor(dense.sum(axis=0))))
+
+    def test_sparse_elementwise(self):
+        """Operations that preserve sparsity keep SciPy sparse arrays sparse;
+        others raise TypeError instead of densifying."""
+        import immlib as il
+        import immlib.math as im
+        import numpy as np
+        import scipy.sparse as sps
+        dense = np.array([[1.26, 0.0, 2.0], [3.0, 4.0, 0.0]])
+        sp = sps.csr_array(dense)
+        q = il.quant(sp, 'm')
+        for r in (im.abs(q), im.negative(q), im.add(q, q), im.multiply(q, q),
+                  im.sqrt(q), im.floor(q), im.ceil(q), im.round(q, 1),
+                  im.maximum(q, q), im.minimum(q, q),
+                  im.sin(sp), im.tan(sp), im.arcsin(sp / 10), im.arctan(sp),
+                  im.reshape(q, (3, 2)), im.transpose(q),
+                  im.concatenate([q, q]), im.concatenate([q, q], axis=1)):
+            self.assertTrue(sps.issparse(r.m))
+        self.assertTrue(np.allclose(im.round(q, 1).m.toarray(),
+                                    np.round(dense, 1)))
+        self.assertTrue(np.allclose(im.floor(q).m.toarray(), np.floor(dense)))
+        self.assertEqual(im.sqrt(q).units, il.unit('m') ** 0.5)
+        self.assertEqual(im.transpose(q).m.shape, (3, 2))
+        r = im.concatenate([q, il.quant(dense, 'cm')])
+        self.assertTrue(np.allclose(r.m.toarray(),
+                                    np.vstack([dense, dense / 100])))
+        r = im.matmul(q, il.quant(sp.T, 's'))
+        self.assertTrue(sps.issparse(r.m))
+        self.assertTrue(np.allclose(r.m.toarray(), dense @ dense.T))
+        self.assertEqual(r.units, il.unit('m*s'))
+        for f in (lambda: im.exp(sp), lambda: im.cos(sp), lambda: im.log(sp),
+                  lambda: im.log10(sp), lambda: im.arccos(sp),
+                  lambda: im.where(sp, sp, sp), lambda: im.squeeze(sp),
+                  lambda: im.stack([sp, sp])):
+            with self.assertRaises(TypeError):
+                f()

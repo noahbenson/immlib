@@ -258,7 +258,7 @@ def detect_indentation(text, /, skip_first=True, tabsize=8):
     return ident
 @docwrap
 def reindent(text, new_indent=0, /,
-             skip_first=True, tabsize=8, final_endline=True):
+             skip_first=True, tabsize=8, final_endline=True, default_indent=0):
     """Returns a block of text with a different indentation.
 
     ``reindent(text, n)`` returns a copy of `text` after removing its current
@@ -275,12 +275,15 @@ def reindent(text, new_indent=0, /,
         0, meaning that the text will be unindented.
     skip_first : bool, optional
         Whether or not to skip the first line.
-    tabside : int, optional
+    tabsize : int, optional
         How large to consider tab characters in the text; this is used with the
         ``str.expandtabs`` method. The default is 8.
     final_endline : bool, optional
         Whether the returned string should end with a newline or not. The
         default is ``True``.
+    default_indent : int, optional
+        The indentation level to assume if none can be detected (i.e., if every
+        line considered is blank). The default is 0.
 
     Returns
     -------
@@ -289,6 +292,8 @@ def reindent(text, new_indent=0, /,
     """
     # Get the current indentation level:
     currind = detect_indentation(text, skip_first=skip_first, tabsize=tabsize)
+    if currind is None:
+        currind = default_indent
     # Split the text into lines.
     lns = text.split('\n')
     # Remove all the current indentations:
@@ -307,6 +312,6 @@ def reindent(text, new_indent=0, /,
             ln = ln[currind:]
         newlns.append(newhead + ln)
     newtext = '\n'.join(newlns)
-    if final_endline and newtext[-1] != '\n':
+    if final_endline and not newtext.endswith('\n'):
         newtext += '\n'
     return newtext
