@@ -15,6 +15,7 @@ import pint
 import numpy as np
 import scipy.sparse as sps
 from pcollections import holdlazy
+from contextvars import ContextVar
 
 from ..doc import docwrap
 
@@ -525,7 +526,7 @@ def is_apseq(obj):
         ``False``.
     """
     return isinstance(obj, PersistentSequence)
-from collections.abc import ByteString
+_ByteString = (bytes, bytearray)
 @docwrap('immlib.is_abytes')
 def is_abytes(obj):
     """Returns ``True`` if an object is a byte-string, otherwise ``False``.
@@ -544,7 +545,7 @@ def is_abytes(obj):
         ``True`` if `obj` is an instance of ``ByteString``, otherwise
         ``False``.
     """
-    return isinstance(obj, ByteString)
+    return isinstance(obj, _ByteString)
 @docwrap('immlib.is_bytes')
 def is_bytes(obj):
     """Returns ``True`` if an object is a ``bytes`` object, otherwise
@@ -2369,6 +2370,19 @@ def _argfilter_dispatch(filter_fn, f, fsig,
 # We put the unitregistry here and not in the quantity namespace because we
 # need it both for quantity and numeric and it causes a circular import if
 # placed in the quantity file.
+# The default unit registry is immlib.units unless it has been overridden in
+# the current thread or task by the immlib.default_ureg context manager.
+_default_ureg_override = ContextVar('immlib_default_ureg', default=None)
+# The global default registry; this is what `immlib.units = ureg` sets (see
+# immlib/__init__.py) and is initialized in immlib.util._quantity.
+_global_ureg = [None]
+def _default_ureg():
+    """Returns the unit registry that ``immlib`` functions use by default:
+    the registry set by an enclosing ``immlib.default_ureg`` block in the
+    current thread (or asynchronous task), if any, and the global default
+    registry otherwise. ``immlib.units`` always returns this registry."""
+    ureg = _default_ureg_override.get()
+    return _global_ureg[0] if ureg is None else ureg
 @docwrap('immlib.unitregistry')
 def unitregistry(obj, /, *args):
     """Returns the ``pint.UnitRegistry`` object for the given unit or quantity.
@@ -2403,8 +2417,7 @@ def unitregistry(obj, /, *args):
     elif isinstance(obj, pint.UnitRegistry):
         return obj
     elif obj is Ellipsis:
-        from immlib import units
-        return units
+        return _default_ureg()
     elif len(args) == 0:
         raise TypeError(
             f"unitregistry() cannot convert object of type {type(obj)} to a"
@@ -2412,7 +2425,7 @@ def unitregistry(obj, /, *args):
     else:
         default = args[0]
         if default is Ellipsis:
-            from immlib import units as default
+            default = _default_ureg()
         return default
 
 

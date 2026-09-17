@@ -42,6 +42,32 @@ described in [Using NumPy and PyTorch Functions Directly](#using-numpy-and-pytor
 remain the more natural choice for anything they already cover.
 
 
+## Writing Functions with `immlib.math`
+
+`immlib.math` also provides `quant`, `mag`, `promote`, `to_array`, and
+`to_tensor` (the same functions as `il.quant`, etc.), so a numerical function
+can be written with only `import immlib.math as im`. Such a function can
+accept quantities, NumPy arrays, and PyTorch tensors alike: convert each
+argument with `im.quant` (arguments that aren't quantities are assumed to be
+in the given units), compute the result, and return
+`result.as_input_type(*args)`, which returns the result as a quantity if any
+argument was a quantity, and returns its magnitude (an array or tensor)
+otherwise.
+
+```{code-cell}
+import torch
+
+def hypot(a, b):
+    qa = im.quant(a, 'mm')
+    qb = im.quant(b, 'mm')
+    return im.sqrt(qa**2 + qb**2).as_input_type(a, b)
+
+(hypot(3.0, 4.0),
+ hypot(torch.tensor([3.0]), torch.tensor([4.0])),
+ hypot(il.quant(3.0, 'cm'), 4.0))
+```
+
+
 (design-principles)=
 ## Design Principles
 

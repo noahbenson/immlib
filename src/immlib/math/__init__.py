@@ -10,6 +10,11 @@ functions, reductions, shape/combination operations, and matrix
 multiplication) that operates uniformly on ``immlib.Quantity`` objects, plain
 NumPy arrays, plain PyTorch tensors, and plain Python numbers.
 
+For convenience, ``immlib.math`` also provides ``quant``, ``mag``,
+``promote``, ``to_array``, and ``to_tensor`` (the same functions as
+``immlib.quant``, etc.), so that a numerical function can be written using
+only ``import immlib.math as im``; see also ``immlib.Quantity.as_input_type``.
+
 For any call, the backend is selected automatically: if any argument's
 magnitude is a PyTorch tensor, PyTorch is used; otherwise NumPy is used. Every
 function returns an ``immlib.Quantity``, except for the comparisons and the
@@ -32,6 +37,7 @@ Examples
 <Quantity([ 2.71828183  7.3890561  20.08553692], None)>
 """
 
+from ..util import (quant, mag, promote, to_array, to_tensor)
 from ._core import (
     abs,
     add,
@@ -82,6 +88,11 @@ from ._core import (
     matmul)
 
 __all__ = (
+    "quant",
+    "mag",
+    "promote",
+    "to_array",
+    "to_tensor",
     "abs",
     "add",
     "subtract",

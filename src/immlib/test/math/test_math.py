@@ -440,3 +440,38 @@ class TestMath(TestCase):
                   lambda: im.stack([sp, sp])):
             with self.assertRaises(TypeError):
                 f()
+
+    def test_helpers_and_as_input_type(self):
+        """immlib.math re-exports quant, mag, promote, to_array, to_tensor,
+        and Quantity.as_input_type matches the quantity-ness of inputs."""
+        import immlib as il
+        import immlib.math as im
+        import numpy as np
+        import torch
+        for name in ('quant', 'mag', 'promote', 'to_array', 'to_tensor'):
+            self.assertIs(getattr(im, name), getattr(il, name))
+            self.assertIn(name, im.__all__)
+        def example(a, b):
+            qa = im.quant(a, 'mm')
+            qb = im.quant(b, 'mm')
+            result = im.sqrt((qa + 1 * qa.u) * (qb - 1 * qb.u))
+            return result.as_input_type(a, b)
+        r = example(3.0, 5.0)
+        self.assertIsInstance(r, np.ndarray)
+        self.assertEqual(float(r), 4.0)
+        r = example(np.array([3.0]), [5.0])
+        self.assertIsInstance(r, np.ndarray)
+        r = example(torch.tensor([3.0]), torch.tensor([5.0]))
+        self.assertTrue(torch.is_tensor(r))
+        self.assertTrue(torch.allclose(r, torch.tensor([4.0])))
+        r = example(il.quant(0.3, 'cm'), 5.0)
+        self.assertIsInstance(r, il.Quantity)
+        self.assertEqual(str(r.units), 'millimeter')
+        self.assertAlmostEqual(float(r.m), 4.0)
+        # Plain pint quantities and unit-less quantities count as quantities.
+        import pint
+        q = il.quant([1.0, 2.0], 'm')
+        self.assertIs(q.as_input_type(1, pint.UnitRegistry().Quantity(1)), q)
+        self.assertIs(q.as_input_type(np.ones(2), il.quant(1.0)), q)
+        self.assertIs(q.as_input_type(), q.m)
+        self.assertIs(q.as_input_type(np.ones(2), 5), q.m)

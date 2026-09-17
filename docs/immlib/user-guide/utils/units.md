@@ -60,6 +60,11 @@ with il.default_ureg(other_registry):
 print(il.units is other_registry)
 ```
 
+The replacement applies only to the thread (or asynchronous task) that
+enters the `with` block, so other threads continue to use their own default
+registry. Assigning `il.units = registry` instead changes the default
+registry for every thread.
+
 Most `immlib` functions that work with units accept a `ureg` parameter that
 lets a specific unit registry be used for a single call instead of changing
 the default.
@@ -249,6 +254,35 @@ Only an explicit `units=None` means "no units". Quantities that `pint` itself
 creates without being given units--for example, by parsing the string
 `"dimensionless"`--have `pint`'s real `dimensionless` unit, even in an
 `immlib.UnitRegistry`.
+```
+
+
+(quantity-mutability)=
+## Mutability
+
+Like `pint.Quantity`, `immlib.Quantity` is mutable, but using its mutating
+features is strongly discouraged. These are:
+
+* the in-place operators (`q += x`, `q *= x`, etc.);
+* the `ito` family of methods (`ito`, `ito_base_units`, `ito_reduced_units`,
+  `ito_root_units`, and `ito_preferred`);
+* item assignment (`q[k] = v`) and in-place NumPy methods such as `fill` and
+  `put`.
+
+Changing a quantity changes it for every part of a program (and every
+thread) that refers to it, and these changes are not thread-safe: some of
+them replace a quantity's magnitude and units one after the other, so another
+thread can briefly see the new magnitude with the old units. The
+non-mutating forms, such as `q = q + x` and `q = q.to('mm')`, return new
+quantities and are always safe to use.
+
+```{note}
+A future release is planned to add a `persist()` method that makes a quantity
+immutable in place, so that its mutating features raise errors. Quantities
+would still be created mutable (which `pint`'s own internal operations rely
+on), but could be made immutable as soon as they are returned; an immutable
+quantity could be copied into a new, mutable quantity, but could not be made
+mutable again. This method is not available yet.
 ```
 
 

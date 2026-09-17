@@ -6,8 +6,38 @@
 # Dependencies ################################################################
 
 from ..doc import docwrap
-import urllib, shutil
+import os, shutil, tempfile
+import urllib.parse, urllib.request
 from pathlib import Path
+from contextlib import contextmanager
+
+
+# Utilities ###################################################################
+
+@contextmanager
+def _atomic_open(path, mode='wb'):
+    """Context manager that opens a temporary file for writing, then moves it
+    into place at `path` when the block exits without an error.
+
+    The temporary file is created in the same directory as `path`, and it is
+    moved into place with ``os.replace``, which is atomic, so readers (in
+    other threads or processes) never see a partially written file at
+    `path`. If the block raises an exception, the temporary file is removed
+    and `path` is left unchanged.
+    """
+    path = Path(path)
+    (fd, tmp) = tempfile.mkstemp(
+        dir=path.parent, prefix=f'.{path.name}.', suffix='.part')
+    try:
+        with os.fdopen(fd, mode) as fl:
+            yield fl
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 # URL Functions ###############################################################
@@ -92,23 +122,23 @@ def url_download(url, /, destpath=None, *,
         # We need to handle things differently depending on whether we have
         # been given a destination path.
         if destpath is None:
-            destpath = response.read()
-        else:
-            destpath = Path(destpath)
-            if expanduser:
-                destpath.expanduser()
-            if destpath.is_dir():
-                raise ValueError(f"destpath is a directory but must be a"
-                                 f" filename: {destpath}")
-            p = destpath.resolve()
-            # Make the directory if it doesn't exist and we have been asked to.
-            if mkdirs:
-                if not p.parent.exists():
-                    p.mkdir(mode=mkdir_mode, parents=True)
-            # Make sure the directory exists regardless.
-            if not p.parent.exists():
-                raise ValueError("destpath parent does not exist: {p.parent}")
-            # Now open the path and save the file.
-            with p.open('wb') as fl:
-                shutil.copyfileobj(response, fl)
+            return response.read()
+        destpath = Path(destpath)
+        if expanduser:
+            destpath = destpath.expanduser()
+        if destpath.is_dir():
+            raise ValueError(f"destpath is a directory but must be a"
+                             f" filename: {destpath}")
+        p = destpath.resolve()
+        # Make the directory if it doesn't exist and we have been asked to.
+        if mkdirs:
+            p.parent.mkdir(mode=mkdir_mode, parents=True, exist_ok=True)
+        # Make sure the directory exists regardless.
+        if not p.parent.is_dir():
+            raise ValueError(f"destpath parent does not exist: {p.parent}")
+        # Now save the file. It is written to a temporary file first and
+        # moved into place when complete, so that a partially downloaded
+        # file is never visible at destpath.
+        with _atomic_open(p, 'wb') as fl:
+            shutil.copyfileobj(response, fl)
     return destpath

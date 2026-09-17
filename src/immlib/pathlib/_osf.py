@@ -18,6 +18,7 @@ from pcollections import (pdict, ldict, lazy)
 
 from ..doc  import docwrap
 from ..util import (is_str, is_amap, is_url, url_download)
+from ..util._url import _atomic_open
 
 # Utility Functions ###########################################################
 
@@ -75,8 +76,9 @@ def _osf_pageload(proj, path,
         # we have a cache path so we should save the url data. First,
         # make sure the directory exists.
         cache_flnm.parent.mkdir(mode=mkdir_mode, parents=True, exist_ok=True)
-        # Now write the file.
-        with cache_flnm.open('wt') as fl:
+        # Now write the file (atomically, so that concurrent readers never
+        # see a partially written file).
+        with _atomic_open(cache_flnm, 'wt') as fl:
             json.dump(dat, fl)
     # At this point, the page has been loaded and cached; just return it.
     return (dat, cache_path)
@@ -87,10 +89,11 @@ def _osf_cache_file(url, path, mkdir_mode=0o775):
         return None
     # Make sure the path exists.
     path = Path(path)
+    # url_download writes the file atomically, so if the file exists, it is
+    # complete.
     if path.is_file():
         return path
-    if not path.parent.is_dir():
-        path.parent.mkdir(mode=mkdir_mode, parents=True)
+    path.parent.mkdir(mode=mkdir_mode, parents=True, exist_ok=True)
     # Download the file and save it.
     url_download(url, destpath=path, mkdir_mode=mkdir_mode)
     if not path.is_file():

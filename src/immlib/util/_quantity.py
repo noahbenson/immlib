@@ -14,7 +14,8 @@ import numpy as np
 import scipy.sparse as sps
 
 from ..doc import docwrap
-from ._core import (is_set, is_str, unitregistry)
+from ._core import (is_set, is_str, unitregistry, _default_ureg,
+                    _default_ureg_override)
 from ._numeric import (
     torch, alttorch, checktorch, scipy__is_sparse,
     is_array, is_tensor, is_numeric, is_sparse, to_sparse,
@@ -84,7 +85,7 @@ def is_unit(q, /, *, ureg=None):
     if ureg is None:
         return isinstance(q, Unit)
     elif ureg is Ellipsis:
-        from immlib import units
+        units = _default_ureg()
         return isinstance(q, units.Unit)
     elif is_ureg(ureg):
         return isinstance(q, ureg.Unit)
@@ -142,7 +143,7 @@ def is_quant(obj, /, unit=Ellipsis, *, ureg=None):
             return False
     else:
         if ureg is Ellipsis:
-            from immlib import units
+            units = _default_ureg()
             ureg = units
         elif not is_ureg(ureg):
             raise TypeError("parameter ureg must be a UnitRegistry")
@@ -165,27 +166,31 @@ class default_ureg:
     """Context manager for setting the default ``immlib`` unit registry.
 
     The following code-block can be used to evaluate the code represented by
-    ``...`` using the unit-registry ``ureg`` as the default ``immlib.units``
-    registry:
+    ``...`` using the unit-registry ``ureg`` in place of ``immlib.units`` as
+    the default registry of ``immlib`` functions such as ``immlib.quant``:
 
     .. code-block:: python
-    
-       with immlib.default_ureg(ureg):
-           ...
+
+       with immlib.default_ureg(ureg) as u:
+           ...  # here, u is ureg
+
+    Inside the block, ``immlib.units`` is ``ureg``. The override applies
+    only to the current thread (or asynchronous task), so ``default_ureg``
+    can be used safely by several threads at once. Blocks may be nested.
+    Assigning ``immlib.units = ureg`` instead changes the default registry
+    for every thread.
     """
+    __slots__ = ('ureg', '_tokens')
     def __init__(self, ureg):
         if not is_ureg(ureg):
             raise TypeError("ureg must be a pint.UnitRegistry")
-        object.__setattr__(self, 'original', None)
         object.__setattr__(self, 'ureg', ureg)
+        object.__setattr__(self, '_tokens', [])
     def __enter__(self):
-        import immlib
-        object.__setattr__(self, 'original', immlib.units)
-        immlib.units = self.ureg
+        self._tokens.append(_default_ureg_override.set(self.ureg))
         return self.ureg
     def __exit__(self, exc_type, exc_val, exc_tb):
-        import immlib
-        immlib.units = self.original
+        _default_ureg_override.reset(self._tokens.pop())
         return False
     def __setattr__(self, name, val):
         raise TypeError("cannot change the original units registry")
@@ -607,8 +612,7 @@ def _hashable_mag(mag):
     return mag
 
 def _unpickle_quantity(mag, units):
-    import immlib
-    ureg = immlib.units
+    ureg = _default_ureg()
     if not issubclass(ureg.Quantity, Quantity):
         ureg = _initial_global_ureg
     return ureg.Quantity(mag, units)
@@ -648,6 +652,27 @@ class Quantity(pint.Quantity):
         expects an ordinary ``pint.Quantity``; code that specifically
         inspects or relies on ``.units``/``.u`` should be prepared for a
         ``None`` value.
+
+    .. Warning:: Like ``pint.Quantity``, ``immlib.Quantity`` is mutable, but
+        its mutating features are strongly discouraged: the in-place
+        operators (``+=``, ``*=``, etc.), the ``ito``-family of methods
+        (``ito``, ``ito_base_units``, ``ito_reduced_units``,
+        ``ito_root_units``, ``ito_preferred``), item assignment
+        (``q[k] = v``), and in-place NumPy methods such as ``fill`` and
+        ``put``. These change a quantity for every part of a program that
+        refers to it, and they are not thread-safe: some of them replace the
+        magnitude and the units one after the other, so another thread can
+        briefly observe the new magnitude with the old units. Prefer the
+        equivalent non-mutating forms (``q = q + x``, ``q.to(u)``, etc.),
+        which return new quantities.
+
+    .. Note:: A future release is planned to add a ``persist()`` method that
+        makes a quantity immutable in place (enforced by its API: the
+        mutating features above would raise errors). Newly created
+        quantities would remain mutable, so that ``pint``'s own internal
+        operations continue to work, and an immutable quantity could be
+        copied into a new, mutable quantity but never made mutable again.
+        This method is not yet available.
     """
     __slots__ = ()
     def __new__(cls, value, units=_omitted):
@@ -680,6 +705,38 @@ class Quantity(pint.Quantity):
             inst._units = None
             return inst
         return super().__new__(cls, value, units)
+    # Matching argument types -------------------------------------------
+    def as_input_type(self, *args):
+        """Returns this quantity if any argument is a quantity, and its
+        magnitude otherwise.
+
+        ``q.as_input_type(a, b, ...)`` returns ``q`` itself if any of the
+        arguments ``a``, ``b``, etc. is a ``pint.Quantity`` (including an
+        ``immlib.Quantity``); otherwise it returns ``q``'s magnitude (a NumPy
+        array, PyTorch tensor, or SciPy sparse array). With no arguments, the
+        magnitude is returned.
+
+        This is intended for the end of a numerical function that converts its
+        arguments into quantities (e.g. with ``immlib.math.quant``) so that it
+        can support quantities, arrays, and tensors uniformly, but that should
+        return a plain array or tensor when it was called with plain arrays or
+        tensors.
+
+        Examples
+        --------
+        >>> import immlib.math as im
+        >>> def hypot(a, b):
+        ...     (qa, qb) = (im.quant(a, 'mm'), im.quant(b, 'mm'))
+        ...     return im.sqrt(qa**2 + qb**2).as_input_type(a, b)
+        >>> hypot(3.0, 4.0)
+        array(5.)
+        >>> hypot(im.quant(3.0, 'cm'), 4.0)
+        <Quantity(30.265491900843113, 'millimeter')>
+        """
+        for arg in args:
+            if isinstance(arg, pint.Quantity):
+                return self
+        return self._magnitude
     # Backend ------------------------------------------------------------
     @property
     def backend(self):
@@ -741,8 +798,13 @@ class Quantity(pint.Quantity):
         # rules: fall back to Pint's raw repr unchanged if its format
         # ever stops matching the trailing "'None')>" this expects.
         body = super().__repr__()
-        if self._units is None and body.endswith("'None')>"):
-            return body[:-len("'None')>")] + 'None)>'
+        if self._units is None:
+            # Pint < 0.26 formats reprs as <Quantity(mag, 'units')>; Pint
+            # 0.26 formats them as Quantity(mag, "units").
+            for (quoted, bare) in (("'None')>", 'None)>'),
+                                   ('"None")', 'None)')):
+                if body.endswith(quoted):
+                    return body[:-len(quoted)] + bare
         return body
     # Pint's own format mini-language recognizes a handful of extra
     # "format type" letters/modifiers, beyond Python's standard mini-
@@ -1349,6 +1411,8 @@ class UnitRegistry(pint.UnitRegistry):
 
 
 _initial_global_ureg = UnitRegistry()
+from ._core import _global_ureg
+_global_ureg[0] = _initial_global_ureg
 # We want to disable the awful pint warning for numpy if it's present:
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
@@ -1384,7 +1448,7 @@ def like_unit(obj, /, *, ureg=Ellipsis):
     if isinstance(obj, pint.Unit):
         return True
     if ureg is Ellipsis:
-        from immlib import units as ureg
+        ureg = _default_ureg()
     if is_str(obj):
         if ureg is None:
             raise ValueError(
@@ -1430,7 +1494,7 @@ def unit(obj, /, ureg=None):
     if obj is None:
         raise ValueError("cannot create a unit for None; use 'dimensionless'")
     if ureg is Ellipsis:
-        from immlib import units as ureg
+        ureg = _default_ureg()
     if is_quant(obj):
         obj = obj.u
     if is_unit(obj):
@@ -1440,7 +1504,7 @@ def unit(obj, /, ureg=None):
             return getattr(ureg, str(obj))
     elif is_str(obj):
         if ureg is None:
-            from immlib import units as ureg
+            ureg = _default_ureg()
         return getattr(ureg, obj)
     else:
         raise ValueError(f'unrecognized unit argument: {obj}')
@@ -1475,7 +1539,7 @@ def alike_units(a, b, /, *, ureg=None):
         ``True`` if the units `a` and `b` are alike and ``False`` otherwise.
     """
     if ureg is Ellipsis:
-        from immlib import units as ureg
+        ureg = _default_ureg()
     if ureg is None:
         ureg = unitregistry(a, None)
         if ureg is None:
@@ -1596,7 +1660,7 @@ def quant(mag, /, unit=Ellipsis, *, ureg=None):
 
     """
     if ureg is Ellipsis:
-        from immlib import units as ureg
+        ureg = _default_ureg()
     if is_quant(mag):
         if ureg is None:
             ureg = unitregistry(mag)
@@ -1624,7 +1688,7 @@ def quant(mag, /, unit=Ellipsis, *, ureg=None):
             q = mag.to(unit)
     else:
         if ureg is None:
-            from immlib import units as ureg
+            ureg = _default_ureg()
         qcls = ureg.Quantity
         if unit is Ellipsis:
             # A non-quantity defaults to immlib's "no units" (None), not to
@@ -1761,7 +1825,7 @@ def promote(*args, ureg=None):
         A list of the arguments after each has been promoted.
     """
     if ureg is None:
-        from immlib import units as ureg
+        ureg = _default_ureg()
     # We can start by making sure that the quants in the args use ureg
     if ureg is not None:
         args = [

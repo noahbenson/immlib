@@ -153,3 +153,34 @@ problem, as only the data that the user interacts with will be loaded.
 that behave superficially like normal data structures, including support for
 data structures based on computational workflows and for the caching of outputs
 and intermediate data of computations.
+
+
+## Thread Safety
+
+`immlib` can be used from several threads at once, including on
+free-threaded builds of Python (3.13t and later), where threads run in
+parallel. Its persistent data structures come from `pcollections`, which is
+designed for this, and the values of a `plandict` (or a lazy dict) are each
+computed at most once, even when several threads request them at the same
+time. Other shared state is handled as follows:
+
+* `il.default_ureg(ureg)` changes the default unit registry only for the
+  thread (or asynchronous task) that enters it; assigning `il.units` changes
+  it for every thread.
+* Files that `immlib` downloads into a cache directory are written to a
+  temporary file and then moved into place, so other threads and processes
+  never read a partially downloaded file.
+* A transient collection, such as a `tplandict`, should only be used by one
+  thread at a time (as with every `pcollections` transient); convert it to a
+  persistent `plandict` to share it.
+* An `immlib.Quantity`, like a `pint.Quantity`, is mutable, but its mutating
+  features (the in-place operators such as `+=`, the `ito` family of
+  methods, item assignment, and in-place NumPy methods such as `fill`) are
+  strongly discouraged and are not thread-safe: a change is seen by every
+  thread that shares the quantity, and some changes replace the magnitude and
+  the units one after the other, so another thread can briefly see
+  mismatched values. Use the non-mutating forms (`q = q + x`, `q.to(u)`)
+  instead; see [Mutability](#quantity-mutability).
+* `immlib` relies on `pint`, whose unit registries are not documented as
+  thread-safe; `immlib`'s tests exercise concurrent use of a registry, but
+  `pint` makes no guarantees.

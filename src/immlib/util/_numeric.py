@@ -469,7 +469,8 @@ def to_number(obj, /, unit=Ellipsis, *, ureg=None):
         If the argument is not like a scalar number.
     """
     if ureg is Ellipsis:
-        from immlib import units as ureg
+        from ._core import _default_ureg
+        ureg = _default_ureg()
     # If obj is a quantity, we handle things differently.
     if isinstance(obj, pint.Quantity):
         if ureg is None:
@@ -1049,7 +1050,8 @@ def is_array(obj, /, *,
     is_tensor, is_numeric
     """
     if ureg is Ellipsis:
-        from immlib import units as ureg
+        from ._core import _default_ureg
+        ureg = _default_ureg()
     # If this is a quantity, just extract the magnitude.
     if isinstance(obj, pint.Quantity):
         if quant is False:
@@ -1063,7 +1065,8 @@ def is_array(obj, /, *,
         return False
     else:
         if ureg is None:
-            from immlib import units as ureg
+            from ._core import _default_ureg
+            ureg = _default_ureg()
         u = None
     # At this point we want to check if this is a valid numpy array or scipy
     # sparse matrix; however how we handle the answer to this question depends
@@ -1220,7 +1223,8 @@ def to_array(obj, /, dtype=None, *,
     to_tensor, to_numeric
     """
     if ureg is Ellipsis:
-        from immlib import units as ureg
+        from ._core import _default_ureg
+        ureg = _default_ureg()
     # If obj is a quantity, we handle things differently.
     if isinstance(obj, pint.Quantity):
         q = obj
@@ -1231,7 +1235,8 @@ def to_array(obj, /, dtype=None, *,
     else:
         q = None
         if ureg is None:
-            from immlib import units as ureg
+            from ._core import _default_ureg
+            ureg = _default_ureg()
     # Translate obj depending on whether it's a pytorch array / scipy sparse
     # matrix.  We need to think about whether the output array is being
     # requested in sparse format. If so, we handle the conversion differently.
@@ -1643,7 +1648,8 @@ def is_tensor(obj, /, dtype=None, *,
     """
     # If so, we can process the arguments.
     if ureg is Ellipsis:
-        from immlib import units as ureg
+        from ._core import _default_ureg
+        ureg = _default_ureg()
     # If this is a quantity, just extract the magnitude.
     if isinstance(obj, pint.Quantity):
         if quant is False:
@@ -1657,7 +1663,8 @@ def is_tensor(obj, /, dtype=None, *,
         if quant is True:
             return False
         if ureg is None:
-            from immlib import units as ureg
+            from ._core import _default_ureg
+            ureg = _default_ureg()
         u = None
     # Right away: is this a torch tensor or not?
     if not torch.is_tensor(obj):
@@ -1789,7 +1796,8 @@ def to_tensor(obj, /, dtype=None, *,
     to_array, to_numeric
     """
     if ureg is Ellipsis:
-        from immlib import units as ureg
+        from ._core import _default_ureg
+        ureg = _default_ureg()
     if dtype is not None:
         dtype = to_torchdtype(dtype)
     # If obj is a quantity, we handle things differently.
@@ -1802,7 +1810,8 @@ def to_tensor(obj, /, dtype=None, *,
     else:
         q = None
         if ureg is None:
-            from immlib import units as ureg
+            from ._core import _default_ureg
+            ureg = _default_ureg()
     # Translate obj depending on whether it's a pytorch tensor already or a
     # scipy sparse matrix.
     if torch.is_tensor(obj):

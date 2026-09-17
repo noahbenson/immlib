@@ -904,11 +904,14 @@ class TestUtilQuantity(TestCase):
         # named "None".
         n0 = quant(np.array([2.718281828, 7.389056099, 20.08553692]))
         r = repr(n0)
-        self.assertTrue(r.endswith('None)>'))
+        # (Pint < 0.26 formats reprs as <Quantity(..., 'units')>; Pint 0.26
+        # formats them as Quantity(..., "units").)
+        self.assertTrue(r.endswith('None)>') or r.endswith('None)'))
         self.assertNotIn("'None'", r)
+        self.assertNotIn('"None"', r)
         # A real-units quantity's repr is untouched.
         real = quant(5.0, 'm')
-        self.assertIn("'meter'", repr(real))
+        self.assertTrue("'meter'" in repr(real) or '"meter"' in repr(real))
         # __int__/__float__/__complex__ on a None-units quantity convert
         # the bare magnitude directly, bypassing pint's own conversion
         # (which requires the quantity to be dimensionless, not merely

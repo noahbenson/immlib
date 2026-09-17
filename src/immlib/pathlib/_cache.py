@@ -73,12 +73,12 @@ class CloudCachePath(_pathbase):
         return Path(self.cloud_path.fspath).group()
     def is_dir(self):
         if os.path.exists(self):
-            return os.path.is_dir(self)
+            return os.path.isdir(self)
         else:
             return self.cloud_path.is_dir()
     def is_file(self):
         if os.path.exists(self):
-            return os.path.is_file(self)
+            return os.path.isfile(self)
         else:
             return self.cloud_path.is_file()
     def is_mount(self):

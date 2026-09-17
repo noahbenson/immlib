@@ -120,3 +120,41 @@ jobs:
           pip install -e .[test]
           python -m immlib.test
         shell: bash -el {0}
+
+  # Free-threaded (no-GIL) Python builds. Conda doesn't provide these, so this
+  # job installs everything with pip into the free-threaded Python.
+  test-freethreaded:
+    name: ${{matrix.version}}/${{matrix.os}} (free-threaded) - ${{github.event_name}}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - '3.14t'
+        os:
+          - ubuntu-latest
+          - macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: '2'
+      - name: Setup Python Environment
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.version }}
+      - name: Install immlib and its dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .[test]
+      - name: Display Python version
+        run: |
+          python --version
+          python -c 'import sys; print("GIL enabled:", sys._is_gil_enabled())'
+      # Importing immlib and its dependencies must not re-enable the GIL.
+      - name: Check that the GIL stays disabled
+        run: |
+          python -c 'import sys, immlib, immlib.math; assert not sys._is_gil_enabled(), "importing immlib enabled the GIL"'
+      - name: Run Tests
+        run: |
+          python -m immlib.test

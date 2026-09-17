@@ -61,7 +61,6 @@ from . import  math
 # value that gets updated when one runs `immlib.default_ureg()`, and this is
 # the UnitRegistry that is used as the default registry for all ``immlib``
 # functions.
-from .util._quantity import _initial_global_ureg as units
 # Do the same for the global DocstringProcessor (from the docrep library) from
 # the doc subpackage.
 from .doc._core import _initial_global_docproc as docproc
@@ -129,6 +128,24 @@ __all__ = tuple(
      if k[0] != '_'
      if k != 'submodules'
      if k != 'version'
-     if ('immlib.' + k) not in submodules])
+     if ('immlib.' + k) not in submodules]
+    + ['units'])
+# immlib.units is a property of the module: it returns the unit registry set
+# by an enclosing immlib.default_ureg block in the current thread, if any, or
+# the global default registry otherwise; assigning to it sets the global
+# default registry.
+import sys as _sys
+import types as _types
+class _ImmlibModule(_types.ModuleType):
+    @property
+    def units(self):
+        from .util._core import _default_ureg
+        return _default_ureg()
+    @units.setter
+    def units(self, ureg):
+        from .util._core import _global_ureg
+        _global_ureg[0] = ureg
+_sys.modules[__name__].__class__ = _ImmlibModule
+del _sys, _types
 # We want to mark our functions as being from the immlib module.
 reclaim(__name__, __all__, del_reclaim=True)
