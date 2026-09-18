@@ -41,8 +41,8 @@ class TriangleData(planobject):
         '''calc_triangle_base computes the base (x-width) of the
         triangle a-b-c.
 
-        Inputs
-        ------
+        Parameters
+        ----------
         a : list-like
             The (x,y) coordinate of point a in triangle a-b-c.
         b : list-like
@@ -50,7 +50,7 @@ class TriangleData(planobject):
         c : list-like
             The (x,y) coordinate of point c in triangle a-b-c.
 
-        Outputs
+        Returns
         -------
         base : number
             The base, or width, of the triangle a-b-c.
@@ -71,14 +71,14 @@ class TriangleData(planobject):
         '''calc_triangle_are computes the area of a triangle with a
         given base and height.
 
-        Inputs
-        ------
+        Parameters
+        ----------
         base : number
             The base of the triangle.
         height : number
             The height of the triangle.
 
-        Outputs
+        Returns
         -------
         area : number
             The area of the triangle with the given base and height.

@@ -15,18 +15,52 @@ from joblib import Memory
 from pathlib import Path
 
 import numpy as np
+from docshare import docparse
 from pcollections import (
     pdict, tdict, ldict, tldict,
     lazy, holdlazy, LazyError,
     pset, tset,
     plist)
 
-from ..doc import (docwrap, make_docproc, reindent, detect_indentation)
 from ..util import (
+    reindent, detect_indentation,
     is_pdict, is_str, is_number, is_tuple, is_dict, is_ldict,
     is_array, is_integer, strisvar, is_amap, is_pcoll, to_pcoll,
     to_pathcache, to_lrucache, identfn,
     merge, rmerge, valmap)
+
+
+def _item_doc(item):
+    """Returns the NumPy-style documentation text of a ``docshare.Item``.
+
+    The first line declares the item's name(s) and type, as in ``x : int``,
+    and the remaining lines are its description, indented by four spaces
+    (the form that ``plan`` expects; see ``plan.__init__``).
+    """
+    head = ', '.join(item.names)
+    if item.type:
+        head = f'{head} : {item.type}' if head else str(item.type)
+    lines = [head]
+    for ln in item.description:
+        lines.append(f'    {ln}' if ln.strip() else '')
+    while lines and not lines[-1].strip():
+        lines.pop()
+    return '\n'.join(lines)
+def _section_docs(doc, kind):
+    """Returns a dict of item-name to documentation text for the section of
+    `doc` (a ``docshare.Document``) whose kind is `kind`; an item that
+    documents several names at once (``x, y : int``) is recorded once per
+    name.
+    """
+    section = doc.section(kind)
+    if section is None:
+        return {}
+    docs = {}
+    for item in section.items:
+        text = _item_doc(item)
+        for nm in item.names:
+            docs[nm] = text
+    return docs
 
 
 # calc ########################################################################
@@ -56,17 +90,18 @@ class calc:
     are to be produced by the function, and the calculation must always run
     when the input parameters are updated.
     
-    The ``calc`` class parses its inputs and outputs through the
-    ``immlib.docwrap`` function in order to collect documentation (see the
-    ``input_docs`` and ``output_docs`` attributes, below). The ``'Inputs'`` and
-    ``'Outputs'`` sections are tracked as the documentation of the parameters,
-    and are required to be formatted using [NumPy's documentation
-    style](https://numpydoc.readthedocs.io/en/latest/format.html) in order for
-    the parameter documentation to be properly extracted. Users of calculation
-    objects should decorate their functions using ``docwrap`` manually
-    themselves, however (if desired), because decorating a function with
-    ``calc`` alone does not cause the function's documentation to be available
-    to other functions that use ``@docwrap`` to format their docstrings.
+    The ``calc`` class parses the documentation of its function in order to
+    collect the documentation of its inputs and outputs (see the
+    ``input_docs`` and ``output_docs`` attributes, below). The docstring must
+    be written in [NumPy's documentation
+    style](https://numpydoc.readthedocs.io/en/latest/format.html): a calc's
+    inputs are documented in the ``'Parameters'`` section and its outputs in
+    the ``'Returns'`` section, whose entries must be named (``y : int``) so
+    that each output's documentation can be found.
+
+    .. Note:: Before ``immlib`` version 0.2, a calc documented its inputs and
+        outputs in ``'Inputs'`` and ``'Outputs'`` sections. These sections are
+        no longer recognized; use ``'Parameters'`` and ``'Returns'`` instead.
 
     Caching for calculations requires some care. First, the ``calc``- and
     ``plan``-based workflow system in ``immlib`` is designed to work best with
@@ -251,25 +286,15 @@ class calc:
         # Check the name.
         if name is None:
             name = fn.__module__ + '.' + fn.__name__
-        # Okay, let's run the fn through docwrap to get the input and output
-        # documentation.
+        # Parse the function's documentation (NumPy style) to collect the
+        # documentation of its inputs (the Parameters section) and of its
+        # outputs (the Returns section).
         if (hasattr(fn, '__doc__') and
-            fn.__doc__ is not None and fn.__doc__.strip() != '' and
-            name is not None):
+            fn.__doc__ is not None and fn.__doc__.strip() != ''):
             fndoc = fn.__doc__
-            dp = make_docproc()
-            fn = docwrap('fn', indent=indent, proc=dp)(fn)
-            input_docs = tdict()
-            output_docs = tdict()
-            for (k,doc) in dp.params.items():
-                if k.startswith('fn.inputs.'):
-                    input_docs[k[10:]] = doc
-                elif k.startswith('fn.parameters.'):
-                    input_docs[k[14:]] = doc
-                elif k.startswith('fn.outputs.'):
-                    output_docs[k[11:]] = doc
-            input_docs  = pdict(input_docs)
-            output_docs = pdict(output_docs)
+            doc = docparse(fn, format='numpy')
+            input_docs = pdict(_section_docs(doc, 'parameters'))
+            output_docs = pdict(_section_docs(doc, 'returns'))
         else:
             input_docs = pdict()
             output_docs = pdict()
@@ -720,7 +745,6 @@ class calc:
         if fn is not new_fn:
             object.__setattr__(new_calc, 'function', new_fn)
         return new_calc
-@docwrap('immlib.workflow.is_calc')
 def is_calc(obj, /):
     """Determines if an object is a ``calc`` instance.
 
@@ -737,7 +761,6 @@ def is_calc(obj, /):
     calc, to_calc, is_calcfn
     """
     return isinstance(obj, calc)
-@docwrap('immlib.is_calcfn')
 def is_calcfn(obj, /):
     """Determines if an object is function that was decorated by ``@calc``.
 
@@ -754,7 +777,6 @@ def is_calcfn(obj, /):
     calc, to_calc, is_calc
     """
     return isinstance(getattr(obj, 'calc', None), calc)
-@docwrap('immlib.workflow.to_calc')
 def to_calc(obj, /, update=True):
     """Converts an object into a ``calc`` object or raises a ``TypeError``.
 
@@ -1357,7 +1379,6 @@ class plan(pdict):
         n = len(self.calcdata.calcs)
         m = len(self.inputs)
         return f"plan(<{n} calcs>, <{m} params>)"
-@docwrap
 def is_plan(arg):
     """Determines if an object is a ``plan`` instance.
 
@@ -1895,7 +1916,6 @@ def _unpickle_plandict(plan, inputs, ready, is_transient):
     return pd.transient() if is_transient else pd
 
 
-@docwrap
 def is_plandict(arg):
     """Determines if an object is a ``plandict`` instance.
 
@@ -1903,7 +1923,6 @@ def is_plandict(arg):
     ``False`` otherwise.
     """
     return isinstance(arg, plandict)
-@docwrap
 def is_tplandict(arg):
     """Determines if an object is a ``tplandict`` instance.
 

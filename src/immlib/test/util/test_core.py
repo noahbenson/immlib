@@ -685,4 +685,25 @@ class TestUtilCore(TestCase):
             with self.assertRaises(TypeError):
                 unitregistry(units, None, 1)
             
-
+    def test_reindent(self):
+        "Tests immlib.reindent and immlib.detect_indentation."
+        from immlib.util import (reindent, detect_indentation)
+        text = "first line\n    second\n      third\n"
+        self.assertEqual(detect_indentation(text), 4)
+        self.assertEqual(reindent(text, 2),
+                         "first line\n  second\n    third\n")
+        self.assertEqual(reindent(text, 0, final_endline=True),
+                         "first line\nsecond\n  third\n")
+        # Text with no indented lines to detect.
+        self.assertIsNone(detect_indentation("one line"))
+        self.assertEqual(reindent("one line", 4), "one line\n")
+        self.assertEqual(reindent("one line\n\n", 4), "one line\n\n")
+        self.assertEqual(reindent("one line", 4, final_endline=False),
+                         "one line")
+        # Empty text.
+        self.assertEqual(reindent("", 4), "\n")
+        self.assertEqual(reindent("", 4, skip_first=False), "\n")
+        self.assertEqual(reindent("", 4, final_endline=False), "")
+        # Without skipping the first line.
+        self.assertEqual(reindent("  a\n    b", 1, skip_first=False),
+                         " a\n   b\n")

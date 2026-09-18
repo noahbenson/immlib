@@ -141,6 +141,6 @@ class TestPathlibCore(TestCase):
         self.assertFalse(is_path(10))
         self.assertFalse(like_path('blarg://nothing'))
         d = pathdict(path(il.__file__).parent)
-        for k in ('util', 'doc', 'types', 'workflow'):
+        for k in ('util', 'math', 'types', 'workflow'):
             self.assertIn(k, d)
         self.assertTrue(path(d['util']['__init__.py']).is_file())

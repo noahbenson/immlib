@@ -11,7 +11,6 @@ from pathlib      import (Path, PurePath)
 from pcollections import (pdict, ldict, lazy)
 from cloudpathlib import CloudPath
 
-from   ..doc      import docwrap
 
 
 # CloudCachePath ##############################################################

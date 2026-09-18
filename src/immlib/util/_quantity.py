@@ -11,9 +11,9 @@ import warnings
 
 import pint
 import numpy as np
+from docshare import docwrap
 import scipy.sparse as sps
 
-from ..doc import docwrap
 from ._core import (is_set, is_str, unitregistry, _default_ureg,
                     _default_ureg_override)
 from ._numeric import (
@@ -30,7 +30,6 @@ from ._numeric import (
 # to an object.
 # Setup pint / units:
 from pint import UnitRegistry
-@docwrap('immlib.is_ureg')
 def is_ureg(obj):
     """Returns ``True`` if an object is a ``ping.UnitRegistry`` object.
 
@@ -51,7 +50,6 @@ def is_ureg(obj):
     """
     return isinstance(obj, pint.UnitRegistry)
 from pint import Unit
-@docwrap('immlib.is_unit')
 def is_unit(q, /, *, ureg=None):
     """Returns ``True`` if `q` is a ``pint.Unit`` object and ``False``
     otherwise.
@@ -91,7 +89,7 @@ def is_unit(q, /, *, ureg=None):
         return isinstance(q, ureg.Unit)
     else:
         raise TypeError("parameter ureg must be a UnitRegistry")
-@docwrap('immlib.is_quant')
+@docwrap(format='numpy', inheritraises=is_unit)
 def is_quant(obj, /, unit=Ellipsis, *, ureg=None):
     """Returns ``True`` if given a ``pint.Quantity`` object and ``False``
     otherwise.
@@ -135,7 +133,6 @@ def is_quant(obj, /, unit=Ellipsis, *, ureg=None):
 
     Raises
     ------
-    %(immlib.is_unit.raises)s
 
     """
     if ureg is None:
@@ -161,7 +158,6 @@ def is_quant(obj, /, unit=Ellipsis, *, ureg=None):
         return False
     else:
         return obj.is_compatible_with(unit)
-@docwrap('immlib.default_ureg')
 class default_ureg:
     """Context manager for setting the default ``immlib`` unit registry.
 
@@ -1420,7 +1416,6 @@ with warnings.catch_warnings():
 # Make sure there's a pixel unit
 if not hasattr(_initial_global_ureg, 'pixels'):
     _initial_global_ureg.define('pixel = [image_length] = px')
-@docwrap('immlib.like_unit')
 def like_unit(obj, /, *, ureg=Ellipsis):
     """Returns ``True`` if `obj` is or names a ``pint.Unit`` and ``False``
     otherwise.
@@ -1456,7 +1451,6 @@ def like_unit(obj, /, *, ureg=Ellipsis):
         return hasattr(ureg, obj) and isinstance(getattr(ureg, obj), pint.Unit)
     else:
         return False
-@docwrap('immlib.unit')
 def unit(obj, /, ureg=None):
     """Converts the argument into a a ``pint.Unit`` object.
 
@@ -1509,7 +1503,6 @@ def unit(obj, /, ureg=None):
     else:
         raise ValueError(f'unrecognized unit argument: {obj}')
 _unitlike_types = (str, pint.Unit, pint.Quantity)
-@docwrap('immlib.alike_units')
 def alike_units(a, b, /, *, ureg=None):
     """Returns ``True`` if the arguments are alike units, otherwise ``False``.
 
@@ -1586,7 +1579,6 @@ def _quant_magnitude(mag):
             f"quant: magnitude must be numerical, but it has dtype {dt}"
             f" (type {type(mag).__name__})")
     return arr
-@docwrap('immlib.quant')
 def quant(mag, /, unit=Ellipsis, *, ureg=None):
     """Returns a ``pint.Quantity`` object with the given magnitude and unit.
 
@@ -1708,7 +1700,6 @@ def quant(mag, /, unit=Ellipsis, *, ureg=None):
         return ureg.Quantity(q._magnitude, q._units)
     else:
         return q
-@docwrap('immlib.mag')
 def mag(obj, /, unit=Ellipsis, *, strict=False):
     """Returns the magnitude of the given object.
 
@@ -1792,7 +1783,6 @@ def mag(obj, /, unit=Ellipsis, *, strict=False):
 def _array_promote(*args, ureg=None):
     return [to_array(el, ureg=ureg) for el in args]
 @alttorch(_array_promote)
-@docwrap('immlib.promote')
 def promote(*args, ureg=None):
     """Promotes all arguments into quantities with compatible magnitudes.
 

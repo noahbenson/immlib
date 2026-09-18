@@ -29,7 +29,6 @@ import scipy as sp
 from pcollections import *
 from numpy.lib.mixins import NDArrayOperatorsMixin
 
-from ..doc import docwrap
 from ..util import (
     freezearray,
     frozenarray,
@@ -222,7 +221,6 @@ class ArrayIndex:
         object.__setattr__(self, 'array', array)
         return self
     # Public Methods -----------------------------------------------------------
-    @docwrap(indent=8)
     def find(self, ids, *, ravel=False, **kw):
         """Finds and returns the indices of the given identities.
         

@@ -8,7 +8,6 @@ The `immlib.test` package contains tests for the immlib library as well as
 examples of the library's usage.
 '''
 
-from .doc      import *
 from .util     import *
 from .types    import *
 from .pathlib  import *

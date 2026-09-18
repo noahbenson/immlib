@@ -11,12 +11,12 @@ from collections import namedtuple
 
 import pint
 import numpy as np
+from docshare import docwrap
 import scipy as sp
 import scipy.sparse as sps
 from scipy.sparse import issparse as scipy__is_sparse
 from pcollections import *
 
-from ..doc import docwrap
 from ._core import (
     is_tuple, is_list, is_aseq, is_aset,
     is_str, streq, strnorm, 
@@ -61,7 +61,6 @@ class FakeTorchPackage:
 try:
     import torch
     torch_found = True
-    @docwrap('immlib.util.checktorch', indent=8)
     def checktorch(f):
         """Decorator, ensures that PyTorch functions throw an informative error
         when PyTorch isn't found.
@@ -75,7 +74,6 @@ try:
         always returns ``f``.
         """
         return f
-    @docwrap('immlib.util.alttorch', indent=8)
     def alttorch(f_alt):
         """Decorator that runs an alternative function when PyTorch isn't
         found on the system.
@@ -92,7 +90,6 @@ try:
 except (ModuleNotFoundError, ImportError) as e:
     torch = FakeTorchPackage()
     torch_found = False
-    @docwrap('immlib.util.checktorch', indent=8)
     def checktorch(f):
         """Decorator that ensures that PyTorch functions throw an informative
         error when PyTorch isn't found.
@@ -108,7 +105,6 @@ except (ModuleNotFoundError, ImportError) as e:
         """
         from functools import wraps
         return wraps(f)(TorchNotFound.raise_self)
-    @docwrap('immlib.util.alttorch', indent=8)
     def alttorch(f_alt):
         """Decorator that runs an alternative function when PyTorch isn't
         found on the system.
@@ -154,7 +150,6 @@ def _is_numtype(obj, numtype, dtypes):
         return False
 from numbers import Number
 _number_dtypes = (np.number, np.bool_)
-@docwrap('immlib.is_numberdata')
 def is_numberdata(obj, /):
     """Returns ``True`` if an object is a Python number, otherwise ``False``.
 
@@ -191,7 +186,6 @@ def is_numberdata(obj, /):
     """
     return _is_numtype(obj, Number, _number_dtypes)
 _bool_dtypes = (np.bool_,)
-@docwrap('immlib.is_booldata')
 def is_booldata(obj, /):
     """Returns ``True`` if an object is a boolean, otherwise ``False``.
 
@@ -218,7 +212,6 @@ def is_booldata(obj, /):
     return _is_numtype(obj, bool, _bool_dtypes)
 from numbers import Integral
 _integer_dtypes = (np.integer, np.bool_)
-@docwrap('immlib.is_intdata')
 def is_intdata(obj, /):
     """Returns ``True`` if an object is a Python integer, otherwise ``False``.
 
@@ -245,7 +238,6 @@ def is_intdata(obj, /):
     return _is_numtype(obj, Integral, _integer_dtypes)
 from numbers import Real
 _real_dtypes = (np.floating, np.integer, np.bool_)
-@docwrap('immlib.is_intdata')
 def is_realdata(obj, /):
     """Returns ``True`` if an object is a Python number, otherwise ``False``.
 
@@ -272,7 +264,6 @@ def is_realdata(obj, /):
     return _is_numtype(obj, Real, _real_dtypes)
 from numbers import Complex
 _complex_dtypes = (np.number, np.bool_)
-@docwrap('immlib.is_complexdata')
 def is_complexdata(obj):
     """Returns ``True`` if an object is a complex number, otherwise ``False``.
 
@@ -305,7 +296,6 @@ def _is_scalar(obj, numtype):
             return False
         obj = obj.item()
     return isinstance(obj, numtype)
-@docwrap('immlib.is_number')
 def is_number(obj, /, dtype=None):
     """Determines whether the argument is a scalar number or not.
 
@@ -347,7 +337,6 @@ def is_number(obj, /, dtype=None):
         return _is_scalar(obj, Complex)
     else:
         raise ValueError(f"invalid dtype: {dtype}")
-@docwrap('immlib.is_bool')
 def is_bool(obj, /):
     """Determines whether the argument is a scalar boolean or not.
 
@@ -359,7 +348,6 @@ def is_bool(obj, /):
     is_scalar, is_booldata
     """
     return _is_scalar(obj, bool)
-@docwrap('immlib.is_integer')
 def is_integer(obj, /):
     """Determines whether the argument is a scalar integer or not.
 
@@ -371,7 +359,6 @@ def is_integer(obj, /):
     is_scalar, is_intdata
     """
     return _is_scalar(obj, Integral)
-@docwrap('immlib.is_real')
 def is_real(obj, /):
     """Determines whether the argument is a scalar real number or not.
 
@@ -384,7 +371,6 @@ def is_real(obj, /):
     is_scalar, is_realdata
     """
     return _is_scalar(obj, Real)
-@docwrap('immlib.is_complex')
 def is_complex(obj, /):
     """Determines whether the argument is a scalar complex number or not.
 
@@ -397,7 +383,6 @@ def is_complex(obj, /):
     is_number, is_complexdata
     """
     return _is_scalar(obj, Complex)
-@docwrap('immlib.like_number')
 def like_number(obj, /):
     """Determines whether the argument holds a scalar number value or not.
 
@@ -423,7 +408,6 @@ def like_number(obj, /):
         except (TypeError, ValueError):
             return False
     return obj.size == 1 and is_numberdata(obj)
-@docwrap('immlib.to_number')
 def to_number(obj, /, unit=Ellipsis, *, ureg=None):
     """Converts the argument into a simple Python number.
 
@@ -590,7 +574,6 @@ def _numcoll_match(numcoll_shape, numcoll_dtype, ndim, shape, numel, dtype):
 # For testing whether numpy arrays or pytorch tensors have the appropriate
 # dimensionality, shape, and dtype, we use some helper functions.
 from numpy import dtype as numpy_dtype
-@docwrap('immlib.util.is_numpydype')
 def is_numpydtype(obj, /):
     """Returns ``True`` for a ``numpy.dtype`` object and ``False`` otherwise.
 
@@ -608,7 +591,6 @@ def is_numpydtype(obj, /):
         ``True`` if `obj` is a valid ``numpy.dtype``, otherwise ``False``.
     """
     return isinstance(obj, numpy_dtype)
-@docwrap('immlib.util.like_numydtype')
 def like_numpydtype(obj, /):
     """Returns ``True`` for any object that can be converted into a
     ``numpy.dtype`` object.
@@ -635,7 +617,6 @@ def like_numpydtype(obj, /):
             return is_numpydtype(np.dtype(obj))
         except TypeError:
             return False
-@docwrap('immlib.util.to_numpydtype')
 def to_numpydtype(obj, /):
     """Returns a ``numpy.dtype`` object equivalent to the given argument.
 
@@ -765,7 +746,6 @@ def torch__is_sparse(obj):
     if not torch.is_tensor(obj):
         return False
     return obj.layout in _sparse_torch_layouts
-@docwrap('immlib.util.sparse_layout')
 def sparse_layout(obj, /):
     """Returns a tuple containing data about a sparse array layout.
 
@@ -812,7 +792,6 @@ def sparse_layout(obj, /):
         return _sparse_index.get(type(obj), None)
     else:
         return _sparse_index.get(obj, None)
-@docwrap('immlib.util.sparse_haslayout')
 def sparse_haslayout(arr, layout):
     """Returns ``True`` if the given sparse array or tensor has the given
     layout.
@@ -833,7 +812,6 @@ def sparse_haslayout(arr, layout):
         return False
     srclay = sparse_layout(arr)
     return srclay.name == dstlay.name
-@docwrap('immlib.sparse_find')
 def sparse_find(arr, /):
     """Returns the indices and values of nonzero elements of a sparse object.
     
@@ -869,7 +847,6 @@ def sparse_find(arr, /):
         return tuple(arr.indices()) + (arr.values().clone().detach(),)
     else:
         raise TypeError(f"sparse_find requires a sparse array or sparse tensor")
-@docwrap('immlib.util.sparse_indices')
 def sparse_indices(arr, /):
     """Returns the indices of the nonzero values in the given sparse object.
 
@@ -890,7 +867,6 @@ def sparse_indices(arr, /):
         return arr.indices()
     else:
         raise TypeError(f"sparse_data requires a sparse array or sparse tensor")
-@docwrap('immlib.util.sparse_data')
 def sparse_data(arr, /):
     """Returns the data vector for the given sparse array or sparse tensor.
 
@@ -914,7 +890,6 @@ def sparse_data(arr, /):
         return arr.values()
     else:
         raise TypeError(f"sparse_data requires a sparse array or sparse tensor")
-@docwrap('immlib.util.sparse_tolayout')
 def sparse_tolayout(obj, layout):
     """Copies a sparse object into another sparse object with a given layout.
 
@@ -952,7 +927,6 @@ def sparse_tolayout(obj, layout):
         raise TypeError(
             "sparse_tolayout requires a sparse scipy array or"
             " a sparse pytorch tensor")
-@docwrap('immlib.is_array')
 def is_array(obj, /, *,
              dtype=None, shape=None, ndim=None, numel=None, frozen=None,
              sparse=None, quant=None, unit=Ellipsis, ureg=None):
@@ -1449,7 +1423,6 @@ def to_array(obj, /, dtype=None, *,
 # we can use @checktorch to make sure that errors are thrown when torch isn't
 # present. Otherwise, we can just write the functions assuming that torch is
 # imported.
-@docwrap('immlib.unit.is_torchdtype')
 @alttorch(lambda dt: False)
 def is_torchdtype(obj, /):
     """Returns ``True`` for a PyTroch ``dtype`` object and ``False`` otherwise.
@@ -1469,7 +1442,6 @@ def is_torchdtype(obj, /):
         ``True`` if `obj` is a valid ``torch.dtype``, otherwise ``False``.
     """
     return isinstance(obj, torch.dtype)
-@docwrap('immlib.unit.like_torchdtype')
 def like_torchdtype(obj, /):
     """Returns ``True`` for any object that can be converted into a
     ``torch.dtype``.
@@ -1511,7 +1483,6 @@ def like_torchdtype(obj, /):
             return None is not torch.from_numpy(np.array((), dtype=obj))
         except Exception:
             return False
-@docwrap('immlib.unit.to_torchdtype')
 @checktorch
 def to_torchdtype(obj, /):
     """Returns a ``torch.dtype`` object equivalent to the given argument `obj`.
@@ -1554,7 +1525,6 @@ def _is_never_tensor(obj,
                      device=None, requires_grad=None,
                      sparse=None, quant=None, unit=Ellipsis, ureg=None):
     return False
-@docwrap('immlib.is_tensor')
 @alttorch(_is_never_tensor)
 def is_tensor(obj, /, dtype=None, *,
               shape=None, ndim=None, numel=None,
@@ -1709,7 +1679,6 @@ def is_tensor(obj, /, dtype=None, *,
     if dtype is None and shape is None and ndim is None and numel is None:
         return True
     return _numcoll_match(obj.shape, obj.dtype, ndim, shape, numel, dtype)
-@docwrap('immlib.to_tensor')
 def to_tensor(obj, /, dtype=None, *,
               device=None, requires_grad=None, copy=False,
               sparse=None, quant=None, ureg=None, unit=Ellipsis):
@@ -1962,7 +1931,6 @@ def to_tensor(obj, /, dtype=None, *,
 
 # General Numeric Collection Functions ########################################
 
-@docwrap('immlib.is_numeric')
 def is_numeric(obj, /, dtype=None, *,
                shape=None, ndim=None, numel=None,
                sparse=None, quant=None, unit=Ellipsis, ureg=None):
@@ -2059,7 +2027,6 @@ def is_numeric(obj, /, dtype=None, *,
         return is_array(obj,
                         dtype=dtype, shape=shape, ndim=ndim, numel=numel,
                         sparse=sparse, quant=quant, unit=unit, ureg=ureg)
-@docwrap('immlib.to_numeric')
 def to_numeric(obj, /, dtype=None, *,
                copy=False, sparse=None, quant=None, ureg=None, unit=Ellipsis):
     """Reinterprets `obj` as a numeric type or quantity with such a magnitude.
@@ -2154,7 +2121,7 @@ def to_numeric(obj, /, dtype=None, *,
 
 # Sparse Matrices and Dense Collections #######################################
 
-@docwrap('immlib.is_sparse')
+@docwrap(format='numpy', inheritparams=is_numeric)
 def is_sparse(obj, /, dtype=None, *,
               shape=None, ndim=None, numel=None,
               quant=None, ureg=None, unit=Ellipsis):
@@ -2172,18 +2139,6 @@ def is_sparse(obj, /, dtype=None, *,
     obj : object
         The object whose quality as a sparse numerical object is to be
         assessed.
-    %(immlib.is_numeric.parameters.dtype)s
-    %(immlib.is_numeric.parameters.ndim)s
-    %(immlib.is_numeric.parameters.shape)s
-    %(immlib.is_numeric.parameters.numel)s
-    %(immlib.is_numeric.parameters.quant)s
-    %(immlib.is_numeric.parameters.ureg)s
-    %(immlib.is_numeric.parameters.unit)s
-    sparsetype : 'matrix', 'array', or None, optional
-        The kind of sparse array to accept: either ``'matrix'`` for the scipy
-        sparse matrix types (e.g., ``scipy.sparse.csr_matrix``) or ``'array'``
-        for the sparse array types (e.g., ``scipy.sparse.csr_array``). If the
-        value is ``None`` (the default) then either is accepted.
 
     Returns
     -------
@@ -2194,7 +2149,7 @@ def is_sparse(obj, /, dtype=None, *,
     return is_numeric(obj, sparse=True,
                       dtype=dtype, shape=shape, ndim=ndim, numel=numel,
                       quant=quant, ureg=ureg, unit=unit)
-@docwrap('immlib.to_sparse')
+@docwrap(format='numpy', inheritparams=to_numeric)
 def to_sparse(obj, /, dtype=None, *, quant=None, ureg=None, unit=Ellipsis):
     """Returns a sparse version of the numerical object `obj`.
 
@@ -2208,10 +2163,6 @@ def to_sparse(obj, /, dtype=None, *, quant=None, ureg=None, unit=Ellipsis):
     ----------
     obj : object
         The object that is to be converted into a sparse representation.
-    %(immlib.to_numeric.parameters.dtype)s
-    %(immlib.to_numeric.parameters.quant)s
-    %(immlib.to_numeric.parameters.ureg)s
-    %(immlib.to_numeric.parameters.unit)s
 
     Returns
     -------
@@ -2221,7 +2172,7 @@ def to_sparse(obj, /, dtype=None, *, quant=None, ureg=None, unit=Ellipsis):
     return to_numeric(obj, sparse=True,
                       dtype=dtype, quant=quant,
                       ureg=ureg, unit=unit)
-@docwrap('immlib.is_dense')
+@docwrap(format='numpy', inheritparams=is_numeric)
 def is_dense(obj, /, dtype=None, *,
              shape=None, ndim=None, numel=None,
              quant=None, ureg=None, unit=Ellipsis):
@@ -2236,13 +2187,6 @@ def is_dense(obj, /, dtype=None, *,
     ----------
     obj : object
         The object whose quality as a dense numerical object is to be assessed.
-    %(immlib.is_numeric.parameters.dtype)s
-    %(immlib.is_numeric.parameters.ndim)s
-    %(immlib.is_numeric.parameters.shape)s
-    %(immlib.is_numeric.parameters.numel)s
-    %(immlib.is_numeric.parameters.quant)s
-    %(immlib.is_numeric.parameters.ureg)s
-    %(immlib.is_numeric.parameters.unit)s
 
     Returns
     -------
@@ -2253,7 +2197,7 @@ def is_dense(obj, /, dtype=None, *,
     return is_numeric(obj, sparse=False,
                       dtype=dtype, shape=shape, ndim=ndim, numel=numel,
                       quant=quant, ureg=ureg, unit=unit)
-@docwrap('immlib.to_dense')
+@docwrap(format='numpy', inheritparams=to_numeric)
 def to_dense(obj, /, dtype=None, *, quant=None, ureg=None, unit=Ellipsis):
     """Returns a dense version of the numerical object `obj`.
 
@@ -2267,10 +2211,6 @@ def to_dense(obj, /, dtype=None, *, quant=None, ureg=None, unit=Ellipsis):
     ----------
     obj : object
         The object that is to be converted into a dense representation.
-    %(immlib.to_numeric.parameters.dtype)s
-    %(immlib.to_numeric.parameters.quant)s
-    %(immlib.to_numeric.parameters.ureg)s
-    %(immlib.to_numeric.parameters.unit)s
 
     Returns
     -------
@@ -2283,7 +2223,6 @@ def to_dense(obj, /, dtype=None, *, quant=None, ureg=None, unit=Ellipsis):
 
 # Numeric Decorators ##########################################################
 
-@docwrap('immlib.numapi')
 class numapi:
     """An interface for defining functions that expect all arguments to be
     either numpy arrays or pytorch tensors.
@@ -2560,7 +2499,6 @@ def _promote_args_decorate(arglist, args_try_fn, keep_arrays, fn):
         args_try_fn, fn,
         sig, sig_args, sig_varargs, sig_kwargs, keep_arrays)
     return wraps(fn)(dispatch)
-@docwrap('immlib.tensor_args')
 def tensor_args(fn=None, /, *args, keep_arrays=False):
     """Converts arguments of the decorated function into PyTorch tensors.
 
@@ -2611,7 +2549,6 @@ def tensor_args(fn=None, /, *args, keep_arrays=False):
         # or as
         #   fn = tensor_args(lambda a,b: ..., 'a').
         return _promote_args_decorate(args, _args_try_tensor, keep_arrays, fn)
-@docwrap('immlib.array_args')
 def array_args(fn=None, /, *args):
     """Converts arguments of the decorated function into NumPy arrays.
 
@@ -2650,7 +2587,6 @@ def array_args(fn=None, /, *args):
         # or as
         #   fn = array_args(lambda a,b: ..., 'a').
         return _promote_args_decorate(args, _args_try_array, False, fn)
-@docwrap('immlib.numeric_args')
 def numeric_args(fn=None, /, *args):
     """Converts arguments of the decorated function into either NumPy arrays or
     PyTorch tensors.

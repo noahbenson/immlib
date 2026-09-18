@@ -13,7 +13,6 @@ from pathlib import Path
 import numpy as np
 from pcollections import pdict, plist, pset, ldict, lazy
 
-from ..doc        import docwrap
 from ..util       import is_str, is_amap, is_aseq
 from ..pathlib    import path, is_path, like_path
 

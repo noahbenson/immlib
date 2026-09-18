@@ -33,15 +33,6 @@ submodules : tuple of str
     A tuple of strings, each of which is the name of one of the submodules in
     ``immlib``. The modules are listed in load-order and all ``immlib``
     submodules, including private submodules, are included.
-docproc: docrep.DocstringProcessor object
-    This object is used to process all of the doc-strings in the ``immlib``
-    library; it should be used only with the ``immlib.docwrap`` decorator,
-    which can safely be applied anywhere in a sequence of decorators and which
-    correctly applies the ``wraps`` decorator to its argument. Function
-    documentation is always processed using the ``sections=('Parameters',
-    'Returns', 'Raises', 'Examples', 'Inputs', 'Outputs')`` parameter and the
-    ``with_indent(4)`` decorator. The base-name for the function ``f`` is
-    ``f.__module__ + '.' + f.__name__``.
 '''
 
 
@@ -50,20 +41,12 @@ docproc: docrep.DocstringProcessor object
 # We always load _init first.
 from ._init    import reclaim
 # Then the core library.
-from .doc      import *
 from .util     import *
 from .pathlib  import *
 from .iolib    import *
 from .workflow import *
 from .types    import *
 from . import  math
-# Import the Global UnitRegistry object to the global immlib scope. This is the
-# value that gets updated when one runs `immlib.default_ureg()`, and this is
-# the UnitRegistry that is used as the default registry for all ``immlib``
-# functions.
-# Do the same for the global DocstringProcessor (from the docrep library) from
-# the doc subpackage.
-from .doc._core import _initial_global_docproc as docproc
 # We want the version object from the ._version namespace; this is always last.
 from ._version import (version, Version)
 
@@ -72,8 +55,6 @@ from ._version import (version, Version)
 
 submodules = (
     'immlib._init',
-    'immlib.doc._core',
-    'immlib.doc',
     'immlib.util._core',
     'immlib.util._numeric',
     'immlib.util._quantity',

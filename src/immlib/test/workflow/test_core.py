@@ -23,14 +23,14 @@ class TestWorkflowCore(TestCase):
             Returns a single value, `'result'`, which is a list whose length is
             `input_1` and whose elements are all `input_2`.
             
-            Inputs
-            ------
+            Parameters
+            ----------
             input_1 : int
                 The number of elements to include in the result.
             input_2 : object
                 The object to put in the list.
 
-            Outputs
+            Returns
             -------
             result : list
                 A list of `input_1` occurrences of `input_2`.
@@ -134,8 +134,8 @@ class TestWorkflowCore(TestCase):
         def normal_pdf(x, mu=0, std=1):
             """Calculates the probability densities for a normal distribution.
 
-            Inputs
-            ------
+            Parameters
+            ----------
             x : array-like
                 The input values at which to calculate the normal PDF.
             mu : number, optional
@@ -143,7 +143,7 @@ class TestWorkflowCore(TestCase):
             std : number, optional
                 The standard deviation of the distribution; the default is 1.
 
-            Outputs
+            Returns
             -------
             weights : array-like
                 The probability densities of the normal distribution at the
@@ -155,14 +155,14 @@ class TestWorkflowCore(TestCase):
         def weighted_mean(x, weights):
             """Calculates the weighted mean.
 
-            Inputs
-            ------
+            Parameters
+            ----------
             x : array-like
                 The values to be averaged.
             weights : array-like
                 The weights of the values in `x`.
 
-            Outputs
+            Returns
             -------
             mean : number
                 The weighted mean of the inputs.

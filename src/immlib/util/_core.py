@@ -14,15 +14,14 @@ from pathlib import Path
 import pint
 import numpy as np
 import scipy.sparse as sps
+from docshare import docwrap
 from pcollections import holdlazy
 from contextvars import ContextVar
 
-from ..doc import docwrap
 
 
 # Strings #####################################################################
 
-@docwrap('immlib.is_str')
 def is_str(obj):
     """Returns ``True`` if an object is a string and ``False`` otherwise.
 
@@ -41,7 +40,6 @@ def is_str(obj):
     """
     return isinstance(obj, str)
 from unicodedata import normalize as unicodedata_normalize
-@docwrap('immlib.strnorm')
 def strnorm(s, /, case=False, *, unicode=True):
     """Normalizes a string using the ``unicodedata`` package.
 
@@ -102,7 +100,6 @@ def _strbinop_prep(a, b, case=True, unicode=None, strip=False):
         a = a.strip(strip)
         b = b.strip(strip)
     return (a,b)
-@docwrap('immlib.strcmp')
 def strcmp(a, b, /, case=True, *, unicode=None, strip=False, split=False):
     """Determines if the given objects are strings and compares them if so.
 
@@ -178,7 +175,7 @@ def strcmp(a, b, /, case=True, *, unicode=None, strip=False, split=False):
         a = ''.join(a)
         b = ''.join(b)
     return (-1 if a < b else 1 if a > b else 0)
-@docwrap('immlib.streq')
+@docwrap(format='numpy', inheritparams=strcmp)
 def streq(a, b, /, case=True, *, unicode=None, strip=False, split=False):
     """Determines if the given objects are equal strings or not.
 
@@ -187,7 +184,6 @@ def streq(a, b, /, case=True, *, unicode=None, strip=False, split=False):
 
     Parameters
     ----------
-    %(immlib.strcmp.parameters)s
 
     Returns
     -------
@@ -202,7 +198,7 @@ def streq(a, b, /, case=True, *, unicode=None, strip=False, split=False):
     """
     cmpval = strcmp(a, b, case=case, unicode=unicode, strip=strip, split=split)
     return None if cmpval is None else (cmpval == 0)
-@docwrap('immlib.strends')
+@docwrap(format='numpy', inheritparams=strcmp)
 def strends(a, b, /, case=True, *, unicode=None, strip=False):
     """Determines whether or not the string `a` ends with the string `b`.
 
@@ -211,9 +207,6 @@ def strends(a, b, /, case=True, *, unicode=None, strip=False):
 
     Parameters
     ----------
-    %(immlib.strcmp.parameters.case)s
-    %(immlib.strcmp.parameters.unicode)s
-    %(immlib.strcmp.parameters.strip)s
 
     Returns
     -------
@@ -227,7 +220,7 @@ def strends(a, b, /, case=True, *, unicode=None, strip=False):
     else: (a, b) = prep
     # Check the ending
     return a.endswith(b)
-@docwrap('immlib.strstarts')
+@docwrap(format='numpy', inheritparams=strcmp)
 def strstarts(a, b, /, case=True, *, unicode=None, strip=False):
     """Determines whether or not the string `a` starts with the string `b`.
 
@@ -236,9 +229,6 @@ def strstarts(a, b, /, case=True, *, unicode=None, strip=False):
 
     Parameters
     ----------
-    %(immlib.strcmp.parameters.case)s
-    %(immlib.strcmp.parameters.unicode)s
-    %(immlib.strcmp.parameters.strip)s
 
     Returns
     -------
@@ -252,7 +242,6 @@ def strstarts(a, b, /, case=True, *, unicode=None, strip=False):
     else: (a, b) = prep
     # Check the beginning.
     return a.startswith(b)
-@docwrap('immlib.strissym')
 def strissym(s):
     """Determines if the given string is a valid symbol (identifier).
 
@@ -266,7 +255,6 @@ def strissym(s):
     """
     return s.isidentifier() if is_str(s) else None
 from keyword import iskeyword
-@docwrap('immlib.striskey')
 def striskey(s):
     """Determines if the given string is a valid keyword.
 
@@ -279,7 +267,6 @@ def striskey(s):
     strissym, strisvar
     """
     return iskeyword(s) if is_str(s) else None
-@docwrap('immlib.strisvar')
 def strisvar(s):
     """Determines if the given string is a valid variable name.
 
@@ -300,7 +287,6 @@ def strisvar(s):
 # Builtin Python Abstract Types ###############################################
 
 from collections.abc import Callable
-@docwrap('immlib.is_acallable')
 def is_acallable(obj):
     """Returns ``True`` if an object is a callable object like a function.
 
@@ -322,7 +308,6 @@ def is_acallable(obj):
     """
     return isinstance(obj, Callable)
 from types import LambdaType
-@docwrap('immlib.is_lambda')
 def is_lambda(obj):
     """Returns ``True`` if an object is a lambda function, otherwise ``False``.
 
@@ -343,7 +328,6 @@ def is_lambda(obj):
     """
     return isinstance(obj, LambdaType)
 from collections.abc import Sized
-@docwrap('immlib.is_asized')
 def is_asized(obj):
     """Returns ``True`` if an object implements ``len()``, otherwise ``False``.
 
@@ -363,7 +347,6 @@ def is_asized(obj):
     """
     return isinstance(obj, Sized)
 from collections.abc import Container
-@docwrap('immlib.is_acontainer')
 def is_acontainer(obj):
     """Returns ``True`` if an object implements ``__contains__``, otherwise
     ``False``.
@@ -383,7 +366,6 @@ def is_acontainer(obj):
     """
     return isinstance(obj, Container)
 from collections.abc import Iterable
-@docwrap('immlib.is_aiterable')
 def is_aiterable(obj):
     """Returns ``True`` if an object implements ``__iter__``, otherwise
     ``False``.
@@ -403,7 +385,6 @@ def is_aiterable(obj):
     """
     return isinstance(obj, Iterable)
 from collections.abc import Iterator
-@docwrap('immlib.is_aiterator')
 def is_aiterator(obj):
     """Returns ``True`` if an object is an instance of
     ``collections.abc.Iterator``.
@@ -423,7 +404,6 @@ def is_aiterator(obj):
     """
     return isinstance(obj, Iterator)
 from collections.abc import Reversible
-@docwrap('immlib.is_areversible')
 def is_areversible(obj):
     """Returns ``True`` if an object is an instance of ``Reversible``.
 
@@ -443,7 +423,6 @@ def is_areversible(obj):
     """
     return isinstance(obj, Reversible)
 from collections.abc import Collection
-@docwrap('immlib.is_acoll')
 def is_acoll(obj):
     """Returns ``True`` if an object is a collection (a sized iterable
     container).
@@ -464,7 +443,6 @@ def is_acoll(obj):
     """
     return isinstance(obj, Collection)
 from collections.abc import Sequence
-@docwrap('immlib.is_aseq')
 def is_aseq(obj):
     """Returns ``True`` if an object is a sequence, otherwise ``False``.
 
@@ -483,7 +461,6 @@ def is_aseq(obj):
     """
     return isinstance(obj, Sequence)
 from collections.abc import MutableSequence
-@docwrap('immlib.is_amseq')
 def is_amseq(obj):
     """Returns ``True`` if an object is a mutable sequence, otherwise
     ``False``.
@@ -505,7 +482,6 @@ def is_amseq(obj):
     """
     return isinstance(obj, MutableSequence)
 from pcollections.abc import PersistentSequence
-@docwrap('immlib.is_apseq')
 def is_apseq(obj):
     """Returns ``True`` if an object is a persistent sequence, otherwise
     ``False``.
@@ -527,7 +503,6 @@ def is_apseq(obj):
     """
     return isinstance(obj, PersistentSequence)
 _ByteString = (bytes, bytearray)
-@docwrap('immlib.is_abytes')
 def is_abytes(obj):
     """Returns ``True`` if an object is a byte-string, otherwise ``False``.
 
@@ -546,7 +521,6 @@ def is_abytes(obj):
         ``False``.
     """
     return isinstance(obj, _ByteString)
-@docwrap('immlib.is_bytes')
 def is_bytes(obj):
     """Returns ``True`` if an object is a ``bytes`` object, otherwise
     ``False``.
@@ -566,7 +540,6 @@ def is_bytes(obj):
     """
     return isinstance(obj, bytes)
 from collections.abc import Set
-@docwrap('immlib.is_aset')
 def is_aset(obj):
     """Returns ``True`` if an object is a set type, otherwise ``False``.
 
@@ -585,7 +558,6 @@ def is_aset(obj):
     """
     return isinstance(obj, Set)
 from collections.abc import MutableSet
-@docwrap('immlib.is_amset')
 def is_amset(obj):
     """Returns ``True`` if an object is a mutable set, otherwise ``False``.
 
@@ -605,7 +577,6 @@ def is_amset(obj):
     """
     return isinstance(obj, MutableSet)
 from pcollections.abc import PersistentSet
-@docwrap('immlib.is_apset')
 def is_apset(obj):
     """Returns ``True`` if an object is a persistent set, otherwise ``False``.
 
@@ -626,7 +597,6 @@ def is_apset(obj):
     """
     return isinstance(obj, PersistentSet)
 from collections.abc import Mapping
-@docwrap('immlib.is_amap')
 def is_amap(obj):
     """Returns ``True`` if an object is an abstract mapping, otherwise
     ``False``.
@@ -646,7 +616,6 @@ def is_amap(obj):
     """
     return isinstance(obj, Mapping)
 from collections.abc import MutableMapping
-@docwrap('immlib.is_ammap')
 def is_ammap(obj):
     """Returns ``True`` if an object is a mutable mapping, otherwise ``False``.
 
@@ -667,7 +636,6 @@ def is_ammap(obj):
     """
     return isinstance(obj, MutableMapping)
 from pcollections.abc import PersistentMapping
-@docwrap('immlib.is_apmap')
 def is_apmap(obj):
     """Returns ``True`` if an object is a persistent mapping, otherwise
     ``False``.
@@ -689,7 +657,6 @@ def is_apmap(obj):
     """
     return isinstance(obj, PersistentMapping)
 from collections.abc import Hashable
-@docwrap('immlib.is_ahashable')
 def is_ahashable(obj):
     """Returns ``True`` if an object is a hashable object, otherwise ``False``.
 
@@ -717,7 +684,6 @@ def is_ahashable(obj):
 
 # Builtin Python Concrete Types ###############################################
 
-@docwrap('immlib.is_list')
 def is_list(obj):
     """Returns ``True`` if an object is a ``list`` object.
 
@@ -735,7 +701,6 @@ def is_list(obj):
         ``True`` if `obj` is an instance of ``list``, otherwise ``False``.
     """
     return isinstance(obj, list)
-@docwrap('immlib.is_tuple')
 def is_tuple(obj):
     """Returns ``True`` if an object is a ``tuple`` object.
 
@@ -754,7 +719,6 @@ def is_tuple(obj):
     """
     return isinstance(obj, tuple)
 from pcollections import plist
-@docwrap('immlib.is_plist')
 def is_plist(obj):
     """Returns ``True`` if an object is a persistent list object.
 
@@ -773,7 +737,6 @@ def is_plist(obj):
     """
     return isinstance(obj, plist)
 from pcollections import tlist
-@docwrap('immlib.is_tlist')
 def is_tlist(obj):
     """Returns ``True`` if an object is a transient list object.
 
@@ -792,7 +755,6 @@ def is_tlist(obj):
     """
     return isinstance(obj, tlist)
 from pcollections import llist
-@docwrap('immlib.is_llist')
 def is_llist(obj):
     """Returns ``True`` if an object is a persistent lazy list object.
 
@@ -810,7 +772,6 @@ def is_llist(obj):
         ``True`` if `obj` is an instance of ``llist``, otherwise ``False``.
     """
     return isinstance(obj, llist)
-@docwrap('immlib.is_set')
 def is_set(obj):
     """Returns ``True`` if an object is a ``set`` object.
 
@@ -834,7 +795,6 @@ def is_set(obj):
     is_aset, is_amset, is_apset, is_pset, is_tset, is_frozenset
     """
     return isinstance(obj, set)
-@docwrap('immlib.is_frozenset')
 def is_frozenset(obj):
     """Returns ``True`` if an object is a ``frozenset`` object.
 
@@ -857,7 +817,6 @@ def is_frozenset(obj):
     """
     return isinstance(obj, frozenset)
 from pcollections import pset
-@docwrap('immlib.is_pset')
 def is_pset(obj):
     """Returns ``True`` if an object is a persistent set object.
 
@@ -881,7 +840,6 @@ def is_pset(obj):
     """
     return isinstance(obj, pset)
 from pcollections import tset
-@docwrap('immlib.is_tset')
 def is_tset(obj):
     """Returns ``True`` if an object is a transient set object.
 
@@ -899,7 +857,6 @@ def is_tset(obj):
         ``True`` if `obj` is an instance of ``tset``, otherwise ``False``.
     """
     return isinstance(obj, tset)
-@docwrap('immlib.is_dict')
 def is_dict(obj):
     """Returns ``True`` if an object is a ``dict`` object.
 
@@ -918,7 +875,6 @@ def is_dict(obj):
     """
     return isinstance(obj, dict)
 from collections import OrderedDict
-@docwrap('immlib.is_odict')
 def is_odict(obj):
     """Returns ``True`` if an object is an ``OrderedDict`` object.
 
@@ -939,7 +895,6 @@ def is_odict(obj):
     """
     return isinstance(obj, OrderedDict)
 from collections import defaultdict
-@docwrap('immlib.is_ddict')
 def is_ddict(obj):
     """Returns ``True`` if an object is a ``defaultdict`` object.
 
@@ -959,7 +914,6 @@ def is_ddict(obj):
     """
     return isinstance(obj, defaultdict)
 from pcollections import pdict
-@docwrap('immlib.is_pdict')
 def is_pdict(obj):
     """Returns ``True`` if an object is a persistent dictionary object.
 
@@ -981,7 +935,6 @@ def is_pdict(obj):
     """
     return isinstance(obj, pdict)
 from pcollections import tdict, tldict
-@docwrap('immlib.is_tdict')
 def is_tdict(obj):
     """Returns ``True`` if an object is a transient dictionary object.
 
@@ -1000,7 +953,6 @@ def is_tdict(obj):
     """
     return isinstance(obj, tdict)
 from pcollections import ldict
-@docwrap('immlib.is_ldict')
 def is_ldict(obj):
     """Returns ``True`` if an object is a persistent lazy dictionary object.
 
@@ -1018,7 +970,6 @@ def is_ldict(obj):
         ``True`` if `obj` is an instance of ``ldict``, otherwise ``False``.
     """
     return isinstance(obj, ldict)
-@docwrap('immlib.hashsafe')
 def hashsafe(obj):
     """Returns ``hash(obj)`` if `obj` is hashable, otherwise returns ``None``.
 
@@ -1047,7 +998,6 @@ def hashsafe(obj):
         return hash(obj)
     except TypeError:
         return None
-@docwrap('immlib.can_hash')
 def can_hash(obj):
     """Returns ``True`` if `obj` is safe to hash and ``False`` otherwise.
 
@@ -1064,7 +1014,6 @@ def can_hash(obj):
     hashsafe, is_ahashable
     """
     return hashsafe(obj) is not None
-@docwrap('immlib.itersafe')
 def itersafe(obj):
     """Returns an iterator of the given object or ``None`` if it is not
     iterable.
@@ -1092,7 +1041,6 @@ def itersafe(obj):
         return iter(obj)
     except TypeError:
         return None
-@docwrap('immlib.can_iter')
 def can_iter(obj):
     """Returns ``True`` if `obj` is safe to iterate and ``False`` otherwise.
 
@@ -1106,7 +1054,6 @@ def can_iter(obj):
     itersafe, is_aiterable
     """
     return itersafe(obj) is not None
-@docwrap('immlib.is_pcoll')
 def is_pcoll(obj):
     """Detects if an object is a ``plist``, ``pset``, ``pdict``, ``llist`` or
     ``ldict``.
@@ -1133,7 +1080,6 @@ def is_pcoll(obj):
     """
     return isinstance(obj, is_pcoll.types)
 is_pcoll.types = (plist, pset, pdict, llist, ldict)
-@docwrap('immlib.is_tcoll')
 def is_tcoll(obj):
     """Returns ``True`` if an object is a transient ``tlist``, ``tset``, or
     ``tdict``.
@@ -1155,7 +1101,6 @@ def is_tcoll(obj):
     """
     return isinstance(obj, is_tcoll.types)
 is_tcoll.types = (tlist, tset, tdict)
-@docwrap('immlib.is_mcoll')
 def is_mcoll(obj):
     """Returns ``True`` if an object is a mutable ``list``, ``set``, or
     ``dict``.
@@ -1177,7 +1122,6 @@ def is_mcoll(obj):
     """
     return isinstance(obj, is_mcoll.types)
 is_mcoll.types = (list, set, dict)
-@docwrap('immlib.to_pcoll')
 def to_pcoll(obj):
     """Returns a persistent copy of `obj`.
 
@@ -1213,7 +1157,6 @@ def to_pcoll(obj):
         raise TypeError(f"argument is not a recognized collection")
 from pcollections.abc import (
     TransientSequence, TransientSet, TransientMapping)
-@docwrap('immlib.to_tcoll')
 def to_tcoll(obj, /, copy=True):
     """Returns a transient copy of `obj`.
 
@@ -1265,7 +1208,6 @@ def to_tcoll(obj, /, copy=True):
         return tdict(obj)
     else:
         raise TypeError(f"argument is not a recognized collection")
-@docwrap('immlib.to_mcoll')
 def to_mcoll(obj, /, copy=True):
     """Returns a mutable copy of `obj`.
 
@@ -1309,7 +1251,6 @@ def to_mcoll(obj, /, copy=True):
         return dict(obj)
     else:
         raise TypeError(f"argument is not a collection")
-@docwrap('immlib.freezearray')
 def freezearray(arr):
     """Freezes a NumPy array or SciPy sparse array in-place.
 
@@ -1337,7 +1278,6 @@ def freezearray(arr):
         raise TypeError(
             f"freezearray requires a numpy array or scipy sparse array,"
             f" but type {type(arr)} was given")
-@docwrap('immlib.frozenarray')
 def frozenarray(obj, /, dtype=None, *, copy=False, **kwargs):
     """Roughly equivalent to ``numpy.array`` but returns read-only arrays.
 
@@ -1392,7 +1332,6 @@ def frozenarray(obj, /, dtype=None, *, copy=False, **kwargs):
 
 # Mapping/Sequence Utilities ##################################################
 
-@docwrap('immlib.get')
 def get(d, k, /, *args, **kwargs):
     """Returns a value from either a mapping or a sequence.
 
@@ -1470,7 +1409,6 @@ def get(d, k, /, *args, **kwargs):
         raise KeyError(k)
     else:
         return default
-@docwrap('immlib.nestget')
 def nestget(d, /, *args, **kwargs):
     """Returns a value from a data structure of nested mappings and sequences.
 
@@ -1551,7 +1489,6 @@ def nestget(d, /, *args, **kwargs):
 from pcollections import lazy
 def _lazyvalmap_extract(f, d, k, *args, **kw):
     return f(d[k], *args, **kw)
-@docwrap('immlib.lazyvalmap')
 def lazyvalmap(f, d, /, *args, **kwargs):
     """Returns a dict object whose values are transformed by a function.
 
@@ -1593,7 +1530,6 @@ def lazyvalmap(f, d, /, *args, **kwargs):
         for k in d.keys():
             t[k] = lazy(_lazyvalmap_extract, f, d, k, *args, **kwargs)
     return t.persistent()
-@docwrap('immlib.valmap')
 def valmap(f, d, /, *args, **kwargs):
     """Returns a dictionary object whose values are transformed by a function.
 
@@ -1637,7 +1573,6 @@ def valmap(f, d, /, *args, **kwargs):
         return t.persistent()
     else:
         return {k: f(v, *args, **kwargs) for (k,v) in d.items()}
-@docwrap('immlib.lazykeymap')
 def lazykeymap(f, d, /, *args, **kwargs):
     """Returns a object of type ``pcollections.ldict`` whose values are a
     function of the keys of the mapping `d`.
@@ -1677,7 +1612,6 @@ def lazykeymap(f, d, /, *args, **kwargs):
     for k in keys:
         t[k] = lazy(f, k, *args, **kwargs)
     return t.persistent()
-@docwrap('immlib.keymap')
 def keymap(f, d, /, *args, **kwargs):
     """Returns a dict object whose values are a function of a dict's keys.
 
@@ -1726,7 +1660,6 @@ def keymap(f, d, /, *args, **kwargs):
     return {k: f(k, *args, **kwargs) for k in keys}
 def _lazyitemmap_extract(f, d, k, *args, **kw):
     return f(k, d[k], *args, **kw)
-@docwrap('immlib.lazyitemmap')
 def lazyitemmap(f, d, /, *args, **kwargs):
     """Returns an ``ldict`` object whose values are a function of a dict's
     items.
@@ -1771,7 +1704,6 @@ def lazyitemmap(f, d, /, *args, **kwargs):
         for k in d.keys():
             t[k] = lazy(_lazyitemmap_extract, f, d, k, *args, **kwargs)
     return t.persistent()
-@docwrap('immlib.itemmap')
 def itemmap(f, d, /, *args, **kwargs):
     """Returns a dictionary object whose values are a function of a given
     dictionary's items.
@@ -1819,16 +1751,15 @@ def itemmap(f, d, /, *args, **kwargs):
         return t.persistent()
     else:
         return {k: f(k, v, *args, **kwargs) for (k,v) in d.items()}
-@docwrap('immlib.dictmap')
-def dictmap(f, keys, /, *args, **kw):
+def dictmap(f, keys, /, *args, **kwargs):
     """Returns a dict with the given keys and the values ``map(f, keys)``.
 
     ``dictmap(f, keys)`` returns a dict object whose keys are the elements of
     ``iter(keys)`` and whose values are the elements of ``map(f, keys)``.
 
-    ``dictmap(f, keys, *args, **kw)`` returns a dict object whose keys are the
+    ``dictmap(f, keys, *args, **kwargs)`` returns a dict object whose keys are the
     elements of ``iter(keys)`` and whose values are the elements of
-    ``[f(k, *args, **kw) for k in iter(keys)]``.
+    ``[f(k, *args, **kwargs) for k in iter(keys)]``.
 
     Parameters
     ----------
@@ -1850,18 +1781,17 @@ def dictmap(f, keys, /, *args, **kw):
         A dictionary of the given `keys` with each key ``k`` mapped to
         ``f(k)``.
     """
-    return {k: f(k, *args, **kw) for k in keys}
-@docwrap('immlib.pdictmap')
-def pdictmap(f, keys, /, *args, **kw):
+    return {k: f(k, *args, **kwargs) for k in keys}
+def pdictmap(f, keys, /, *args, **kwargs):
     """Returns a ``pdict`` with the given keys and the values ``map(f, keys)``.
 
     ``pdictmap(f, keys)`` returns a ``pdict`` object whose keys are the
     elements of ``iter(keys)`` and whose values are the elements of
     ``map(f, keys)``.
 
-    ``pdictmap(f, keys, *args, **kw)`` returns a dict object whose keys are
+    ``pdictmap(f, keys, *args, **kwargs)`` returns a dict object whose keys are
     the elements of ``iter(keys)`` and whose values are the elements of
-    ``[f(k, *args, **kw) for k in iter(keys)]``.
+    ``[f(k, *args, **kwargs) for k in iter(keys)]``.
 
     Parameters
     ----------
@@ -1885,10 +1815,9 @@ def pdictmap(f, keys, /, *args, **kw):
     """
     t = tdict()
     for k in keys:
-        t[k] = f(k, *args, **kw)
+        t[k] = f(k, *args, **kwargs)
     return t.persistent()
-@docwrap('immlib.ldictmap')
-def ldictmap(f, keys, *args, **kw):
+def ldictmap(f, keys, *args, **kwargs):
     """Returns a lazy dictionary with the given keys and the values
     ``map(f, keys)``.
 
@@ -1896,9 +1825,9 @@ def ldictmap(f, keys, *args, **kw):
     are the elements of ``iter(keys)`` and whose values are the elements of
     ``map(f, keys)``. All values are lazy.
 
-    ``lazydictmap(f, keys, *args, **kw)`` returns a `pcollections.ldict` object
+    ``lazydictmap(f, keys, *args, **kwargs)`` returns a `pcollections.ldict` object
     whose keys are the elements of ``iter(keys)`` and whose values are the
-    elements of ``[f(k, *args, **kw) for k in iter(keys)]``, lazily calculated.
+    elements of ``[f(k, *args, **kwargs) for k in iter(keys)]``, lazily calculated.
 
     Parameters
     ----------
@@ -1922,9 +1851,8 @@ def ldictmap(f, keys, *args, **kw):
     """
     t = tldict()
     for k in keys:
-        t[k] = lazy(f, k, *args, **kw)
+        t[k] = lazy(f, k, *args, **kwargs)
     return t.persistent()
-@docwrap('immlib.merge')
 def merge(*args, **kwargs):
     '''Merges dict-like objects left-to-right. See also ``rmerge``.
 
@@ -2028,7 +1956,6 @@ def rmerge(*args, **kwargs):
         else:
             res.update(d)
     return ldict(res) if lazy else pdict(res)
-@docwrap('immlib.assoc')
 def assoc(d, /, *args, **kwargs):
     """Returns a copy of the given dictionary with additional key-value pairs.
 
@@ -2090,7 +2017,6 @@ def assoc(d, /, *args, **kwargs):
     else:
         raise TypeError(f"cannot assoc to type {type(d)}")
     return d
-@docwrap('immlib.dissoc')
 def dissoc(d, /, *args):
     """Returns a copy of the given dictionary with certain keys removed.
 
@@ -2212,8 +2138,7 @@ class args(argstuple):
     ``k1=v1``, ``k2=v2``, etc.
 
     If ``a`` is an instance of ``args`` and ``f`` is a function, then the
-    arguments in ``a`` can be applied to ``f`` using either of the following
-    methods:
+    arguments in ``a`` can be applied to ``f`` in either of two ways.
     
      - ``f @ a``
      - ``a.passto(f)``
@@ -2237,7 +2162,6 @@ class args(argstuple):
         if args is self.args and kwargs is self.kwargs:
             return self
         return argstuple.__new__(type(self), args, kwargs)
-@docwrap('immlib.argfilter')
 def argfilter(fn=None, /, **kwargs):
     """A decorator that creates decorators that filter function arguments.
 
@@ -2365,6 +2289,114 @@ def _argfilter_dispatch(filter_fn, f, fsig,
     return f(*b.args, **b.kwargs)
 
 
+# Indentation #################################################################
+
+def detect_indentation(text, /, skip_first=True, tabsize=8):
+    """Given a block of text that is part of a docstring, guess the level of
+    indentation used to write it.
+
+    This function accepts a string that contains multiple lines and guesses the
+    indentation level used to write it. It does this by splitting the lines and
+    finding the line that starts with the smallest number of spaces. That
+    number of spaces is the indentation guess.
+
+    By default, this function skips the first line because it is customary to
+    start docstrings out with an unindented line. This behavior can be changed
+    by setting the optional argument `skip_first` to ``False``.
+
+    Parameters
+    ----------
+    text : str
+        The text whose indentation is to be guessed.
+    skip_first : bool, optional
+        Whether to skip the first line when detecting the indentation level.
+        The default is ``True``.
+    tabsize : int, optional
+        The number of spaces in a tab-stop; used to replace the tab characters
+        in each line using the method ``str.expandtabs``. The default is ``8``.
+
+    Returns
+    -------
+    int
+        The number of spaces of indentation detected.
+    """
+    if not isinstance(text, str):
+        raise TypeError(
+            f"detect_indentation requires str but got {type(text)}")
+    lns = text.split('\n')
+    ident = None
+    if skip_first:
+        lns = lns[1:]
+    for ln in lns:
+        ln = ln.expandtabs(tabsize)
+        if ln.strip() == '':
+            continue
+        ln_ident = len(ln) - len(ln.lstrip())
+        if ident is None:
+            ident = ln_ident
+        elif ln_ident < ident:
+            ident = ln_ident
+    return ident
+def reindent(text, new_indent=0, /,
+             skip_first=True, tabsize=8, final_endline=True, default_indent=0):
+    """Returns a block of text with a different indentation.
+
+    ``reindent(text, n)`` returns a copy of `text` after removing its current
+    indentation level and uniformly reindenting the text with ``n`` spaces. The
+    first line is skipped entirely, and the current indentation level is
+    detected using ``detect_indentation``.
+
+    Parameters
+    ----------
+    text : str
+        The text that is to be reindented.
+    new_indent : int, optional
+        The new indentation level. If this is not provided, then the default is
+        0, meaning that the text will be unindented.
+    skip_first : bool, optional
+        Whether or not to skip the first line.
+    tabsize : int, optional
+        How large to consider tab characters in the text; this is used with the
+        ``str.expandtabs`` method. The default is 8.
+    final_endline : bool, optional
+        Whether the returned string should end with a newline or not. The
+        default is ``True``.
+    default_indent : int, optional
+        The indentation level to assume if none can be detected (i.e., if every
+        line considered is blank). The default is 0.
+
+    Returns
+    -------
+    str
+        A duplicate of `text` with updated indentation.
+    """
+    # Get the current indentation level:
+    currind = detect_indentation(text, skip_first=skip_first, tabsize=tabsize)
+    if currind is None:
+        currind = default_indent
+    # Split the text into lines.
+    lns = text.split('\n')
+    # Remove all the current indentations:
+    newlns = []
+    if skip_first:
+        newlns.append(lns[0].expandtabs(tabsize))
+        lns = lns[1:]
+    head = ' ' * currind
+    newhead = ' ' * new_indent
+    for ln in lns:
+        ln = ln.expandtabs(tabsize)
+        if ln.strip() == '':
+            newlns.append('')
+            continue
+        if ln.startswith(head):
+            ln = ln[currind:]
+        newlns.append(newhead + ln)
+    newtext = '\n'.join(newlns)
+    if final_endline and not newtext.endswith('\n'):
+        newtext += '\n'
+    return newtext
+
+
 # unitregistry ################################################################
 
 # We put the unitregistry here and not in the quantity namespace because we
@@ -2383,7 +2415,6 @@ def _default_ureg():
     registry otherwise. ``immlib.units`` always returns this registry."""
     ureg = _default_ureg_override.get()
     return _global_ureg[0] if ureg is None else ureg
-@docwrap('immlib.unitregistry')
 def unitregistry(obj, /, *args):
     """Returns the ``pint.UnitRegistry`` object for the given unit or quantity.
 
@@ -2431,7 +2462,6 @@ def unitregistry(obj, /, *args):
 
 # Caching #####################################################################
 
-@docwrap('immlib.util.to_pathcache')
 def to_pathcache(obj):
     """Returns a ``joblib.Memory`` object that corresponds to the given path
     object.
@@ -2492,7 +2522,6 @@ def to_pathcache(obj):
     else:
         raise TypeError(
             f"to_pathcache: arg must be path, str, or None; not {type(obj)}")
-@docwrap('immlib.util.to_lrucache')
 def to_lrucache(obj):
     """Returns an ``lru_cache`` function appropriate for the given object.
 

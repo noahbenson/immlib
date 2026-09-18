@@ -16,7 +16,6 @@ from cloudpathlib.cloudpath import (
 from cloudpathlib.client import (register_client_class, Client)
 from pcollections import (pdict, ldict, lazy)
 
-from ..doc  import docwrap
 from ..util import (is_str, is_amap, is_url, url_download)
 from ..util._url import _atomic_open
 
@@ -175,7 +174,6 @@ def _osf_crawl(proj, path=None,
         kind='directory',
         contents=ldict(ls),
         cache_path=cache_path)
-@docwrap
 def osf_contents(proj,
                  storage='osfstorage',
                  cache_path=None,

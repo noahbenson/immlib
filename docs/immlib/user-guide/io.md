@@ -56,7 +56,7 @@ For example:
 ```{code-cell}
 import immlib as il
 
-filename = il.doc.__file__
+filename = il.util.__file__
 print("Catting file", filename, "...")
 
 lines = il.load(filename, 'text')

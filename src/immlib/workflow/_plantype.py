@@ -11,7 +11,6 @@ from copy import copy
 
 from pcollections import (pdict, ldict, lazy)
 
-from ..doc import docwrap
 from ..util import (is_str, is_pdict, is_tdict, is_ldict, assoc, merge)
 from ._core import (calc, plan, plandict, tplandict, is_calcfn)
 
@@ -313,7 +312,6 @@ class planobject(plantype.planobject_base, metaclass=plantype):
 
 # Utilities ###################################################################
 
-@docwrap
 def is_planobject(obj):
     '''Determines if an object is an instance of a ``immlib.plantype`` object.
     
@@ -323,7 +321,6 @@ def is_planobject(obj):
     See also: ``plantype``, ``is_plantype``
     '''
     return isinstance(obj, planobject)
-@docwrap
 def is_plantype(obj):
     '''Determines if an object is a ``immlib.plantype``.
     

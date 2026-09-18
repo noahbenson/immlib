@@ -26,7 +26,7 @@ To obtain a path object&mdash;either a `CloudPath` or `Path`&mdash;the
 ```{code-cell}
 import immlib as il
 
-p = il.path(il.doc.__file__)
+p = il.path(il.util.__file__)
 print(type(p), ': ', il.pathstr(p), sep='')
 
 cp = il.path(

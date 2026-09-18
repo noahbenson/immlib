@@ -5,7 +5,6 @@
 
 # Dependencies ################################################################
 
-from ..doc import docwrap
 import os, shutil, tempfile
 import urllib.parse, urllib.request
 from pathlib import Path
@@ -42,7 +41,6 @@ def _atomic_open(path, mode='wb'):
 
 # URL Functions ###############################################################
 
-@docwrap('immlib.is_url')
 def is_url(url, /):
     '''Returns ``True`` if given a valid URL string and ``False`` otherwise.
     
@@ -61,7 +59,6 @@ def is_url(url, /):
         return bool(p.scheme and (p.netloc or p.scheme == 'file'))
     except Exception:
         return False
-@docwrap('immlib.util.can_download_url')
 def can_download_url(url):
     '''Returns ``True`` if given a requestable URL and ``False`` otherwise.
     
@@ -78,7 +75,6 @@ def can_download_url(url):
             return bool(response)
     except Exception:
         return False
-@docwrap('immlib.url_download')
 def url_download(url, /, destpath=None, *,
                  mkdirs=True, mkdir_mode=0o775, expanduser=True):
     '''Returns the contents of the given URL as a byte-string.

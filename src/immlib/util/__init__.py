@@ -138,6 +138,10 @@ from ._numeric import (
     array_args,
     numeric_args)
 
+from ._core import (
+    detect_indentation,
+    reindent)
+
 from ._quantity import (
     Quantity,
     UnitRegistry,
@@ -251,6 +255,8 @@ __all__ = (
     "tensor_args",
     "array_args",
     "numeric_args",
+    "detect_indentation",
+    "reindent",
     "Quantity",
     "UnitRegistry",
     "default_ureg",

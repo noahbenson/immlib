@@ -16,7 +16,6 @@ from cloudpathlib import (
     S3Path, AzureBlobPath, GSPath,
     S3Client, AzureBlobClient, GSClient)
 
-from ..doc        import docwrap
 from ..util       import (is_str, is_amap, is_aseq, strstarts, strends)
 
 from ._osf        import (OSFClient, OSFPath)
@@ -60,7 +59,6 @@ is_windows_drive.__doc__ = \
 
 # General Utilities ###########################################################
 
-@docwrap
 def pathstr(obj):
     """Returns a string or bytes representation of a path.
 
@@ -74,7 +72,6 @@ def pathstr(obj):
 
 # OSFPath Functions ###########################################################
 
-@docwrap
 def is_osfpath(obj):
     """Detects whether the input is an ``OSFPath`` object.
 
@@ -96,7 +93,6 @@ def is_osfpath(obj):
         otherwise.
     """
     return isinstance(obj, OSFPath)
-@docwrap
 def like_osfpath(obj):
     """Detects whether the input can be converted into an ``OSFPath`` object.
 
@@ -134,7 +130,6 @@ def _interp_cache(local_cache_dir, cache_path, tag):
         # Otherwise we make it a path and append the tag.
         cache_path = Path(cache_path).expanduser()
         return cache_path if tag is None else (cache_path / tag)
-@docwrap
 def osfpath(obj, /, *args,
             client=None,
             cache_path=None,
@@ -242,7 +237,6 @@ def osfpath(obj, /, *args,
 
 # S3Path Functions ############################################################
 
-@docwrap
 def is_s3path(obj):
     """Detects whether the input is an ``S3Path`` object.
 
@@ -264,7 +258,6 @@ def is_s3path(obj):
         otherwise.
     """
     return isinstance(obj, S3Path)
-@docwrap
 def like_s3path(obj):
     """Detects whether the input can be converted into an ``S3Path`` object.
 
@@ -290,7 +283,6 @@ def like_s3path(obj):
         return True
     url = urlparse(pathstr(obj))
     return bool(url.scheme == 's3' and url.netloc)
-@docwrap
 def s3path(obj, *args, **kwargs):
     """Creates and returns an ``S3Path`` representing an AWS S3 repository.
 
@@ -347,7 +339,6 @@ def s3path(obj, *args, **kwargs):
 
 # GSPath Functions ############################################################
 
-@docwrap
 def is_gspath(obj):
     """Detects whether the input is an ``GSPath`` object.
 
@@ -370,7 +361,6 @@ def is_gspath(obj):
 
     """
     return isinstance(obj, GSPath)
-@docwrap
 def like_gspath(obj):
     """Detects whether the input can be converted into an ``GSPath`` object.
 
@@ -396,7 +386,6 @@ def like_gspath(obj):
         return True
     url = urlparse(pathstr(obj))
     return bool(url.scheme == 'gs' and url.netloc)
-@docwrap
 def gspath(obj, *args, **kwargs):
     """Creates and returns an ``GSPath`` representing a Google Storage
     repository.
@@ -454,7 +443,6 @@ def gspath(obj, *args, **kwargs):
 
 # AzureBlobPath Functions #####################################################
 
-@docwrap
 def is_azpath(obj):
     """Detects whether the input is an ``AzureBlobPath`` object.
 
@@ -476,7 +464,6 @@ def is_azpath(obj):
         otherwise.
     """
     return isinstance(obj, AzureBlobPath)
-@docwrap
 def like_azpath(obj):
     """Detects whether an input can be converted into an ``AzureBlobPath``
     object.
@@ -504,7 +491,6 @@ def like_azpath(obj):
         return True
     url = urlparse(pathstr(obj))
     return bool(url.scheme == 'az' and url.netloc)
-@docwrap
 def azpath(obj, *args, **kwargs):
     """Creates and returns an ``AzureBlobPath`` representing an Azure
     repository.
@@ -562,7 +548,6 @@ def azpath(obj, *args, **kwargs):
 
 # Filesystem Paths ############################################################
 
-@docwrap
 def is_filepath(p):
     """Detects whether an object is a filesystem ``Path`` object.
 
@@ -581,7 +566,6 @@ def is_filepath(p):
         otherwise.
     """
     return isinstance(p, Path)
-@docwrap
 def like_filepath(obj):
     """Detects whether an input can be converted into a ``Path`` object.
 
@@ -610,7 +594,6 @@ def like_filepath(obj):
         return True
     url = urlparse(pathstr(obj))
     return bool(url.scheme == '' or url.scheme == 'file')
-@docwrap
 def filepath(p, *args):
     """Returns a local ``Path`` object for the given path if possible.
 
@@ -678,7 +661,6 @@ pathtypes = dict(
     file=PathTypeRecord(
         filepath, is_filepath, like_filepath, lambda path:path))
 scheme_sep = '://'
-@docwrap
 def pathtype(path, default='file', encoding='utf-8'):
     """Given a path, returns the pathtype record and remaining path.
 
@@ -719,7 +701,6 @@ def pathtype(path, default='file', encoding='utf-8'):
     else:
         scheme = spath.split(scheme_sep)[0]
     return pathtypes[scheme]
-@docwrap
 def is_path(p):
     """Detects whether an object is either a ``Path`` or a ``CloudPath``
     object.
@@ -748,7 +729,6 @@ def is_path(p):
     except (KeyError, TypeError):
         return False
     return pt.isfn(p)
-@docwrap
 def like_path(p):
     """Detects whether an object is either like a ``Path`` or ``CloudPath``
     object.
@@ -783,7 +763,6 @@ def like_path(p):
 
 # path ########################################################################
 
-@docwrap
 def path(arg0, *args, **kwargs):
     """Convenience function for instantiating ``Path`` objects.
 
@@ -818,7 +797,6 @@ def path(arg0, *args, **kwargs):
     # That is all that's required.
     return p
 
-@docwrap
 def pathdict(arg, all=False, filter=None, ondir=None, onfile=None):
     """Returns a lazy dictionary of the nested paths beginning at the argument.
 

@@ -41,7 +41,7 @@ def check_data(data):
        be a 1-dimensional vector of numbers, and it is converted into a NumPy
        array by this calculation.
    
-   Outputs
+   Returns
    -------
    data : numpy.ndarray
        A 1-dimensional NumPy array of numbers.
@@ -63,7 +63,7 @@ def check_data(data):
 def calc_sums(data):
     """Calculates the sum and sum of squares of the data.
     
-    Outputs
+    Returns
     -------
     sum_of_squares : number
         The sum of squares of the absolute values of the data.
@@ -79,7 +79,7 @@ def calc_sums(data):
 def calc_mean_etc(sum, sum_of_squares, n):
     """Calculates the mean, variance, and standard deviation of the data.
     
-    Outputs
+    Returns
     -------
     mean : number
         The mean of the data.
@@ -169,7 +169,7 @@ error. (`PlanError` is a subclass of `pcollections.LazyError`.)
 def calc_ratio(mean, std):
     """Calculates the ratio of the mean to the standard deviation.
 
-    Outputs
+    Returns
     -------
     ratio : number
         The mean divided by the standard deviation.
@@ -240,7 +240,19 @@ calc_sums.calc
 ## Tracking Documentation
 
 Calculations and plans also track the documentation for their inputs and
-outputs. These can be accessed via the `input_docs` and `output_docs` fields.
+outputs. A calculation's docstring must be written in
+[NumPy style](https://numpydoc.readthedocs.io/en/latest/format.html): its
+inputs are documented in the `Parameters` section and its outputs in the
+`Returns` section, whose entries must be named (`y : int`) so that each
+output's documentation can be found. The parsed documentation is available
+through the `input_docs` and `output_docs` fields, and is also used to build
+a plan's own docstring.
+
+```{note}
+Before version 0.2, a calculation documented its inputs and outputs in
+`Inputs` and `Outputs` sections. Those section names are no longer
+recognized.
+```
 
 ```{code-cell}
 print(calc_sums.calc.output_docs['sum'])
