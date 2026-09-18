@@ -94,7 +94,16 @@ def _osf_cache_file(url, path, mkdir_mode=0o775):
         return path
     path.parent.mkdir(mode=mkdir_mode, parents=True, exist_ok=True)
     # Download the file and save it.
-    url_download(url, destpath=path, mkdir_mode=mkdir_mode)
+    try:
+        url_download(url, destpath=path, mkdir_mode=mkdir_mode)
+    except OSError:
+        # Another thread or process may have cached the same file while this
+        # download was running; on Windows, moving this download into place
+        # then fails because the file that is already there is open. The
+        # file in place is complete (nothing incomplete is ever moved into
+        # place), so it is used and this download is discarded.
+        if not path.is_file():
+            raise
     if not path.is_file():
         raise RuntimeError(f"url failed to download: {url} -> {path}")
     return path

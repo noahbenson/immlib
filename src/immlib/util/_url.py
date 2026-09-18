@@ -39,16 +39,13 @@ def _atomic_open(path, mode='wb'):
     and `path` is left unchanged.
 
     .. Note:: On Windows, replacing a file that another thread or process
-        currently has open raises ``PermissionError``. When `path` did not
-        exist when the block started but exists when it ends, another writer
-        finished writing the same file first; since nothing incomplete is
-        ever moved into place, that file is complete, so the temporary file
-        is discarded and no error is raised. An error while replacing a file
-        that already existed is raised as usual, so that an intended
-        overwrite never fails silently.
+        currently has open raises ``PermissionError`` (POSIX allows it).
+        The error is raised, so that a write never fails silently; a caller
+        that only wants the file to exist, such as a download into a cache
+        directory, should treat that error as success when the file is
+        there (see ``immlib.pathlib._osf._osf_cache_file``).
     """
     path = Path(path)
-    existed = path.exists()
     (fd, tmp) = tempfile.mkstemp(
         dir=path.parent, prefix=f'.{path.name}.', suffix='.part')
     def rmtmp():
@@ -69,11 +66,9 @@ def _atomic_open(path, mode='wb'):
         raise
     try:
         os.replace(tmp, path)
-    except OSError:
+    except BaseException:
         rmtmp()
-        # Another writer got there first (see the note above).
-        if existed or not os.path.exists(path):
-            raise
+        raise
 
 
 # URL Functions ###############################################################

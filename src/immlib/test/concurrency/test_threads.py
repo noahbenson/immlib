@@ -103,40 +103,75 @@ class TestThreads(TestCase):
         import os
         from pathlib import Path
         from immlib.util import _url
+        from immlib.pathlib._osf import _osf_cache_file
         def failing_replace(src, dst):
             # This is what Windows does when dst is open elsewhere.
             raise PermissionError(5, 'Access is denied')
-        def write(dest, data, *, other_writer=None):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            src = tmpdir / 'source.bin'
+            src.write_bytes(b'source data')
+            url = src.as_uri()
+            # url_download raises rather than failing silently, and leaves
+            # no temporary file behind.
+            dest = tmpdir / 'dest' / 'file.bin'
+            dest.parent.mkdir()
             real_replace = _url.os.replace
             _url.os.replace = failing_replace
             try:
-                with _url._atomic_open(dest, 'wb') as fl:
-                    fl.write(data)
-                    if other_writer is not None:
-                        real_replace(other_writer, dest)
+                with self.assertRaises(PermissionError):
+                    _url.url_download(url, destpath=dest)
+                self.assertFalse(dest.exists())
+                self.assertEqual(os.listdir(dest.parent), [])
+                # A cached file that another writer put in place first is
+                # used, and this download is discarded.
+                dest.write_bytes(b'cached by another writer')
+                other = tmpdir / 'other.bin'
+                other.write_bytes(b'x')
+                self.assertEqual(_osf_cache_file(other.as_uri(), dest), dest)
+                self.assertEqual(dest.read_bytes(), b'cached by another writer')
+                self.assertEqual(os.listdir(dest.parent), ['file.bin'])
+                # But a failure with no file in place is still an error.
+                missing = tmpdir / 'dest' / 'missing.bin'
+                with self.assertRaises(PermissionError):
+                    _osf_cache_file(other.as_uri(), missing)
+                self.assertFalse(missing.exists())
             finally:
                 _url.os.replace = real_replace
+    def test_cache_download_windows_semantics(self):
+        """Tests concurrent cache downloads with Windows's rule that a file
+        that is open elsewhere cannot be replaced."""
+        import os
+        from pathlib import Path
+        from immlib.util import _url
+        from immlib.pathlib._osf import _osf_cache_file
+        real_replace = os.replace
+        def windows_replace(src, dst):
+            # Windows refuses to replace a file that is open elsewhere; in
+            # these tests, assume any existing destination is open.
+            if os.path.exists(dst):
+                raise PermissionError(5, 'Access is denied')
+            return real_replace(src, dst)
+        data = os.urandom(1_000_000)
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)
-            # A file that another writer finished first is kept, and no
-            # temporary file is left behind.
-            other = tmpdir / 'other.tmp'
-            other.write_bytes(b'winner')
-            dest = tmpdir / 'file.bin'
-            write(dest, b'loser', other_writer=other)
-            self.assertEqual(dest.read_bytes(), b'winner')
-            self.assertEqual(os.listdir(tmpdir), ['file.bin'])
-            # Failing to overwrite a file that was already there raises,
-            # rather than silently keeping the old contents.
-            with self.assertRaises(PermissionError):
-                write(dest, b'newer')
-            self.assertEqual(dest.read_bytes(), b'winner')
-            # So does failing to write a file that does not appear at all.
-            missing = tmpdir / 'missing.bin'
-            with self.assertRaises(PermissionError):
-                write(missing, b'x')
-            self.assertFalse(missing.exists())
-            self.assertEqual(os.listdir(tmpdir), ['file.bin'])
+            src = tmpdir / 'source.bin'
+            src.write_bytes(data)
+            url = src.as_uri()
+            _url.os.replace = windows_replace
+            try:
+                for rep in range(3):
+                    dest = tmpdir / f'cache{rep}' / 'sub' / 'file.bin'
+                    def fetch(i):
+                        p = _osf_cache_file(url, dest)
+                        return Path(p).read_bytes()
+                    results = run_threads(fetch)
+                    self.assertEqual([len(r) for r in results],
+                                     [len(data)] * NTHREADS)
+                    self.assertTrue(all(r == data for r in results))
+                    self.assertEqual(os.listdir(dest.parent), ['file.bin'])
+            finally:
+                _url.os.replace = real_replace
     def test_plandict_threads(self):
         from immlib.workflow import calc, plan
         calls = []
