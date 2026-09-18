@@ -80,6 +80,16 @@ class TestThreads(TestCase):
                 self.assertEqual(run_threads(fetch), [len(data)] * NTHREADS)
                 # No temporary files are left behind.
                 self.assertEqual(os.listdir(dest.parent), ['file.bin'])
+                # The file that ended up in place is complete.
+                self.assertEqual(len(dest.read_bytes()), len(data))
+            # Downloaded files get ordinary permissions, not the
+            # owner-only permissions of a temporary file.
+            if os.name == 'posix':
+                import stat
+                mode = stat.S_IMODE(os.stat(dest).st_mode)
+                umask = os.umask(0)
+                os.umask(umask)
+                self.assertEqual(mode, 0o666 & ~umask)
             # A failed download leaves nothing at the destination.
             dest = Path(tmpdir) / 'missing.bin'
             with self.assertRaises(Exception):
@@ -87,6 +97,46 @@ class TestThreads(TestCase):
             self.assertFalse(dest.exists())
             self.assertEqual(
                 [f for f in os.listdir(tmpdir) if f.endswith('.part')], [])
+    def test_atomic_open_replace_conflict(self):
+        """Tests the Windows case in which the destination file cannot be
+        replaced because another thread or process has it open."""
+        import os
+        from pathlib import Path
+        from immlib.util import _url
+        def failing_replace(src, dst):
+            # This is what Windows does when dst is open elsewhere.
+            raise PermissionError(5, 'Access is denied')
+        def write(dest, data, *, other_writer=None):
+            real_replace = _url.os.replace
+            _url.os.replace = failing_replace
+            try:
+                with _url._atomic_open(dest, 'wb') as fl:
+                    fl.write(data)
+                    if other_writer is not None:
+                        real_replace(other_writer, dest)
+            finally:
+                _url.os.replace = real_replace
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            # A file that another writer finished first is kept, and no
+            # temporary file is left behind.
+            other = tmpdir / 'other.tmp'
+            other.write_bytes(b'winner')
+            dest = tmpdir / 'file.bin'
+            write(dest, b'loser', other_writer=other)
+            self.assertEqual(dest.read_bytes(), b'winner')
+            self.assertEqual(os.listdir(tmpdir), ['file.bin'])
+            # Failing to overwrite a file that was already there raises,
+            # rather than silently keeping the old contents.
+            with self.assertRaises(PermissionError):
+                write(dest, b'newer')
+            self.assertEqual(dest.read_bytes(), b'winner')
+            # So does failing to write a file that does not appear at all.
+            missing = tmpdir / 'missing.bin'
+            with self.assertRaises(PermissionError):
+                write(missing, b'x')
+            self.assertFalse(missing.exists())
+            self.assertEqual(os.listdir(tmpdir), ['file.bin'])
     def test_plandict_threads(self):
         from immlib.workflow import calc, plan
         calls = []

@@ -13,6 +13,20 @@ from contextlib import contextmanager
 
 # Utilities ###################################################################
 
+# tempfile.mkstemp creates its file readable and writable by its owner only,
+# but a downloaded file should have the permissions an ordinary new file
+# would have, so that (for example) a cache directory can be shared. The
+# umask is read once, here, because reading it is not thread-safe.
+def _default_file_mode():
+    try:
+        umask = os.umask(0)
+        os.umask(umask)
+    except OSError:  # pragma: no cover - not available everywhere
+        return None
+    return 0o666 & ~umask
+_FILE_MODE = _default_file_mode()
+
+
 @contextmanager
 def _atomic_open(path, mode='wb'):
     """Context manager that opens a temporary file for writing, then moves it
@@ -23,20 +37,43 @@ def _atomic_open(path, mode='wb'):
     other threads or processes) never see a partially written file at
     `path`. If the block raises an exception, the temporary file is removed
     and `path` is left unchanged.
+
+    .. Note:: On Windows, replacing a file that another thread or process
+        currently has open raises ``PermissionError``. When `path` did not
+        exist when the block started but exists when it ends, another writer
+        finished writing the same file first; since nothing incomplete is
+        ever moved into place, that file is complete, so the temporary file
+        is discarded and no error is raised. An error while replacing a file
+        that already existed is raised as usual, so that an intended
+        overwrite never fails silently.
     """
     path = Path(path)
+    existed = path.exists()
     (fd, tmp) = tempfile.mkstemp(
         dir=path.parent, prefix=f'.{path.name}.', suffix='.part')
-    try:
-        with os.fdopen(fd, mode) as fl:
-            yield fl
-        os.replace(tmp, path)
-    except BaseException:
+    def rmtmp():
         try:
             os.remove(tmp)
         except OSError:
             pass
+    try:
+        with os.fdopen(fd, mode) as fl:
+            yield fl
+        if _FILE_MODE is not None:
+            try:
+                os.chmod(tmp, _FILE_MODE)
+            except OSError:
+                pass
+    except BaseException:
+        rmtmp()
         raise
+    try:
+        os.replace(tmp, path)
+    except OSError:
+        rmtmp()
+        # Another writer got there first (see the note above).
+        if existed or not os.path.exists(path):
+            raise
 
 
 # URL Functions ###############################################################

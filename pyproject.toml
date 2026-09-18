@@ -39,7 +39,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["torch >= 2.2.0"]
 test = ["torch >= 2.2.0"]
-docs = ["torch >= 2.2.0", "jupyter-book >= 1.0.0", "matplotlib >= 3.4.0"]
+# Jupyter Book 2 is a different program (it builds with mystmd and uses its
+# own myst.yml configuration); these docs are written for Jupyter Book 1.
+docs = ["torch >= 2.2.0", "jupyter-book >= 1.0.0, < 2", "matplotlib >= 3.4.0"]
 
 [project.urls]
 homepage = "https://github.com/noahbenson/immlib"
