@@ -104,9 +104,9 @@ def _osf_cache_file(url, path, mkdir_mode=0o775):
         url_download(
             url, destpath=path, mkdir_mode=mkdir_mode, overwrite=False)
     except OSError:
-        # On a filesystem that cannot make hard links, the file is moved
-        # into place instead, and on Windows that move fails when another
-        # thread or process has the file that is already there open.
+        # Moving a file into place can fail for reasons peculiar to the
+        # filesystem, especially on Windows, so a download whose file is
+        # nonetheless in the cache when it ends is a success.
         if not path.is_file():
             raise
     if not path.is_file():

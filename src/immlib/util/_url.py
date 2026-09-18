@@ -56,7 +56,9 @@ def _atomic_open(path, mode='wb', *, overwrite=True):
         ``PermissionError`` for as long as that lasts, so a reader can fail
         on a file that exists and is complete. Passing ``overwrite=False``
         avoids both problems, because nothing at `path` is ever deleted or
-        replaced.
+        replaced: the file is linked into place, or, where hard links are
+        not supported, renamed into place, which on Windows fails rather
+        than replacing an existing file.
     """
     path = Path(path)
     (fd, tmp) = tempfile.mkstemp(
@@ -88,11 +90,24 @@ def _atomic_open(path, mode='wb', *, overwrite=True):
             return
         except OSError:
             # Hard links are not supported everywhere (FAT filesystems and
-            # some network shares); fall back to a replacement.
+            # some network shares); fall back to a rename below.
             pass
         else:
             rmtmp()
             return
+        # os.rename, unlike os.replace, refuses to replace an existing file
+        # on Windows, which is what is wanted here: another writer's file is
+        # kept, and no file is deleted for a reader to trip over. On POSIX
+        # it does replace, but replacing a file that a reader has open is
+        # harmless there.
+        try:
+            os.rename(tmp, path)
+        except FileExistsError:
+            rmtmp()
+        except BaseException:
+            rmtmp()
+            raise
+        return
     try:
         os.replace(tmp, path)
     except BaseException:

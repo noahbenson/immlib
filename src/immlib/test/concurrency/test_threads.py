@@ -145,9 +145,11 @@ class TestThreads(TestCase):
         def failing_replace(src, dst):
             # This is what Windows does when dst is open elsewhere.
             raise PermissionError(5, 'Access is denied')
+        def failing_rename(src, dst):
+            raise PermissionError(5, 'Access is denied')
         def failing_link(src, dst):
             # This is what a filesystem without hard links does; it forces
-            # the downloads below onto the replacement path.
+            # the downloads below onto the rename path.
             raise OSError(errno.EPERM, 'Operation not permitted')
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)
@@ -159,8 +161,10 @@ class TestThreads(TestCase):
             dest = tmpdir / 'dest' / 'file.bin'
             dest.parent.mkdir()
             real_replace = _url.os.replace
+            real_rename = _url.os.rename
             real_link = _url.os.link
             _url.os.replace = failing_replace
+            _url.os.rename = failing_rename
             _url.os.link = failing_link
             try:
                 with self.assertRaises(PermissionError):
@@ -182,30 +186,37 @@ class TestThreads(TestCase):
                 self.assertFalse(missing.exists())
             finally:
                 _url.os.replace = real_replace
+                _url.os.rename = real_rename
                 _url.os.link = real_link
     def test_cache_download_windows_semantics(self):
         """Tests concurrent cache downloads with Windows's rules: a file that
         is open elsewhere cannot be replaced, and a file that has been
         replaced cannot be opened by name until every handle to it is
-        closed."""
+        closed. Nothing in a cache download may replace a file, so these
+        rules must never come into play."""
         import os
         import errno
         from pathlib import Path
         from immlib.util import _url
         from immlib.pathlib._osf import _osf_cache_file
         real_replace = _url.os.replace
+        real_rename = _url.os.rename
         real_link = _url.os.link
         replaced = []
         def windows_replace(src, dst):
-            # Windows refuses to replace a file that is open elsewhere; in
-            # these tests, assume any existing destination is open. A
-            # replacement that does succeed is recorded, because a
-            # successful replacement is what makes the replaced file
-            # unopenable by other threads on Windows.
-            if os.path.exists(dst):
-                raise PermissionError(5, 'Access is denied')
+            # A replacement is recorded, because on Windows a replacement
+            # either fails (when the destination is open elsewhere) or
+            # leaves the replaced file pending deletion, in which state
+            # other threads cannot open it by name. Neither may happen to a
+            # cached file, so this must never be called.
             replaced.append(dst)
             return real_replace(src, dst)
+        def windows_rename(src, dst):
+            # os.rename refuses to replace an existing file on Windows.
+            if os.path.exists(dst):
+                raise FileExistsError(183, 'Cannot create a file when that'
+                                           ' file already exists')
+            return real_rename(src, dst)
         def failing_link(src, dst):
             raise OSError(errno.EPERM, 'Operation not permitted')
         data = os.urandom(1_000_000)
@@ -224,6 +235,7 @@ class TestThreads(TestCase):
                 self.assertTrue(all(r == data for r in results))
                 self.assertEqual(os.listdir(dest.parent), ['file.bin'])
             _url.os.replace = windows_replace
+            _url.os.rename = windows_rename
             try:
                 # Cache downloads link their file into place, so no file is
                 # ever replaced, whether or not one is already there. This
@@ -232,17 +244,17 @@ class TestThreads(TestCase):
                 for rep in range(3):
                     fetch_concurrently(tmpdir / f'cache{rep}' / 'sub' /
                                        'file.bin')
-                self.assertEqual(replaced, [])
-                # On a filesystem that cannot link, the file is moved into
+                # On a filesystem that cannot link, the file is renamed into
                 # place instead, and the losers of the race keep the file
-                # that is already there rather than failing.
+                # that is already there rather than replacing it or failing.
                 _url.os.link = failing_link
                 for rep in range(3):
                     fetch_concurrently(tmpdir / f'nolink{rep}' / 'sub' /
                                        'file.bin')
-                self.assertEqual(len(replaced), 3)
+                self.assertEqual(replaced, [])
             finally:
                 _url.os.replace = real_replace
+                _url.os.rename = real_rename
                 _url.os.link = real_link
     def test_plandict_threads(self):
         from immlib.workflow import calc, plan
