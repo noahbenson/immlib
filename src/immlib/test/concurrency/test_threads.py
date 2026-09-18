@@ -97,16 +97,58 @@ class TestThreads(TestCase):
             self.assertFalse(dest.exists())
             self.assertEqual(
                 [f for f in os.listdir(tmpdir) if f.endswith('.part')], [])
+    def test_atomic_open_no_overwrite(self):
+        """Tests that a download that must not overwrite its destination
+        keeps the file that is already there and never replaces it."""
+        import os
+        from pathlib import Path
+        from immlib.util import _url
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            src = tmpdir / 'source.bin'
+            src.write_bytes(b'source data')
+            url = src.as_uri()
+            dest = tmpdir / 'dest' / 'file.bin'
+            dest.parent.mkdir()
+            # Nothing is replaced when overwrite is False, so os.replace is
+            # not called at all on a filesystem that can make hard links.
+            def no_replace(s, d):
+                raise AssertionError(f"os.replace called: {s} -> {d}")
+            real_replace = _url.os.replace
+            _url.os.replace = no_replace
+            try:
+                # The file is created when it is not already there.
+                _url.url_download(url, destpath=dest, overwrite=False)
+                self.assertEqual(dest.read_bytes(), b'source data')
+                # A file that is already there is kept, and the downloaded
+                # data are discarded without a trace.
+                dest.write_bytes(b'cached by another writer')
+                other = tmpdir / 'other.bin'
+                other.write_bytes(b'other data')
+                _url.url_download(other.as_uri(), destpath=dest,
+                                  overwrite=False)
+                self.assertEqual(dest.read_bytes(), b'cached by another writer')
+                self.assertEqual(os.listdir(dest.parent), ['file.bin'])
+            finally:
+                _url.os.replace = real_replace
+            # An ordinary download does replace the file.
+            _url.url_download(other.as_uri(), destpath=dest)
+            self.assertEqual(dest.read_bytes(), b'other data')
     def test_atomic_open_replace_conflict(self):
         """Tests the Windows case in which the destination file cannot be
         replaced because another thread or process has it open."""
         import os
+        import errno
         from pathlib import Path
         from immlib.util import _url
         from immlib.pathlib._osf import _osf_cache_file
         def failing_replace(src, dst):
             # This is what Windows does when dst is open elsewhere.
             raise PermissionError(5, 'Access is denied')
+        def failing_link(src, dst):
+            # This is what a filesystem without hard links does; it forces
+            # the downloads below onto the replacement path.
+            raise OSError(errno.EPERM, 'Operation not permitted')
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)
             src = tmpdir / 'source.bin'
@@ -117,7 +159,9 @@ class TestThreads(TestCase):
             dest = tmpdir / 'dest' / 'file.bin'
             dest.parent.mkdir()
             real_replace = _url.os.replace
+            real_link = _url.os.link
             _url.os.replace = failing_replace
+            _url.os.link = failing_link
             try:
                 with self.assertRaises(PermissionError):
                     _url.url_download(url, destpath=dest)
@@ -138,40 +182,68 @@ class TestThreads(TestCase):
                 self.assertFalse(missing.exists())
             finally:
                 _url.os.replace = real_replace
+                _url.os.link = real_link
     def test_cache_download_windows_semantics(self):
-        """Tests concurrent cache downloads with Windows's rule that a file
-        that is open elsewhere cannot be replaced."""
+        """Tests concurrent cache downloads with Windows's rules: a file that
+        is open elsewhere cannot be replaced, and a file that has been
+        replaced cannot be opened by name until every handle to it is
+        closed."""
         import os
+        import errno
         from pathlib import Path
         from immlib.util import _url
         from immlib.pathlib._osf import _osf_cache_file
-        real_replace = os.replace
+        real_replace = _url.os.replace
+        real_link = _url.os.link
+        replaced = []
         def windows_replace(src, dst):
             # Windows refuses to replace a file that is open elsewhere; in
-            # these tests, assume any existing destination is open.
+            # these tests, assume any existing destination is open. A
+            # replacement that does succeed is recorded, because a
+            # successful replacement is what makes the replaced file
+            # unopenable by other threads on Windows.
             if os.path.exists(dst):
                 raise PermissionError(5, 'Access is denied')
+            replaced.append(dst)
             return real_replace(src, dst)
+        def failing_link(src, dst):
+            raise OSError(errno.EPERM, 'Operation not permitted')
         data = os.urandom(1_000_000)
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)
             src = tmpdir / 'source.bin'
             src.write_bytes(data)
             url = src.as_uri()
+            def fetch_concurrently(dest):
+                def fetch(i):
+                    p = _osf_cache_file(url, dest)
+                    return Path(p).read_bytes()
+                results = run_threads(fetch)
+                self.assertEqual([len(r) for r in results],
+                                 [len(data)] * NTHREADS)
+                self.assertTrue(all(r == data for r in results))
+                self.assertEqual(os.listdir(dest.parent), ['file.bin'])
             _url.os.replace = windows_replace
             try:
+                # Cache downloads link their file into place, so no file is
+                # ever replaced, whether or not one is already there. This
+                # is what keeps a reader on Windows from meeting a file
+                # that is pending deletion.
                 for rep in range(3):
-                    dest = tmpdir / f'cache{rep}' / 'sub' / 'file.bin'
-                    def fetch(i):
-                        p = _osf_cache_file(url, dest)
-                        return Path(p).read_bytes()
-                    results = run_threads(fetch)
-                    self.assertEqual([len(r) for r in results],
-                                     [len(data)] * NTHREADS)
-                    self.assertTrue(all(r == data for r in results))
-                    self.assertEqual(os.listdir(dest.parent), ['file.bin'])
+                    fetch_concurrently(tmpdir / f'cache{rep}' / 'sub' /
+                                       'file.bin')
+                self.assertEqual(replaced, [])
+                # On a filesystem that cannot link, the file is moved into
+                # place instead, and the losers of the race keep the file
+                # that is already there rather than failing.
+                _url.os.link = failing_link
+                for rep in range(3):
+                    fetch_concurrently(tmpdir / f'nolink{rep}' / 'sub' /
+                                       'file.bin')
+                self.assertEqual(len(replaced), 3)
             finally:
                 _url.os.replace = real_replace
+                _url.os.link = real_link
     def test_plandict_threads(self):
         from immlib.workflow import calc, plan
         calls = []

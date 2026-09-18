@@ -95,13 +95,18 @@ def _osf_cache_file(url, path, mkdir_mode=0o775):
     path.parent.mkdir(mode=mkdir_mode, parents=True, exist_ok=True)
     # Download the file and save it.
     try:
-        url_download(url, destpath=path, mkdir_mode=mkdir_mode)
+        # A file that is already in the cache is never replaced: another
+        # thread or process may have cached the same file while this
+        # download was running, and the file in place is complete (nothing
+        # incomplete is ever moved into place), so it is used and this
+        # download is discarded. Replacing it instead would also break
+        # concurrent readers of the cache on Windows.
+        url_download(
+            url, destpath=path, mkdir_mode=mkdir_mode, overwrite=False)
     except OSError:
-        # Another thread or process may have cached the same file while this
-        # download was running; on Windows, moving this download into place
-        # then fails because the file that is already there is open. The
-        # file in place is complete (nothing incomplete is ever moved into
-        # place), so it is used and this download is discarded.
+        # On a filesystem that cannot make hard links, the file is moved
+        # into place instead, and on Windows that move fails when another
+        # thread or process has the file that is already there open.
         if not path.is_file():
             raise
     if not path.is_file():
