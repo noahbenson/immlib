@@ -154,6 +154,7 @@ from ._quantity import (
     unit,
     quant,
     ilquant,
+    quantwrap,
     mag,
     promote)
 
@@ -266,6 +267,7 @@ __all__ = (
     "unit",
     "quant",
     "ilquant",
+    "quantwrap",
     "mag",
     "promote",
     "lazykeymap",

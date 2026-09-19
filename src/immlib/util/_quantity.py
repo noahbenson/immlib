@@ -8,14 +8,15 @@
 import inspect
 import operator
 import warnings
+from functools import (partial, wraps)
 
 import pint
 import numpy as np
 from docshare import docwrap
 import scipy.sparse as sps
 
-from ._core import (is_set, is_str, unitregistry, _default_ureg,
-                    _default_ureg_override)
+from ._core import (is_set, is_str, is_tuple, is_amap, unitregistry,
+                    _default_ureg, _default_ureg_override)
 from ._numeric import (
     torch, alttorch, checktorch, scipy__is_sparse,
     is_array, is_tensor, is_numeric, is_sparse, to_sparse,
@@ -2456,3 +2457,457 @@ def promote(*args, ureg=None):
                 args[ii] = mag
     # That's all that is needed.
     return args
+
+
+# quantwrap ###################################################################
+
+# The decorator below is the quantity analogue of immlib.tensor_args and its
+# relatives: it converts a function's arguments into quantities before the
+# call and decides what the return value's units are afterwards. The pieces
+# are separated out here so that the decorator itself reads as a list of
+# steps rather than as one long function.
+
+def _qw_ureg(ureg):
+    """Resolves and validates `quantwrap`'s `ureg` option.
+
+    Returns the ``pint.UnitRegistry`` that the decorated function's
+    quantities will live in. The registry must be an ``immlib.UnitRegistry``,
+    because ``quantwrap`` gives unit-less arguments units of ``None``, which
+    only immlib's registries support.
+    """
+    if ureg is Ellipsis:
+        ureg = _default_ureg()
+    elif ureg is None:
+        raise ValueError(
+            "quantwrap: ureg=None requests no particular unit registry, but"
+            " quantwrap requires an immlib.UnitRegistry (it uses units of"
+            " None); use ureg=Ellipsis for immlib's default registry")
+    elif not is_ureg(ureg):
+        raise TypeError(f"quantwrap: ureg must be a UnitRegistry, not {ureg}")
+    if not issubclass(ureg.Quantity, Quantity):
+        raise TypeError(
+            "quantwrap requires an immlib.UnitRegistry, because it uses units"
+            " of None, which a plain pint.UnitRegistry cannot represent")
+    return ureg
+def _qw_unitmap(arg, params, what):
+    """Checks one of `quantwrap`'s unit mappings and returns it as a dict.
+
+    `arg` is the `units` or `require_units` option, `params` is the decorated
+    function's parameters, and `what` names the option in error messages.
+    """
+    if arg is None:
+        return {}
+    if not is_amap(arg):
+        raise TypeError(f"quantwrap: {what} must be a mapping of argument"
+                        f" names to units, not {type(arg)}")
+    for name in arg.keys():
+        if name not in params:
+            raise ValueError(
+                f"quantwrap: {what} names '{name}', which is not an argument"
+                f" of the decorated function")
+    return dict(arg)
+def _qw_require(val, u, what, ureg):
+    """Checks that `val` satisfies the required unit `u`, and returns it
+    converted into `u`.
+
+    The value must already be a quantity: a required unit is a statement
+    about what the caller passes in (or about what the decorated function
+    returns), which is what makes it different from `units`. `what` names
+    the value in error messages.
+    """
+    if not isinstance(val, pint.Quantity):
+        raise TypeError(
+            f"quantwrap: {what} requires units of {u}, so it must be a"
+            f" quantity, not {type(val)}")
+    have = val.units
+    if u is None:
+        if have is not None:
+            raise ValueError(
+                f"quantwrap: {what} requires units of None but has units"
+                f" of {have}")
+    elif have is None:
+        raise ValueError(
+            f"quantwrap: {what} requires units of {u} but is a quantity with"
+            f" no units")
+    elif not alike_units(have, u, ureg=ureg):
+        raise ValueError(
+            f"quantwrap: {what} requires units of {u} but has units"
+            f" of {have}")
+    # The requirement is met; hand on the converted value, so that a
+    # function requiring mm always sees mm even when given m.
+    return quant(val, u, ureg=ureg)
+def _qw_convert(val, u, name, ureg, required):
+    """Converts one argument of a `quantwrap`-decorated function."""
+    if required:
+        return _qw_require(val, u, f"argument '{name}'", ureg)
+    # An argument with no unit named for it keeps whatever units it arrived
+    # with (Ellipsis), and is given units of None only if it is not already
+    # a quantity. An argument with a unit named for it is converted into
+    # that unit, which raises if its own units are incompatible.
+    return quant(val, u, ureg=ureg)
+def _qw_remap(rval, updates):
+    """Returns a copy of the mapping `rval` with `updates` applied to it."""
+    if not updates:
+        return rval
+    try:
+        return type(rval)(rval, **updates)
+    except Exception:
+        # A mapping whose keys are not strings cannot be rebuilt through
+        # keyword arguments, and a mapping type may not accept them at all;
+        # most accept a mapping instead, which is tried next. Whatever went
+        # wrong here is reported through that attempt's failure if it fails
+        # too.
+        pass
+    try:
+        return type(rval)({**rval, **updates})
+    except Exception as e:
+        raise TypeError(
+            f"quantwrap could not rebuild the returned mapping of type"
+            f" {type(rval)}") from e
+def _qw_map_rval(rval, fn, spec, what):
+    """Applies `fn` to a return value, or to each item of a tuple or each
+    value of a mapping.
+
+    `spec` is either a single value applied to everything, or a tuple or
+    mapping giving one value per item. This does not recurse: a tuple inside
+    a tuple is one item.
+    """
+    if is_tuple(rval):
+        if is_tuple(spec):
+            if len(spec) != len(rval):
+                raise ValueError(
+                    f"quantwrap: {what} has {len(spec)} elements but the"
+                    f" decorated function returned {len(rval)}")
+            return tuple(map(fn, rval, spec))
+        elif is_amap(spec):
+            raise TypeError(
+                f"quantwrap: {what} is a mapping but the decorated function"
+                f" returned a tuple")
+        return tuple(fn(u, spec) for u in rval)
+    elif is_amap(rval):
+        if is_amap(spec):
+            if set(spec.keys()) != set(rval.keys()):
+                raise ValueError(
+                    f"quantwrap: {what} has keys {sorted(spec.keys())} but"
+                    f" the decorated function returned keys"
+                    f" {sorted(rval.keys())}")
+            updates = {k: fn(v, spec[k]) for (k, v) in rval.items()}
+        elif is_tuple(spec):
+            raise TypeError(
+                f"quantwrap: {what} is a tuple but the decorated function"
+                f" returned a mapping")
+        else:
+            updates = {k: fn(v, spec) for (k, v) in rval.items()}
+        return _qw_remap(rval, updates)
+    elif is_tuple(spec) or is_amap(spec):
+        raise TypeError(
+            f"quantwrap: {what} is a {type(spec).__name__} but the decorated"
+            f" function returned a {type(rval).__name__}")
+    return fn(rval, spec)
+def _qw_strip(rval):
+    """Replaces every quantity in a return value with its magnitude."""
+    if isinstance(rval, pint.Quantity):
+        return rval.m
+    elif is_tuple(rval):
+        if not any(isinstance(u, pint.Quantity) for u in rval):
+            return rval
+        return tuple(
+            u.m if isinstance(u, pint.Quantity) else u for u in rval)
+    elif is_amap(rval):
+        updates = {
+            k: v.m for (k, v) in rval.items() if isinstance(v, pint.Quantity)}
+        return _qw_remap(rval, updates)
+    return rval
+def _qw_quantify(rval, ureg):
+    """Makes every item of a return value a quantity, with units of None for
+    anything that is not one already."""
+    if isinstance(rval, pint.Quantity):
+        return quant(rval, ureg=ureg)
+    elif is_tuple(rval):
+        return tuple(quant(u, ureg=ureg) for u in rval)
+    elif is_amap(rval):
+        return _qw_remap(rval, {k: quant(v, ureg=ureg) for (k, v) in
+                                rval.items()})
+    return quant(rval, ureg=ureg)
+def _qw_dispatch(fn, sig, sig_args, sig_vargs, sig_kwargs,
+                 units, require_units, runit, require_runit,
+                 return_quant, ureg_opt,
+                 *args, **kwargs):
+    "[Private] Dispatcher for the quantwrap decorator."
+    ureg = _qw_ureg(ureg_opt)
+    binding = sig.bind(*args, **kwargs)
+    binding.apply_defaults()
+    # Gather the arguments quantwrap touches, as (name, value, unit,
+    # required) rows, before converting any of them: whether any input was
+    # already a quantity, and whether they agree about their registry, are
+    # questions about all of them together.
+    rows = []
+    for name in sig_args:
+        rows.append((name, binding.arguments[name], name))
+    if sig_vargs:
+        for (ii, val) in enumerate(binding.arguments[sig_vargs]):
+            rows.append((sig_vargs, val, f"{sig_vargs}[{ii}]"))
+    if sig_kwargs:
+        for (k, val) in binding.arguments[sig_kwargs].items():
+            rows.append((sig_kwargs, val, k))
+    any_quant = False
+    regs = []
+    for (name, val, _) in rows:
+        if isinstance(val, pint.Quantity):
+            any_quant = True
+            r = val._REGISTRY
+            if not any(r is s for s in regs):
+                regs.append(r)
+    if len(regs) > 1 and ureg_opt is Ellipsis:
+        # The caller did not name a registry, and the arguments do not agree
+        # about one, so there is no unambiguous answer. Naming a registry
+        # (ureg=...) says which one to use and re-homes everything into it.
+        raise ValueError(
+            "quantwrap: the arguments use more than one unit registry; pass"
+            " ureg= to say which one the decorated function should use")
+    # Now convert each of them.
+    def convert(name, val, label):
+        required = name in require_units
+        u = require_units[name] if required else units.get(name, Ellipsis)
+        return _qw_convert(val, u, label, ureg, required)
+    for name in sig_args:
+        binding.arguments[name] = convert(
+            name, binding.arguments[name], name)
+    if sig_vargs:
+        binding.arguments[sig_vargs] = tuple(
+            convert(sig_vargs, val, f"{sig_vargs}[{ii}]")
+            for (ii, val) in enumerate(binding.arguments[sig_vargs]))
+    if sig_kwargs:
+        kwdict = binding.arguments[sig_kwargs]
+        for (k, val) in list(kwdict.items()):
+            kwdict[k] = convert(sig_kwargs, val, k)
+    rval = fn(*binding.args, **binding.kwargs)
+    # The return value, in four steps. First, what the function returned
+    # must satisfy require_runit, which is a statement about the function.
+    if require_runit is not Ellipsis:
+        rval = _qw_map_rval(
+            rval,
+            lambda v, u: _qw_require(v, u, "the return value", ureg),
+            require_runit, 'require_runit')
+    # Second, runit says what unit to return it in.
+    if runit is not Ellipsis:
+        rval = _qw_map_rval(
+            rval, lambda v, u: quant(v, u, ureg=ureg), runit, 'runit')
+    # Third, if the caller spoke in plain numbers, answer in plain numbers.
+    # An explicit runit says the caller cares about units, so it turns this
+    # off; return_quant says so outright, and is handled last.
+    elif not any_quant and return_quant is None:
+        rval = _qw_strip(rval)
+    # Fourth, return_quant overrides all of the above.
+    if return_quant is True:
+        rval = _qw_quantify(rval, ureg)
+    elif return_quant is False:
+        rval = _qw_strip(rval)
+    return rval
+def _qw_decorate(arglist, units, require_units, runit, require_runit,
+                 return_quant, ureg, fn):
+    "[Private] Decorator-builder for the quantwrap decorator."
+    sig = inspect.signature(fn)
+    params = sig.parameters
+    units = _qw_unitmap(units, params, 'units')
+    require_units = _qw_unitmap(require_units, params, 'require_units')
+    both = sorted(set(units.keys()) & set(require_units.keys()))
+    if both:
+        raise ValueError(
+            f"quantwrap: {both} appear in both units and require_units; an"
+            f" argument's unit is either converted or required, not both")
+    # Validate the registry option now, so that a bad one is an error where
+    # the decorator is written rather than where it is called.
+    _qw_ureg(ureg)
+    # The arguments quantwrap touches: those named positionally, or all of
+    # them when none are named. Naming an argument in units or in
+    # require_units also asks for it to be touched.
+    if arglist:
+        names = list(arglist)
+    else:
+        names = list(params.keys())
+    for k in (*units.keys(), *require_units.keys()):
+        if k not in names:
+            names.append(k)
+    sig_args = []
+    sig_vargs = None
+    sig_kwargs = None
+    for name in names:
+        p = params.get(name)
+        if p is None:
+            raise ValueError(
+                f"'{name}' requested as a quantity but not found in the"
+                f" arguments of {getattr(fn, '__name__', fn)}")
+        if p.kind is p.VAR_POSITIONAL:
+            sig_vargs = p.name
+        elif p.kind is p.VAR_KEYWORD:
+            sig_kwargs = p.name
+        elif p.name not in sig_args:
+            sig_args.append(p.name)
+    dispatch = partial(
+        _qw_dispatch, fn, sig, sig_args, sig_vargs, sig_kwargs,
+        units, require_units, runit, require_runit, return_quant, ureg)
+    return wraps(fn)(dispatch)
+@docwrap(format='numpy')
+def quantwrap(fn=None, /, *args,
+              units=None,
+              require_units=None,
+              runit=Ellipsis,
+              require_runit=Ellipsis,
+              return_quant=None,
+              ureg=Ellipsis):
+    """Converts the arguments of the decorated function into quantities.
+
+    The decorator ``@quantwrap``, when applied to a function, converts that
+    function's arguments into ``immlib.Quantity`` objects before the function
+    is called, and decides what the units of the return value are afterwards.
+    It is the quantity analogue of ``immlib.tensor_args`` and its relatives.
+
+    ``@quantwrap('arg1', 'arg2' ...)`` touches only the named arguments;
+    with no names, every argument is touched. An argument named in `units`
+    or in `require_units` is touched whether or not it is also named here.
+
+    An argument that is already a quantity keeps its own units; an argument
+    that is not becomes a quantity with units of ``None``, which behaves like
+    its own magnitude in arithmetic (see ``immlib.Quantity``). The decorated
+    function therefore never has to ask whether it was given a quantity.
+
+    The conversion is ``immlib.quant``'s, so the function sees ``quant``'s
+    magnitudes: an array, a tensor or a sparse array is used as it is,
+    without being copied or moved between backends, and anything else,
+    including a Python or NumPy scalar, becomes a NumPy array (a scalar
+    becomes a 0-dimensional one).
+
+    .. Note:: Units of ``None`` are not ``dimensionless``, so wrapping an
+        argument does not make a bare number interchangeable with a
+        dimensional one: adding a plain ``2.0`` to a length still raises,
+        exactly as it did before the decorator was applied. What the
+        decorator removes is the need for the function to ask whether each
+        argument is a quantity, not the arithmetic of units themselves.
+
+    ``quantwrap`` requires an ``immlib.UnitRegistry``, because units of
+    ``None`` are an immlib extension that a plain ``pint.UnitRegistry``
+    cannot represent.
+
+    The return value is decided in four steps, in this order: `require_runit`
+    says what the *function* must return; `runit` says what unit to return it
+    in; then, if the caller passed no quantities at all and neither `runit`
+    nor `return_quant` was given, the magnitude is returned rather than a
+    quantity, so that a caller who spoke in plain numbers is answered in
+    plain numbers; and finally `return_quant`, if it is not ``None``,
+    overrides that decision.
+
+    The last three steps apply to a return value, to each element of a
+    returned tuple, or to each value of a returned mapping. They do not
+    recurse: a tuple inside a tuple is one element. A mapping is rebuilt as
+    ``type(rval)(rval, **changes)``, so a ``dict``, a ``pcollections.pdict``
+    and a ``pcollections.ldict`` all survive the trip.
+
+    Parameters
+    ----------
+    fn : callable or str, optional
+        The function to decorate, or the first of the argument names to
+        touch.
+    args : str, optional
+        The names of the arguments to convert into quantities. If no names
+        are given, then all of the function's arguments are converted.
+    units : mapping or None, optional
+        A mapping from argument name to the unit that argument is converted
+        into. An argument that is not named keeps its own units if it is
+        already a quantity and is given units of ``None`` if it is not.
+        Naming a unit here makes no requirement of the caller: with
+        ``units={'x': 'mm'}``, both ``10`` and ``quant(10, 'mm')`` are
+        accepted and behave identically, and ``quant(1, 'm')`` is converted
+        to ``1000 mm``. Only an incompatible unit is an error. Use
+        `require_units` to require a quantity. The name of a ``*args``
+        parameter applies its unit to every one of those arguments, and the
+        name of a ``**kwargs`` parameter to every one of those values.
+    require_units : mapping or None, optional
+        A mapping in the same form as `units`, naming arguments that *must*
+        be given as quantities in compatible units. An argument named here
+        raises a ``TypeError`` if it is not a quantity and a ``ValueError``
+        if its units are not compatible with the requirement. A compatible
+        but different unit satisfies the requirement, and the function is
+        given the converted value: requiring ``'mm'`` and being given
+        ``quant(1, 'm')`` passes ``1000 mm`` along. An argument may appear
+        in `units` or in `require_units`, but not in both.
+    runit : unit-like or None or Ellipsis or tuple or mapping, optional
+        The unit that the return value is converted into. The default,
+        ``Ellipsis``, leaves the return value's units alone. Any other
+        value, including ``None``, is applied to the return value, to each
+        element of a returned tuple, or to each value of a returned mapping;
+        a tuple or a mapping gives one unit per element or key instead, and
+        must match the return value's shape.
+
+        .. Warning:: ``runit`` does not check the decorated function. If the
+            function returns a bare magnitude, ``runit='mm'`` assumes that
+            magnitude is already in millimeters and labels it so, rather
+            than raising. Only a return value that is already a quantity in
+            an incompatible unit is an error. Use `require_runit` to require
+            that the function return a quantity.
+    require_runit : unit-like or None or Ellipsis or tuple or mapping, optional
+        A requirement on what the decorated function returns, in the same
+        form and with the same meaning as `require_units`. A tuple or a
+        mapping requires a returned tuple of the same length or a returned
+        mapping with the same keys, and applies one requirement to each.
+        Unlike `runit`, this is a statement about the function rather than
+        about what the caller receives, so it does not by itself suppress
+        the plain-numbers-in, plain-numbers-out rule: pair it with
+        ``return_quant=True`` to always hand the caller a quantity.
+    return_quant : boolean or None, optional
+        Whether the decorated function returns quantities. ``True`` always
+        returns quantities, giving units of ``None`` to anything that is not
+        one already; ``False`` always returns magnitudes. The default,
+        ``None``, leaves the decision to the rules above. This is applied
+        after `runit`, so ``quantwrap(runit='mm', return_quant=False)``
+        converts the return value into millimeters and then returns its
+        magnitude.
+    ureg : pint.UnitRegistry or Ellipsis, optional
+        The unit registry in which the decorated function's quantities
+        live. The default, ``Ellipsis``, is immlib's default registry, and
+        every argument is re-homed into it, as ``immlib.ilquant`` does. Any
+        other value must be an ``immlib.UnitRegistry``; ``None``, which
+        means "no particular registry" to ``immlib.quant``, is an error
+        here. When `ureg` is left at its default and the arguments disagree
+        about which registry they belong to, that is an error, since there
+        is then no unambiguous answer; naming a registry resolves it.
+
+    Returns
+    -------
+    callable
+        The decorated function.
+
+    Raises
+    ------
+    TypeError
+        If `fn` is neither a string nor a callable, if `units` or
+        `require_units` is not a mapping, if `ureg` is not a unit registry
+        or is not an ``immlib.UnitRegistry``, or if an argument or return
+        value required to be a quantity is not one.
+    ValueError
+        If a name given here is not an argument of the decorated function,
+        if an argument appears in both `units` and `require_units`, if
+        `ureg` is ``None``, if the arguments disagree about their unit
+        registry, or if a required unit is not satisfied.
+
+    See Also
+    --------
+    quant : Convert a magnitude and a unit into a quantity.
+    ilquant : ``quant``, always in an ``immlib.UnitRegistry``.
+    tensor_args : Convert a function's arguments into PyTorch tensors.
+    """
+    # (These are the parameters of _qw_decorate, in its own order, up to the
+    # function that it decorates.)
+    opts = (units, require_units, runit, require_runit, return_quant, ureg)
+    if fn is None:
+        # Decorating with `@quantwrap()` or with options but no names.
+        return partial(_qw_decorate, args, *opts)
+    elif is_str(fn):
+        # Decorating with `@quantwrap('arg1', ...)`.
+        return partial(_qw_decorate, (fn,) + args, *opts)
+    elif not callable(fn):
+        raise TypeError(
+            f"expected string or callable for first argument; got {type(fn)}")
+    else:
+        # Decorating with `@quantwrap` alone, or calling quantwrap(f, 'a').
+        return _qw_decorate(args, *opts, fn)

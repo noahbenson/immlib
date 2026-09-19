@@ -411,6 +411,134 @@ start.
 ```
 
 
+## Writing Functions That Take Quantities: `quantwrap`
+
+A function that should accept either a quantity or a plain number usually
+ends up asking, argument by argument, which one it got. The `@il.quantwrap`
+decorator does that once: it converts the arguments into quantities before
+the function runs, so the body can assume it is always working with
+quantities, and it decides what the units of the return value are afterward.
+It is the quantity analogue of `il.tensor_args` and its relatives.
+
+```{code-cell}
+@il.quantwrap
+def midpoint(a, b):
+    # a and b are always quantities here.
+    return (a + b) / 2
+
+midpoint(il.quant(1.0, 'mm'), il.quant(3.0, 'mm'))
+```
+
+An argument that is already a quantity keeps its units; one that is not gets
+units of `None`. The most important part of the design is what comes back:
+if the caller passed no quantities at all, the magnitude is returned rather
+than a quantity, so a caller who spoke in plain numbers is answered in plain
+numbers.
+
+```{code-cell}
+midpoint(1.0, 3.0)
+```
+
+```{note}
+Units of `None` are not `dimensionless`, so wrapping an argument does not
+make a bare number interchangeable with a dimensional one. `midpoint(quant(1,
+'mm'), 3.0)` still raises, because adding a length to a bare number is still
+meaningless. What the decorator removes is the need to *ask* whether each
+argument is a quantity, not the arithmetic of units.
+```
+
+### Naming Units for Arguments
+
+`units` converts named arguments into the units given for them. This makes no
+requirement of the caller: a bare number is taken to be in that unit already,
+and a quantity in a compatible unit is converted.
+
+```{code-cell}
+@il.quantwrap(units={'dist': 'mm'})
+def describe(dist):
+    return f"{float(dist.m):.1f} {dist.units}"
+
+(describe(10), describe(il.quant(1.0, 'm')))
+```
+
+`require_units` has the same form but *requires* the caller to pass a
+quantity in a compatible unit. A compatible but different unit satisfies the
+requirement and is converted, so a function that requires millimeters always
+sees millimeters.
+
+```{code-cell}
+@il.quantwrap(require_units={'dist': 'mm'})
+def strict(dist):
+    return float(dist.m)
+
+try:
+    strict(10)
+except TypeError as e:
+    print(e)
+```
+
+For a function with a `*args` or `**kwargs` parameter, naming that parameter
+applies its unit to every one of those arguments.
+
+### Naming Units for the Return Value
+
+`runit` says what unit to return the result in. It also says that the caller
+cares about units, so it turns off the plain-numbers rule above.
+
+```{code-cell}
+@il.quantwrap(runit='m')
+def perimeter(w, h):
+    return 2 * (w + h)
+
+perimeter(il.quant(30.0, 'cm'), il.quant(20.0, 'cm'))
+```
+
+```{warning}
+`runit` does not check the decorated function. If the function returns a bare
+magnitude, `runit='mm'` assumes that magnitude is already in millimeters and
+labels it so, rather than raising. Only a return value that is already a
+quantity in an incompatible unit is an error. Use `require_runit` when the
+function must return a quantity.
+```
+
+`return_quant` settles the question outright: `True` always returns
+quantities and `False` always returns magnitudes. It is applied after
+`runit`, so the two compose.
+
+```{code-cell}
+@il.quantwrap(runit='m', return_quant=False)
+def perimeter_m(w, h):
+    return 2 * (w + h)
+
+perimeter_m(il.quant(30.0, 'cm'), il.quant(20.0, 'cm'))
+```
+
+All of this applies to a returned tuple element by element, and to a returned
+mapping value by value, without recursing further; a tuple or a mapping of
+units gives one per element or key. A returned mapping keeps its own type, so
+a `dict`, a `pdict` and an `ldict` all survive the trip.
+
+```{code-cell}
+from pcollections import pdict
+
+@il.quantwrap(runit={'w': 'm', 'h': 'cm'})
+def sides(w, h):
+    return pdict(w=w, h=h)
+
+sides(il.quant(30.0, 'cm'), il.quant(20.0, 'cm'))
+```
+
+### Unit Registries
+
+`quantwrap` requires an `immlib.UnitRegistry`, because it gives unit-less
+arguments units of `None`, which a plain `pint.UnitRegistry` cannot
+represent. By default every argument is re-homed into immlib's own registry,
+as `il.ilquant` does. Pass `ureg` to name a different one; `ureg=None`, which
+means "no particular registry" to `il.quant`, is an error here. When the
+default is in use and the arguments disagree about which registry they belong
+to, that is an error too, since there is then no unambiguous answer -- naming
+a registry resolves it.
+
 ## Combining Arrays and Tensors: `promote`
 
 `il.promote(*args)` converts a collection of arguments--quantities, arrays,

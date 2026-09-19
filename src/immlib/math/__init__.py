@@ -11,6 +11,7 @@ multiplication) that operates uniformly on ``immlib.Quantity`` objects, plain
 NumPy arrays, plain PyTorch tensors, and plain Python numbers.
 
 For convenience, ``immlib.math`` also provides ``quant``, ``ilquant``,
+``quantwrap``,
 ``mag``, ``promote``, ``to_array``, and ``to_tensor`` (the same functions as
 ``immlib.quant``, etc.), so that a numerical function can be written using
 only ``import immlib.math as im``; see also ``immlib.Quantity.as_input_type``.
@@ -37,7 +38,8 @@ Examples
 <Quantity([ 2.71828183  7.3890561  20.08553692], None)>
 """
 
-from ..util import (quant, ilquant, mag, promote, to_array, to_tensor)
+from ..util import (quant, ilquant, quantwrap, mag, promote,
+                    to_array, to_tensor)
 from ._core import (
     abs,
     add,
@@ -149,6 +151,7 @@ from ._core import (
 __all__ = (
     "quant",
     "ilquant",
+    "quantwrap",
     "mag",
     "promote",
     "to_array",

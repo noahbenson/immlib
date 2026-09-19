@@ -2435,36 +2435,28 @@ def _args_dispatch(args_try_fn, fn,
     binding = sig.bind(*args, **kwargs)
     binding.apply_defaults()
     vals = tuple(map(binding.arguments.__getitem__, sig_args))
-    if sig_vargs:
-        vargs = binding.arguments[sig_vargs]
-        nvargs = len(vargs)
-    else:
-        vargs = None
-        nvargs = 0
-    if sig_kwargs:
-        kwargs = binding.arguments[sig_kwargs]
-        nkw = len(kw)
-    else:
-        kwargs = None
-        nkw = 0
+    # The variadic parameters, if this function has them and they were
+    # requested. binding.apply_defaults() above guarantees that they are
+    # present, as an empty tuple and an empty dict when nothing was passed.
+    vargs = binding.arguments[sig_vargs] if sig_vargs else None
+    kwdict = binding.arguments[sig_kwargs] if sig_kwargs else None
     if args_try_fn is _args_try_array:
         first_tensor = None
     else:
-        first_tensor = _args_find_tensor(vals, vargs, kwargs)
+        first_tensor = _args_find_tensor(vals, vargs, kwdict)
     # Convert to the appropriate types (and update the values in the arguments
     # list if there is a change in any of the args):
     for (argname,val) in zip(sig_args, vals):
         args_try_fn(val, argname, binding, first_tensor)
     if sig_vargs:
-        new_vargs = tuple(
+        binding.arguments[sig_vargs] = tuple(
             args_try_fn(val, first_tensor=first_tensor)
-            for val in vals[nargs:nargs+nva])
-        binding.arguments[sig_varargs] = new_varargs
+            for val in vargs)
     if sig_kwargs:
-        for (k,val) in kw.items():
+        for (k,val) in list(kwdict.items()):
             cnv = args_try_fn(val, first_tensor=first_tensor)
             if cnv is not val:
-                kw[k] = tns
+                kwdict[k] = cnv
     rval = fn(*binding.args, **binding.kwargs)
     if keep_arrays and first_tensor is None:
         if is_tuple(rval):

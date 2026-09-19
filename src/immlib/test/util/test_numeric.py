@@ -1417,3 +1417,66 @@ class TestUtilNumeric(TestCase):
         (x, y) = test3(torch.tensor(10.0), np.array([11.1, 12.2]))
         self.assertTrue(torch.is_tensor(x))
         self.assertTrue(isinstance(y, str))
+    def test_args_decorators_variadic(self):
+        """Tests the *args and **kwargs paths of the argument decorators.
+
+        These had never been executed: the dispatcher referred to five
+        names that do not exist in it, so decorating any function with a
+        variadic parameter and calling it raised a NameError.
+        """
+        import numpy as np, torch
+        from immlib.util import (tensor_args, array_args, numeric_args)
+        from immlib import quant
+        # Every variadic argument is converted, alongside the named ones.
+        @tensor_args
+        def f(a, *rest, **kw):
+            return (a, rest, kw)
+        (a, rest, kw) = f([1.0], [2.0], [3.0], c=[4.0])
+        self.assertTrue(torch.is_tensor(a))
+        self.assertEqual(len(rest), 2)
+        self.assertTrue(all(map(torch.is_tensor, rest)))
+        self.assertTrue(torch.is_tensor(kw['c']))
+        # Empty variadic parameters are not a problem.
+        (a, rest, kw) = f([1.0])
+        self.assertTrue(torch.is_tensor(a))
+        self.assertEqual(rest, ())
+        self.assertEqual(kw, {})
+        # A variadic parameter can be named on its own, by the name the
+        # function gives it, and then the other arguments are left alone.
+        @tensor_args('rest')
+        def g(a, *rest):
+            return (a, rest)
+        (a, rest) = g([1.0], [2.0])
+        self.assertIsInstance(a, list)
+        self.assertTrue(torch.is_tensor(rest[0]))
+        # The device of the first tensor found is used for the rest, and a
+        # tensor in the variadic arguments counts as the first one.
+        @tensor_args
+        def h(a, *rest):
+            return (a, rest)
+        (a, rest) = h([1.0], torch.tensor([2.0]))
+        self.assertEqual(a.device, rest[0].device)
+        # array_args converts variadic arguments to arrays.
+        @array_args
+        def fa(a, *rest, **kw):
+            return (a, rest, kw)
+        (a, rest, kw) = fa([1.0], [2.0], c=[3.0])
+        self.assertIsInstance(a, np.ndarray)
+        self.assertIsInstance(rest[0], np.ndarray)
+        self.assertIsInstance(kw['c'], np.ndarray)
+        # numeric_args follows a tensor wherever it appears, including in
+        # the variadic arguments.
+        @numeric_args
+        def fn(a, *rest):
+            return (a, rest)
+        (a, rest) = fn([1.0], [2.0])
+        self.assertIsInstance(a, np.ndarray)
+        self.assertIsInstance(rest[0], np.ndarray)
+        (a, rest) = fn([1.0], torch.tensor([2.0]))
+        self.assertTrue(torch.is_tensor(a))
+        self.assertTrue(torch.is_tensor(rest[0]))
+        # A quantity in a variadic argument keeps its units and has its
+        # magnitude converted, as it does in a named argument.
+        (a, rest) = h(quant([1.0], 'mm'), quant([2.0], 'mm'))
+        self.assertEqual(str(rest[0].units), 'millimeter')
+        self.assertTrue(torch.is_tensor(rest[0].m))

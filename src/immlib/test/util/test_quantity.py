@@ -1746,3 +1746,456 @@ class TestUtilQuantity(TestCase):
             self.assertTrue(torch.is_tensor(a.m))
             self.assertEqual(str(a.units), 'millimeter')
         self.assertTrue(torch.is_tensor(args[3]))
+    def test_quantwrap_basics(self):
+        """Tests that quantwrap converts arguments into quantities."""
+        import numpy as np
+        from immlib import quantwrap, quant, Quantity
+        # Every argument becomes a quantity; one that was not a quantity
+        # gets units of None.
+        @quantwrap
+        def f(a, b):
+            return (a, b)
+        (a, b) = f(1.0, quant(2.0, 'mm'))
+        self.assertIsInstance(a, Quantity)
+        self.assertIsInstance(b, Quantity)
+        self.assertIsNone(a.units)
+        self.assertEqual(str(b.units), 'millimeter')
+        # The decorated function keeps its name and documentation.
+        @quantwrap
+        def documented(a):
+            "A docstring."
+            return a
+        self.assertEqual(documented.__name__, 'documented')
+        self.assertEqual(documented.__doc__, "A docstring.")
+        # Naming arguments touches only those. What the function is given
+        # has to be checked inside it: a caller who passes no quantities is
+        # answered with magnitudes, whatever the function returns.
+        seen = {}
+        def record(a, b):
+            seen['a'] = isinstance(a, Quantity)
+            seen['b'] = isinstance(b, Quantity)
+        quantwrap('a')(record)(1.0, 2.0)
+        self.assertTrue(seen['a'])
+        self.assertFalse(seen['b'])
+        # The same names can be given after the function instead.
+        seen.clear()
+        quantwrap(record, 'a')(1.0, 2.0)
+        self.assertTrue(seen['a'])
+        self.assertFalse(seen['b'])
+        # And the decorator can be written with empty parentheses, which
+        # touches every argument.
+        seen.clear()
+        quantwrap()(record)(1.0, 2.0)
+        self.assertTrue(seen['a'])
+        self.assertTrue(seen['b'])
+        # A first argument that is neither a name nor a callable is an
+        # error.
+        with self.assertRaises(TypeError):
+            quantwrap(10)
+    def test_quantwrap_return_rules(self):
+        """Tests how quantwrap decides the units of the return value."""
+        import numpy as np
+        from immlib import quantwrap, quant, Quantity
+        @quantwrap
+        def add(a, b):
+            return a + b
+        # A caller who passes no quantities is answered with a magnitude.
+        r = add(1.0, 2.0)
+        self.assertNotIsInstance(r, Quantity)
+        self.assertEqual(float(r), 3.0)
+        # A caller who passes one is answered with a quantity.
+        r = add(quant(1.0, 'mm'), quant(2.0, 'mm'))
+        self.assertIsInstance(r, Quantity)
+        self.assertEqual(str(r.units), 'millimeter')
+        # A bare argument becomes a quantity with no units, which is not
+        # the same as a dimensionless one: adding it to a length is still
+        # the error it always was.
+        import pint
+        with self.assertRaises(pint.DimensionalityError):
+            add(quant(1.0, 'mm'), 2.0)
+        # Multiplying by one is fine, as it is for a bare number.
+        @quantwrap
+        def scale(a, b):
+            return a * b
+        r = scale(quant(2.0, 'mm'), 3.0)
+        self.assertEqual(str(r.units), 'millimeter')
+        self.assertAlmostEqual(float(r.m), 6.0)
+        # runit converts the result, and says the caller cares about units,
+        # so the plain-numbers rule does not apply.
+        @quantwrap(runit='mm')
+        def ident(a):
+            return a
+        r = ident(quant(1.0, 'm'))
+        self.assertIsInstance(r, Quantity)
+        self.assertEqual(str(r.units), 'millimeter')
+        self.assertAlmostEqual(float(r.m), 1000.0)
+        r = ident(5.0)
+        self.assertIsInstance(r, Quantity)
+        self.assertEqual(str(r.units), 'millimeter')
+        # An incompatible unit is an error; a bare magnitude is not, since
+        # runit assumes the magnitude is already in the named unit.
+        with self.assertRaises(Exception):
+            ident(quant(1.0, 's'))
+        # runit=None gives the result no units.
+        @quantwrap(runit=None)
+        def unitless(a):
+            return a
+        self.assertIsNone(unitless(quant(1.0, 'mm')).units)
+        # return_quant is applied after runit.
+        @quantwrap(runit='mm', return_quant=False)
+        def mm_mag(a):
+            return a
+        r = mm_mag(quant(1.0, 'm'))
+        self.assertNotIsInstance(r, Quantity)
+        self.assertAlmostEqual(float(r), 1000.0)
+        # return_quant=True wraps whatever is not a quantity.
+        @quantwrap(return_quant=True)
+        def always_q(a):
+            return a
+        self.assertIsInstance(always_q(1.0), Quantity)
+        self.assertIsNone(always_q(1.0).units)
+        # return_quant=False strips whatever is.
+        @quantwrap(return_quant=False)
+        def never_q(a):
+            return a
+        self.assertNotIsInstance(never_q(quant(1.0, 'mm')), Quantity)
+    def test_quantwrap_units_and_requirements(self):
+        """Tests the units and require_units options."""
+        import numpy as np
+        from immlib import quantwrap, quant, Quantity
+        # units converts an argument into the named unit, and accepts both a
+        # bare value and a quantity.
+        @quantwrap(units={'x': 'mm'}, return_quant=True)
+        def f(x):
+            return x
+        self.assertEqual(str(f(10).units), 'millimeter')
+        self.assertAlmostEqual(float(f(quant(1.0, 'm')).m), 1000.0)
+        self.assertEqual(str(f(quant(1.0, 'm')).units), 'millimeter')
+        with self.assertRaises(Exception):
+            f(quant(1.0, 's'))
+        # require_units insists on a quantity in a compatible unit, and
+        # converts it.
+        @quantwrap(require_units={'x': 'mm'}, return_quant=True)
+        def g(x):
+            return x
+        self.assertAlmostEqual(float(g(quant(1.0, 'm')).m), 1000.0)
+        with self.assertRaises(TypeError):
+            g(10)
+        with self.assertRaises(ValueError):
+            g(quant(1.0, 's'))
+        # A required unit of None means the argument must be a quantity with
+        # no units, which is not the same as dimensionless.
+        @quantwrap(require_units={'x': None}, return_quant=True)
+        def h(x):
+            return x
+        self.assertIsNone(h(quant(1.0)).units)
+        with self.assertRaises(ValueError):
+            h(quant(1.0, 'dimensionless'))
+        with self.assertRaises(ValueError):
+            h(quant(1.0, 'mm'))
+        # Naming an argument in units also asks for it to be touched, even
+        # when other arguments are named positionally.
+        seen = {}
+        @quantwrap('a', units={'b': 'mm'})
+        def k(a, b, c):
+            seen.update(a=a, b=b, c=c)
+        k(1.0, 2.0, 3.0)
+        self.assertIsInstance(seen['a'], Quantity)
+        self.assertIsNone(seen['a'].units)
+        self.assertEqual(str(seen['b'].units), 'millimeter')
+        self.assertNotIsInstance(seen['c'], Quantity)
+        # Decoration-time errors.
+        with self.assertRaises(ValueError):
+            quantwrap('nosucharg')(lambda a: a)
+        with self.assertRaises(ValueError):
+            quantwrap(units={'nosucharg': 'mm'})(lambda a: a)
+        with self.assertRaises(ValueError):
+            quantwrap(units={'a': 'mm'}, require_units={'a': 'mm'})(
+                lambda a: a)
+        with self.assertRaises(TypeError):
+            quantwrap(units=10)(lambda a: a)
+    def test_quantwrap_require_runit(self):
+        """Tests the require_runit option."""
+        from immlib import quantwrap, quant, Quantity
+        @quantwrap(require_runit='mm', return_quant=True)
+        def f(a):
+            return quant(1.0, 'm')
+        r = f(1.0)
+        self.assertEqual(str(r.units), 'millimeter')
+        self.assertAlmostEqual(float(r.m), 1000.0)
+        # A function that returns the wrong dimension is an error.
+        @quantwrap(require_runit='mm')
+        def g(a):
+            return quant(1.0, 's')
+        with self.assertRaises(ValueError):
+            g(1.0)
+        # As is one that returns something with no units at all.
+        @quantwrap(require_runit='mm')
+        def h(a):
+            return quant(1.0)
+        with self.assertRaises(ValueError):
+            h(1.0)
+        # A tuple requirement applies one unit per element, and the lengths
+        # must match.
+        @quantwrap(require_runit=('mm', 's'), return_quant=True)
+        def tup(a):
+            return (quant(1.0, 'm'), quant(2.0, 'ms'))
+        (x, y) = tup(1.0)
+        self.assertAlmostEqual(float(x.m), 1000.0)
+        self.assertAlmostEqual(float(y.m), 0.002)
+        @quantwrap(require_runit=('mm', 's'))
+        def short(a):
+            return (quant(1.0, 'm'),)
+        with self.assertRaises(ValueError):
+            short(1.0)
+        # A mapping requirement applies one unit per key, and the keys must
+        # match.
+        @quantwrap(require_runit={'x': 'mm'}, return_quant=True)
+        def dct(a):
+            return {'x': quant(1.0, 'm')}
+        self.assertAlmostEqual(float(dct(1.0)['x'].m), 1000.0)
+        @quantwrap(require_runit={'x': 'mm'})
+        def wrongkeys(a):
+            return {'y': quant(1.0, 'm')}
+        with self.assertRaises(ValueError):
+            wrongkeys(1.0)
+        # A requirement shaped differently from the return value is an
+        # error rather than a silent mismatch.
+        @quantwrap(require_runit=('mm', 's'))
+        def notuple(a):
+            return quant(1.0, 'm')
+        with self.assertRaises(TypeError):
+            notuple(1.0)
+    def test_quantwrap_tuples_and_mappings(self):
+        """Tests quantwrap's handling of tuple and mapping return values."""
+        import numpy as np
+        from immlib import quantwrap, quant, Quantity
+        from pcollections import pdict, ldict, lazy
+        # Every quantity in a returned tuple is stripped when the caller
+        # passed none, and items that are not quantities are left alone.
+        @quantwrap
+        def tup(a):
+            return (a, 'text', 5)
+        r = tup(1.0)
+        self.assertNotIsInstance(r[0], Quantity)
+        self.assertEqual(r[1], 'text')
+        self.assertEqual(r[2], 5)
+        self.assertIsInstance(tup(quant(1.0, 'mm'))[0], Quantity)
+        # The same for a mapping, which keeps its own type.
+        @quantwrap
+        def dct(a):
+            return {'x': a, 'y': 5}
+        r = dct(1.0)
+        self.assertIsInstance(r, dict)
+        self.assertNotIsInstance(r['x'], Quantity)
+        self.assertEqual(r['y'], 5)
+        self.assertIsInstance(dct(quant(1.0, 'mm'))['x'], Quantity)
+        @quantwrap
+        def pd(a):
+            return pdict(x=a, y=5)
+        r = pd(1.0)
+        self.assertIsInstance(r, pdict)
+        self.assertNotIsInstance(r['x'], Quantity)
+        # A lazy dictionary survives too, and the values that did not change
+        # are left lazy.
+        @quantwrap
+        def ld(a):
+            return ldict({'x': a, 'y': lazy(lambda: 5)})
+        r = ld(1.0)
+        self.assertIsInstance(r, ldict)
+        self.assertNotIsInstance(r['x'], Quantity)
+        self.assertEqual(r['y'], 5)
+        # A mapping whose keys are not strings cannot be rebuilt with
+        # keyword arguments, so quantwrap falls back to rebuilding it from a
+        # mapping.
+        @quantwrap
+        def intkeys(a):
+            return {1: a, 2: 5}
+        r = intkeys(1.0)
+        self.assertNotIsInstance(r[1], Quantity)
+        self.assertEqual(r[2], 5)
+        # runit applies to each element of a tuple, and a tuple of units
+        # applies one to each.
+        @quantwrap(runit='mm')
+        def tup2(a):
+            return (a, a)
+        self.assertTrue(all(str(u.units) == 'millimeter' for u in tup2(1.0)))
+        @quantwrap(runit=('mm', 'm'))
+        def tup3(a):
+            return (a, a)
+        (x, y) = tup3(quant(1.0, 'm'))
+        self.assertEqual(str(x.units), 'millimeter')
+        self.assertEqual(str(y.units), 'meter')
+    def test_quantwrap_variadic(self):
+        """Tests quantwrap on *args and **kwargs parameters."""
+        from immlib import quantwrap, quant, Quantity
+        # What the function receives is checked inside it, since a nested
+        # tuple or mapping is one element to quantwrap and is not
+        # traversed.
+        seen = {}
+        # The unit named for a *args parameter applies to all of them.
+        @quantwrap(units={'rest': 'mm'})
+        def f(a, *rest):
+            seen.update(a=a, rest=rest)
+        f(1.0, 2.0, quant(3.0, 'm'))
+        self.assertIsNone(seen['a'].units)
+        self.assertEqual([str(u.units) for u in seen['rest']],
+                         ['millimeter', 'millimeter'])
+        self.assertAlmostEqual(float(seen['rest'][1].m), 3000.0)
+        # And the one named for a **kwargs parameter to all of its values.
+        @quantwrap(units={'kw': 's'})
+        def g(a, **kw):
+            seen.update(a=a, kw=kw)
+        g(1.0, b=2.0, c=quant(3.0, 'ms'))
+        self.assertEqual(str(seen['kw']['b'].units), 'second')
+        self.assertAlmostEqual(float(seen['kw']['c'].m), 0.003)
+        # Empty variadic parameters are fine.
+        f(1.0)
+        self.assertEqual(seen['rest'], ())
+        g(1.0)
+        self.assertEqual(seen['kw'], {})
+        # A quantity anywhere, including in the variadic arguments, means
+        # the result keeps its units.
+        @quantwrap
+        def h(*vals):
+            return sum(vals[1:], vals[0])
+        self.assertNotIsInstance(h(1.0, 2.0), Quantity)
+        self.assertIsInstance(h(quant(1.0, 'mm'), quant(2.0, 'mm')),
+                              Quantity)
+    def test_quantwrap_registries(self):
+        """Tests quantwrap's ureg option and its registry checks."""
+        import pint
+        from immlib import quantwrap, quant, Quantity, units, UnitRegistry
+        other = UnitRegistry()
+        # By default everything is re-homed into immlib's default registry.
+        @quantwrap(return_quant=True)
+        def f(a):
+            return a
+        r = f(other.Quantity(1.0, 'mm'))
+        self.assertIs(r._REGISTRY, units)
+        # Arguments that disagree about their registry are an error when no
+        # registry was named, since there is then no unambiguous answer.
+        @quantwrap
+        def g(a, b):
+            return a
+        with self.assertRaises(ValueError):
+            g(quant(1.0, 'mm'), other.Quantity(2.0, 'mm'))
+        # Naming one resolves it.
+        @quantwrap(ureg=units, return_quant=True)
+        def h(a, b):
+            return a
+        r = h(quant(1.0, 'mm'), other.Quantity(2.0, 'mm'))
+        self.assertIs(r._REGISTRY, units)
+        # A plain pint registry cannot represent units of None, so it is
+        # refused, as is ureg=None, which asks for no registry at all.
+        with self.assertRaises(TypeError):
+            quantwrap(ureg=pint.UnitRegistry())(lambda a: a)
+        with self.assertRaises(ValueError):
+            quantwrap(ureg=None)(lambda a: a)
+        with self.assertRaises(TypeError):
+            quantwrap(ureg=10)(lambda a: a)
+    def test_quantwrap_rules(self):
+        """Tests that quantwrap obeys immlib.math's two rules.
+
+        Rule 1: the wrapper gives equal results for equal arrays and
+        tensors, with the result's type following the input's. Rule 2: it
+        does not break PyTorch's gradient tracking, which means it must
+        never convert a magnitude, and unit conversion must stay a
+        multiplication.
+        """
+        import numpy as np, torch
+        from immlib import quantwrap, quant, Quantity
+        @quantwrap(units={'a': 'mm'}, runit='m')
+        def f(a):
+            return a * 2
+        rn = f(np.array([1000.0, 2000.0]))
+        rt = f(torch.tensor([1000.0, 2000.0]))
+        # Rule 1: same units, same values, types following the inputs.
+        self.assertEqual(str(rn.units), str(rt.units))
+        self.assertTrue(np.allclose(np.asarray(rn.m), rt.m.numpy()))
+        self.assertIsInstance(rn.m, np.ndarray)
+        self.assertTrue(torch.is_tensor(rt.m))
+        # Rule 2: a tensor that requires grad survives the wrapper, the
+        # unit conversion, and the return.
+        x = torch.tensor([1.0, 2.0], requires_grad=True)
+        @quantwrap
+        def g(a):
+            return a * 2
+        r = g(x)
+        self.assertTrue(torch.is_tensor(r))
+        self.assertIsNotNone(r.grad_fn)
+        r.sum().backward()
+        self.assertTrue(np.allclose(x.grad.numpy(), [2.0, 2.0]))
+        # And through a conversion, which is a multiply.
+        x = torch.tensor([1.0], requires_grad=True)
+        @quantwrap(runit='mm')
+        def h(a):
+            return a
+        r = h(quant(x, 'm'))
+        self.assertEqual(str(r.units), 'millimeter')
+        self.assertIsNotNone(r.m.grad_fn)
+        r.m.sum().backward()
+        self.assertTrue(np.allclose(x.grad.numpy(), [1000.0]))
+        # The magnitude is never copied or moved between backends.
+        y = torch.tensor([1.0, 2.0])
+        @quantwrap
+        def ident(a):
+            return a.m
+        self.assertIs(ident(y), y)
+    def test_quantwrap_shape_mismatches(self):
+        """Tests quantwrap's errors when a unit spec and a return value have
+        different shapes, and the paths that leave a value alone."""
+        from immlib import quantwrap, quant, Quantity
+        from pcollections import pdict
+        # A mapping of units against a returned tuple, and a tuple of units
+        # against a returned mapping, are both errors rather than silent
+        # mismatches.
+        @quantwrap(runit={'x': 'mm'})
+        def a(v):
+            return (v,)
+        with self.assertRaises(TypeError):
+            a(1.0)
+        @quantwrap(runit=('mm',))
+        def b(v):
+            return {'x': v}
+        with self.assertRaises(TypeError):
+            b(1.0)
+        # A single unit applies to every value of a returned mapping.
+        @quantwrap(runit='mm')
+        def c(v):
+            return {'x': v, 'y': v}
+        r = c(1.0)
+        self.assertEqual([str(u.units) for u in r.values()],
+                         ['millimeter', 'millimeter'])
+        # A tuple or mapping that holds no quantities is returned as it is.
+        @quantwrap
+        def d(v):
+            return ('a', 'b')
+        self.assertEqual(d(1.0), ('a', 'b'))
+        @quantwrap
+        def e(v):
+            return pdict(x=1, y=2)
+        self.assertEqual(e(1.0), pdict(x=1, y=2))
+        # So is a return value that is not a quantity at all.
+        @quantwrap
+        def f(v):
+            return 'text'
+        self.assertEqual(f(1.0), 'text')
+        # return_quant=True cannot wrap something that is not numerical.
+        @quantwrap(return_quant=True)
+        def g(v):
+            return 'text'
+        with self.assertRaises(TypeError):
+            g(1.0)
+        # A mapping type that can be rebuilt from neither keyword arguments
+        # nor a mapping is reported rather than silently mishandled.
+        class OddMap(dict):
+            def __init__(self, *args, **kw):
+                raise RuntimeError("cannot rebuild me")
+        @quantwrap(return_quant=False)
+        def h(v):
+            m = OddMap.__new__(OddMap)
+            dict.__init__(m, x=quant(1.0, 'mm'))
+            return m
+        with self.assertRaises(TypeError):
+            h(1.0)
