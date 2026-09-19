@@ -116,6 +116,102 @@ class TestWorkflowCore(TestCase):
         self.assertEqual(res['x'], 2)
         self.assertEqual(res['y'], 4)
         self.assertEqual(res['out3'], 6)
+    def test_calc_doc_sections(self):
+        """A calc documents its inputs under 'Parameters' or 'Inputs' and its
+        outputs under 'Returns' or 'Outputs'."""
+        from immlib.workflow import (calc, plan, CALC_DOC_SECTIONS)
+        from immlib.workflow._core import to_calc
+        from docshare import docparse
+        def make(doc):
+            def fn(width, height):
+                return width * height
+            fn.__doc__ = doc
+            return to_calc(calc('area')(fn))
+        new_style = make("""Computes an area.
+
+            Parameters
+            ----------
+            width : number
+                The width.
+            height : number
+                The height.
+
+            Returns
+            -------
+            area : number
+                The area.
+            """)
+        old_style = make("""Computes an area.
+
+            Inputs
+            ------
+            width : number
+                The width.
+            height : number
+                The height.
+
+            Outputs
+            -------
+            area : number
+                The area.
+            """)
+        for c in (new_style, old_style):
+            self.assertEqual(set(c.input_docs), {'width', 'height'})
+            self.assertEqual(set(c.output_docs), {'area'})
+            self.assertIn('The width.', c.input_docs['width'])
+            self.assertIn('The area.', c.output_docs['area'])
+        # A docstring may use both spellings, for different items.
+        mixed = make("""Computes an area.
+
+            Parameters
+            ----------
+            width : number
+                The width.
+
+            Inputs
+            ------
+            height : number
+                The height.
+
+            Outputs
+            -------
+            area : number
+                The area.
+            """)
+        self.assertEqual(set(mixed.input_docs), {'width', 'height'})
+        self.assertEqual(set(mixed.output_docs), {'area'})
+        # An output written under 'Returns' as a bare name on its own line
+        # is found, although NumPy identifies a return value by position and
+        # so reads that word as the item's type.
+        bare = make("""Computes an area.
+
+            Returns
+            -------
+            area
+                The area.
+            """)
+        self.assertEqual(set(bare.output_docs), {'area'})
+        self.assertIn('The area.', bare.output_docs['area'])
+        # A word that is a genuine type rather than one of the calc's
+        # outputs is not mistaken for a name.
+        typed = make("""Computes an area.
+
+            Returns
+            -------
+            number
+                The area, documented by its type alone.
+            """)
+        self.assertEqual(set(typed.output_docs), set())
+        # A plan gathers them under its own role-based headings, whichever
+        # section each calc used, and its docstring parses when the two
+        # declared sections are given.
+        p = plan(a=calc('area')(mixed.function))
+        self.assertIn('Inputs', p.__doc__)
+        self.assertIn('Outputs', p.__doc__)
+        doc = docparse(p.__doc__, format='numpy', custom=CALC_DOC_SECTIONS)
+        names = {nm for s in doc.sections if s.items
+                 for i in s.items for nm in i.names}
+        self.assertTrue({'width', 'height', 'area'} <= names)
     def test_is_calc(self):
         from immlib.workflow import (calc, is_calcfn)
         @calc

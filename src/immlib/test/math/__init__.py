@@ -6,3 +6,4 @@
 
 
 from .test_math import TestMath
+from .test_rules import TestRules

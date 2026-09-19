@@ -30,6 +30,24 @@ from ..util import (
     merge, rmerge, valmap)
 
 
+#: The sections that ``immlib`` recognizes in a calc's docstring beyond the
+#: standard NumPy ones, as a ``docshare`` ``custom=`` declaration. A calc's
+#: inputs may be documented under ``'Parameters'`` or under ``'Inputs'``, and
+#: its outputs under ``'Returns'`` or under ``'Outputs'``; the second spelling
+#: of each is how ``immlib`` wrote them before version 0.2.
+#:
+#: A ``docshare`` declaration applies only to the call that makes it, so that
+#: one library cannot change how another library's docstrings are read. Pass
+#: this to ``docparse``, ``docinfo`` or ``docwrap`` to read a calc's or a
+#: plan's documentation as ``immlib`` reads it.
+#:
+#: ``Outputs`` is declared like ``Attributes`` rather than like ``Returns``
+#: because a calc's outputs are always named, and a name is what each entry
+#: is looked up by. The two sections differ for an entry written as a bare
+#: name on its own line, which NumPy's ``Returns`` reads as an unnamed item's
+#: *type*--the form a plan's generated documentation uses.
+CALC_DOC_SECTIONS = {'Inputs': 'Parameters', 'Outputs': 'Attributes'}
+
 def _item_doc(item):
     """Returns the NumPy-style documentation text of a ``docshare.Item``.
 
@@ -46,20 +64,43 @@ def _item_doc(item):
     while lines and not lines[-1].strip():
         lines.pop()
     return '\n'.join(lines)
-def _section_docs(doc, kind):
-    """Returns a dict of item-name to documentation text for the section of
-    `doc` (a ``docshare.Document``) whose kind is `kind`; an item that
-    documents several names at once (``x, y : int``) is recorded once per
-    name.
+def _section_docs(doc, *kinds, unnamed_as=None):
+    """Returns a dict of item-name to documentation text for the sections of
+    `doc` (a ``docshare.Document``) named by `kinds`; an item that documents
+    several names at once (``x, y : int``) is recorded once per name.
+
+    Several sections may be given because a calc documents its inputs under
+    ``'Parameters'`` or under ``'Inputs'`` and its outputs under
+    ``'Returns'`` or under ``'Outputs'`` (see ``CALC_DOC_SECTIONS``). They
+    are separate sections to ``docshare``, and describe the same things to a
+    calc, so both are read.
+
+    `unnamed_as` is the collection of names an item that has none of its own
+    might be documenting. NumPy's ``'Returns'`` section identifies its items
+    by position rather than by name, so an entry written as a bare word on
+    its own line parses as an item with no name whose *type* is that word.
+    A calc's outputs are always named, so when that word is one of
+    `unnamed_as` it is taken as the item's name. (``'Outputs'``, being
+    immlib's own section, is simply declared to hold named items and needs
+    none of this; ``'Returns'`` is NumPy's, and ``docshare`` does not allow
+    a section it recognizes to be redeclared--rightly, since one library's
+    conventions should not change how another's documentation is read.)
     """
-    section = doc.section(kind)
-    if section is None:
-        return {}
+    unnamed_as = frozenset(unnamed_as or ())
     docs = {}
-    for item in section.items:
-        text = _item_doc(item)
-        for nm in item.names:
-            docs[nm] = text
+    for kind in kinds:
+        section = doc.section(kind)
+        if section is None:
+            continue
+        for item in section.items:
+            names = item.names
+            if not names and item.type in unnamed_as:
+                names = (item.type,)
+            # The text is unchanged: an item with no name of its own already
+            # renders its type as the head line, which is the bare name.
+            text = _item_doc(item)
+            for nm in names:
+                docs[nm] = text
     return docs
 
 
@@ -96,12 +137,19 @@ class calc:
     be written in [NumPy's documentation
     style](https://numpydoc.readthedocs.io/en/latest/format.html): a calc's
     inputs are documented in the ``'Parameters'`` section and its outputs in
-    the ``'Returns'`` section, whose entries must be named (``y : int``) so
-    that each output's documentation can be found.
+    the ``'Returns'`` section, whose entries must be named so that each
+    output's documentation can be found. An output may be named with its
+    type, as in ``y : int``, or written as a bare name on its own line.
 
-    .. Note:: Before ``immlib`` version 0.2, a calc documented its inputs and
-        outputs in ``'Inputs'`` and ``'Outputs'`` sections. These sections are
-        no longer recognized; use ``'Parameters'`` and ``'Returns'`` instead.
+    A calc's inputs may equally be documented in an ``'Inputs'`` section and
+    its outputs in an ``'Outputs'`` section, which is how ``immlib`` wrote
+    them before version 0.2. The two spellings mean the same thing to a
+    calc--an input is an input however its documentation is headed--and a
+    docstring may use both, for different inputs, if there is a reason to.
+    They are read with ``docshare``'s ``custom=`` declaration, which applies
+    to the call that makes it, so anything that parses a calc's docstring
+    itself must declare them too; ``immlib.workflow.CALC_DOC_SECTIONS`` is
+    that declaration.
 
     Caching for calculations requires some care. First, the ``calc``- and
     ``plan``-based workflow system in ``immlib`` is designed to work best with
@@ -287,14 +335,20 @@ class calc:
         if name is None:
             name = fn.__module__ + '.' + fn.__name__
         # Parse the function's documentation (NumPy style) to collect the
-        # documentation of its inputs (the Parameters section) and of its
-        # outputs (the Returns section).
+        # documentation of its inputs (the Parameters or Inputs section) and
+        # of its outputs (the Returns or Outputs section).
         if (hasattr(fn, '__doc__') and
             fn.__doc__ is not None and fn.__doc__.strip() != ''):
             fndoc = fn.__doc__
-            doc = docparse(fn, format='numpy')
-            input_docs = pdict(_section_docs(doc, 'parameters'))
-            output_docs = pdict(_section_docs(doc, 'returns'))
+            doc = docparse(fn, format='numpy', custom=CALC_DOC_SECTIONS)
+            try:
+                out_names = tuple(outputs)
+            except TypeError:
+                out_names = ()
+            input_docs = pdict(_section_docs(doc, 'parameters', 'Inputs'))
+            output_docs = pdict(
+                _section_docs(doc, 'returns', 'Outputs',
+                              unnamed_as=out_names))
         else:
             input_docs = pdict()
             output_docs = pdict()
@@ -1252,6 +1306,11 @@ class plan(pdict):
 
             This documentation was generated automatically from the docstrings
             of the individual ``immlib.calc`` objects that make up this plan.
+            Its ``Inputs`` section documents the values the plan must be
+            given and its ``Outputs`` section the values it computes,
+            whichever sections the individual calcs documented them in; to
+            parse this docstring, declare those two sections with
+            ``immlib.workflow.CALC_DOC_SECTIONS``.
 
             This plan contains the following calculations:
              {calcstr}

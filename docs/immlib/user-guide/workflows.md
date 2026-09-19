@@ -243,15 +243,26 @@ Calculations and plans also track the documentation for their inputs and
 outputs. A calculation's docstring must be written in
 [NumPy style](https://numpydoc.readthedocs.io/en/latest/format.html): its
 inputs are documented in the `Parameters` section and its outputs in the
-`Returns` section, whose entries must be named (`y : int`) so that each
-output's documentation can be found. The parsed documentation is available
+`Returns` section, whose entries must be named so that each output's
+documentation can be found; an output may be named with its type, as in
+`y : int`, or written as a bare name on its own line. The parsed documentation is available
 through the `input_docs` and `output_docs` fields, and is also used to build
 a plan's own docstring.
 
-```{note}
-Before version 0.2, a calculation documented its inputs and outputs in
-`Inputs` and `Outputs` sections. Those section names are no longer
-recognized.
+A calculation may equally document its inputs in an `Inputs` section and its
+outputs in an `Outputs` section, which is how `immlib` wrote them before
+version 0.2. The two spellings mean the same thing to a calculation, and one
+docstring may use both. They are read with `docshare`'s `custom=`
+declaration, which applies only to the call that makes it, so anything that
+parses a calculation's or a plan's docstring itself needs the same
+declaration, which `immlib.workflow.CALC_DOC_SECTIONS` provides:
+
+```{code-cell}
+from docshare import docparse
+from immlib.workflow import CALC_DOC_SECTIONS
+
+doc = docparse(stats_plan.__doc__, format='numpy', custom=CALC_DOC_SECTIONS)
+[section.name for section in doc.sections]
 ```
 
 ```{code-cell}

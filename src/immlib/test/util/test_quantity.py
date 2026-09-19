@@ -837,10 +837,9 @@ class TestUtilQuantity(TestCase):
         self.assertIsNone(r.units)
         self.assertTrue(torch.allclose(r.m, torch.atan2(qy.m, qx.m)))
 
-        # Reduction functions (_TORCH_MATH_REDUCTION_FUNCS) translate
-        # torch's own kwarg names (dim/keepdim/correction) to
-        # immlib.math's NumPy-style ones (axis/keepdims/ddof) via
-        # _TORCH_KWARG_TRANSLATION.
+        # Reduction functions (_TORCH_MATH_REDUCTION_FUNCS) pass torch's own
+        # arguments straight through, since immlib.math takes PyTorch's
+        # argument names and defaults.
         am = quant(torch.tensor([[1.0, 2.0], [3.0, 4.0]]), 'm')
         r = torch.var(am, dim=0, correction=0)
         self.assertTrue(is_quant(r))
@@ -871,18 +870,18 @@ class TestUtilQuantity(TestCase):
         self.assertEqual(str(r.units), 'second')
         self.assertTrue(torch.allclose(r.m, torch.tensor([1.0, 2.0])))
 
-        # torch.min/torch.max are deliberately NOT handled: they return
-        # PyTorch's native (values, indices) tuple and take a `dim`
-        # argument, which immlib.math's NumPy-style values-only min/max
-        # cannot reproduce without silently changing torch's own
-        # documented contract for a Quantity input (the same "materially
-        # different semantics, exclude" reasoning as the dot exclusion,
-        # spec 9.3); calling them on a Quantity therefore falls through
-        # to torch's own error rather than returning a wrong result.
-        with self.assertRaises(TypeError):
-            torch.min(am)
-        with self.assertRaises(TypeError):
-            torch.max(am)
+        # torch.min/torch.max are handled now that immlib.math.min/max
+        # return PyTorch's own (values, indices) pair: torch's documented
+        # contract holds for a Quantity, with the values carrying units.
+        r = torch.min(am)
+        self.assertTrue(is_quant(r))
+        self.assertEqual(float(r.m), 1.0)
+        self.assertEqual(r.u, am.u)
+        r = torch.max(am, dim=0)
+        self.assertTrue(is_quant(r.values))
+        self.assertEqual(r.values.u, am.u)
+        self.assertTrue(torch.allclose(r.values.m, torch.tensor([3.0, 4.0])))
+        self.assertTrue(torch.equal(r.indices, torch.tensor([1, 1])))
 
         # Gradient flow is preserved through the delegate path (a hard
         # requirement per spec 9.3.4): sqrt above goes through
@@ -962,7 +961,8 @@ class TestUtilQuantity(TestCase):
         self.assertTrue(np.array_equal(f.m, [2.0, 2.5, 3.0]))
 
     def test_quantity_plain_pint_interaction(self):
-        from immlib import quant, units, Quantity
+        from immlib import quant, ilquant, units, Quantity
+        from immlib.util import unitregistry
         import pint
         # quant() accepts a plain pint.Quantity--one belonging to an
         # ordinary pint.UnitRegistry rather than an immlib.UnitRegistry--
@@ -971,14 +971,39 @@ class TestUtilQuantity(TestCase):
         plain_ureg = pint.UnitRegistry()
         plain_q = plain_ureg.Quantity(5.0, 'meter')
         self.assertNotIsInstance(plain_q, Quantity)
-        # By default (unit=Ellipsis), a plain pint.Quantity is returned
-        # exactly as given, in its own registry--even when an explicit,
-        # different `ureg` is also passed--since Ellipsis short-circuits
-        # before quant() ever considers re-homing it; a plain
-        # pint.Quantity is never silently promoted to an immlib.Quantity
-        # just because a different registry was mentioned.
+        # With no `ureg` (the default, None, which requests no particular
+        # registry), a plain pint.Quantity is returned exactly as given, in
+        # its own registry: quant() never silently promotes one.
         self.assertIs(quant(plain_q), plain_q)
-        self.assertIs(quant(plain_q, ureg=units), plain_q)
+        self.assertIs(quant(plain_q, ureg=None), plain_q)
+        # Naming a registry requests one, however, so the quantity is
+        # re-homed into it and thus promoted.
+        r1 = quant(plain_q, ureg=units)
+        self.assertIsInstance(r1, Quantity)
+        self.assertEqual(r1.m, 5.0)
+        self.assertEqual(str(r1.units), 'meter')
+        self.assertIs(unitregistry(r1), units)
+        # ureg=Ellipsis names immlib.units, and is what ilquant defaults to.
+        self.assertIsInstance(quant(plain_q, ureg=Ellipsis), Quantity)
+        r1b = ilquant(plain_q)
+        self.assertIsInstance(r1b, Quantity)
+        self.assertEqual(r1b.m, 5.0)
+        self.assertEqual(str(r1b.units), 'meter')
+        # ilquant(q, ureg=None) is quant(q).
+        self.assertIs(ilquant(plain_q, ureg=None), plain_q)
+        # An immlib.Quantity is already where ilquant wants it.
+        iq = quant(5.0, 'meter')
+        self.assertIs(ilquant(iq), iq)
+        self.assertIs(quant(iq), iq)
+        # For a non-quantity, the two functions agree.
+        for f in (quant, ilquant):
+            q0 = f(5.0, 'meter')
+            self.assertIsInstance(q0, Quantity)
+            self.assertEqual(q0.m, 5.0)
+        # A unit-less quantity cannot be moved into a plain pint registry,
+        # which would silently turn "no units" into dimensionless.
+        with self.assertRaises(ValueError):
+            quant(quant(5.0), ureg=plain_ureg)
         # Converting to an explicit unit, with no explicit `ureg`, also
         # keeps the result in the plain quantity's own (plain) registry.
         r2 = quant(plain_q, 'mm')
@@ -990,9 +1015,8 @@ class TestUtilQuantity(TestCase):
         # to do the analogous thing for an immlib.UnitRegistry quantity.
         with self.assertRaises(ValueError):
             quant(plain_q, None)
-        # Requesting an explicit real-unit conversion *together with* an
-        # explicit, different `ureg` is the one case where a plain
-        # pint.Quantity does get promoted: quant() converts within the
+        # An explicit real-unit conversion together with an explicit,
+        # different `ureg` promotes as well: quant() converts within the
         # quantity's own registry first, then re-homes the result into
         # the requested registry because the two registries differ.
         r3 = quant(plain_q, 'mm', ureg=units)
@@ -1099,9 +1123,15 @@ class TestUtilQuantity(TestCase):
             except pint.DimensionalityError:
                 return ('dimerr', None)
             except ValueError:
-                # Pint raises ValueError when ordering a bare value against
-                # a quantity with real dimensions.
-                return ('valerr', None)
+                # Ordering a bare value against a quantity with real
+                # dimensions fails either way round, but Pint spells the
+                # failure differently in the two orders: a
+                # DimensionalityError for `bare < quantity` and a
+                # ValueError ("Cannot compare PlainQuantity and ...") for
+                # `quantity < bare`. immlib raises the DimensionalityError
+                # both ways (asserted below), so the two spellings count as
+                # the same outcome here.
+                return ('dimerr', None)
         def same(r1, r2):
             self.assertEqual(r1[0], r2[0])
             if r1[0] != 'ok':
@@ -1129,6 +1159,19 @@ class TestUtilQuantity(TestCase):
                             expected = run(lambda: op(quant(py, u), px))
                             got = run(lambda: op(quant(y, u), quant(x)))
                             same(got, expected)
+        # Ordering a unit-less quantity against a dimensional one raises a
+        # DimensionalityError whichever way round it is written, rather than
+        # Pint's ValueError in one order and DimensionalityError in the
+        # other.
+        for x in xs:
+            for y in ys:
+                for op in (operator.lt, operator.le, operator.gt,
+                           operator.ge):
+                    with self.subTest(x=type(x), y=type(y), op=op):
+                        with self.assertRaises(pint.DimensionalityError):
+                            op(quant(x), quant(y, 'm'))
+                        with self.assertRaises(pint.DimensionalityError):
+                            op(quant(y, 'm'), quant(x))
         # Tensor results stay on the tensor side and are Quantities.
         r = quant(np.array([1.0, 2.0])) * quant(torch.tensor([1.0, 2.0]), 'm')
         self.assertTrue(torch.is_tensor(r.m))
@@ -1206,7 +1249,9 @@ class TestUtilQuantity(TestCase):
         r = quant(t, 'm/km') + t
         self.assertEqual(r.units, quant(1, 'm/km').units)
         self.assertTrue(torch.allclose(r.m, 1001 * t))
-        with self.assertRaises(ValueError):
+        # Ordering a dimensional quantity against a bare value is a
+        # dimensionality failure (Pint spells this one a ValueError).
+        with self.assertRaises(pint.DimensionalityError):
             q < t
         self.assertTrue(bool((q > torch.zeros(3)).all()))
         # NumPy and tensor magnitudes are promoted to tensors.

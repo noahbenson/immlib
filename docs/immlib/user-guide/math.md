@@ -90,12 +90,18 @@ A few rules apply consistently across every function in this module:
   it; functions like `exp`, `log`, and `sin` require a unit-less
   (`units=None`) input and raise a `TypeError` otherwise, since "the sine of
   3 meters" isn't a meaningful physical quantity.
-* **NumPy's own semantics and argument conventions are the reference.**
-  Where PyTorch's same-named function differs--argument names (`dim`/
-  `keepdim` vs. `axis`/`keepdims`), differing defaults (see the `std`/`var`
-  note below), or a differing result shape (`torch.min`/`torch.max`'s
-  `(values, indices)` tuple)--the PyTorch side is implemented, per function,
-  to match NumPy's own behavior instead.
+* **The two backends must agree (Rule 1).** A function gives equal results
+  for an array and a tensor that are equal; only the type of the result
+  differs, following the type of the input. Where the two libraries
+  disagree--in a default, a result shape, a strictness, or the meaning of a
+  name--immlib picks one behavior and implements it for both.
+* **PyTorch's behavior is the one picked.** `immlib.math` follows PyTorch's
+  names, signatures, defaults and semantics, and the NumPy backend is made
+  to comply; PyTorch's API is generally the smaller of the two, so meeting
+  it with NumPy is a translation rather than a reimplementation. Where
+  PyTorch accepts NumPy's spelling of an argument (`axis` for `dim`,
+  `keepdims` for `keepdim`), so does immlib--uniformly, for every function
+  that has the argument.
 * **Tensor computations stay on PyTorch's own differentiable operations.**
   No `immlib.math` function round-trips a tensor's magnitude through NumPy,
   so gradients flow through `immlib.math` calls exactly as they would
@@ -190,23 +196,23 @@ except TypeError as e:
 units of `y` and `x` as `maximum` does and always returns a unit-less result,
 since an angle has no unit of its own here.
 
-`floor`, `ceil`, and `round` all preserve the input's units. `round` takes
-its digit-count argument as `ndigits`, matching Python's builtin `round`
-(rather than NumPy's `decimals` or PyTorch's `decimals`):
+`floor`, `ceil`, and `round` all preserve the input's units. `round` names
+its digit-count argument `decimals`, as `torch.round` does, and also accepts
+it positionally, as `numpy.round` does:
 
 ```{code-cell}
-im.round(il.quant([1.234, 5.678], 'm'), ndigits=1)
+im.round(il.quant([1.234, 5.678], 'm'), decimals=1)
 ```
 
 
 (reductions)=
 ## Reductions
 
-`sum`, `mean`, `min`, `max`, `std`, `var`, and `prod` all accept NumPy-style
-`axis`/`keepdims` keywords (translated to PyTorch's `dim`/`keepdim` on the
-tensor backend). `sum`, `mean`, `min`, and `max` preserve the input's units;
-`var` squares them; `prod` raises them to the power of however many elements
-were multiplied together.
+`sum`, `mean`, `min`, `max`, `amin`, `amax`, `std`, `var`, `prod`, and
+`cumsum` all take PyTorch's `dim`/`keepdim` arguments, and accept NumPy's
+`axis`/`keepdims` as aliases for them. `sum`, `mean`, `min`, and `max`
+preserve the input's units; `var` squares them; `prod` raises them to the
+power of however many elements were multiplied together.
 
 ```{code-cell}
 im.sum(il.quant([[1.0, 2.0], [3.0, 4.0]], 's'), axis=0)
@@ -221,19 +227,18 @@ im.sum(il.quant(sps.eye(3, format='csr'), 'm'), axis=0)
 ```
 
 ```{important}
-`std` and `var` both default to `ddof=0` (NumPy's own default, a *population*
-standard deviation/variance) on *both* backends--including the PyTorch
-backend, where `torch.std`/`torch.var` called directly default to
-`correction=1` (a *sample* standard deviation/variance) instead. Pass
-`ddof=1` explicitly if you want PyTorch's default behavior.
+`std` and `var` both default to `correction=1` (PyTorch's own default, a
+*sample* standard deviation/variance) on *both* backends--including the
+NumPy backend, where `numpy.std`/`numpy.var` called directly default to
+`ddof=0` (a *population* standard deviation/variance) instead. Pass
+`correction=0` for the population statistic.
 ```
 
-`min` and `max` return only the reduced values, matching NumPy's
-`min`/`max`--*not* PyTorch's own `torch.min`/`torch.max`, which additionally
-return the indices of the selected elements as a `(values, indices)` tuple
-when called with a `dim` argument. If you need the indices, call
-`torch.min`/`torch.max` (or `.m.min(...)`/`.m.max(...)`) directly on the
-magnitude instead.
+`min` and `max` follow `torch.min`/`torch.max`: given a `dim`, they return a
+`(values, indices)` named tuple, where `values` is a `Quantity` and
+`indices` is a plain array or tensor; given none, they return the single
+smallest or largest element. Use `amin`/`amax` for the values alone, which
+can also reduce several dimensions at once.
 
 `any` and `all` return a plain boolean NumPy array or PyTorch tensor, like
 the comparison functions above, rather than a unit-less `Quantity`.
@@ -241,12 +246,14 @@ the comparison functions above, rather than a unit-less `Quantity`.
 
 ## Shape and Combination
 
-`reshape`, `transpose`, and `squeeze` all preserve units and accept NumPy's
-own argument conventions (e.g. `transpose(a, axes=None)` reverses all axes
-by default on both backends, matching `np.transpose`'s default--even though
-that requires an explicit `Tensor.permute` call on the PyTorch side, since
-PyTorch has no direct equivalent to NumPy's axis-reversal default for
-`transpose`).
+`reshape`, `transpose`, `permute`, `squeeze`, `unsqueeze`, `ravel`, and
+`flatten` all preserve units and take PyTorch's arguments. Two of them are
+worth pointing out, since NumPy spells the same ideas differently:
+`transpose(a, dim0, dim1)` exchanges two dimensions, as `torch.transpose`
+does, and the full permutation that `numpy.transpose` performs is
+`permute(a, dims)` (which, given no dimensions, reverses them all).
+`squeeze(a, dim)` leaves a dimension alone when it is not of size 1, as
+`torch.squeeze` does, rather than raising as `numpy.squeeze` would.
 
 `stack` and `concatenate` combine a sequence of quantities along a new or
 existing axis respectively. If any element has real units, the result has

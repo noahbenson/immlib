@@ -6,6 +6,7 @@
 
 
 from ._core import (
+    CALC_DOC_SECTIONS,
     to_pathcache,
     to_lrucache,
     calc,
@@ -27,6 +28,7 @@ from ._plantype import (
     is_planobject)
 
 __all__ = (
+    "CALC_DOC_SECTIONS",
     #"to_pathcache",
     #"to_lrucache",
     "calc",

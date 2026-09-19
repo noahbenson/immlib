@@ -26,6 +26,7 @@ LockType = type(Lock())
 
 import numpy as np
 import scipy as sp
+from docshare import docwrap
 from pcollections import *
 from numpy.lib.mixins import NDArrayOperatorsMixin
 
@@ -221,6 +222,9 @@ class ArrayIndex:
         object.__setattr__(self, 'array', array)
         return self
     # Public Methods -----------------------------------------------------------
+    # `default` is documented although the signature does not name it: it is
+    # taken from **kw, so that "not given" can be told from "given as None".
+    @docwrap(format='numpy', extraparam='default')
     def find(self, ids, *, ravel=False, **kw):
         """Finds and returns the indices of the given identities.
         

@@ -205,7 +205,7 @@ def osf_contents(proj,
 
     Parameters
     ----------
-    project : str
+    proj : str
         The OSF project ID.
     storage : str, optional
         The OSF storage type to extract. By default this is ``'osfstorage'``.

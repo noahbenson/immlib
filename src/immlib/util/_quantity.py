@@ -360,28 +360,18 @@ _TORCH_MATH_DELEGATE_FUNCS = {
     'atan2': 'arctan2', 'sqrt': 'sqrt',
 }
 # Reduction functions whose output unit is *not* the input's own units
-# (var/prod) or whose PyTorch-native keyword arguments ('dim', 'keepdim',
-# 'correction') differ in name from immlib.math's own NumPy-style ones
-# ('axis', 'keepdims', 'ddof')--std/var/prod all fall in the latter
-# category (see _TORCH_KWARG_TRANSLATION below), so dispatching these
-# through __torch_function__ must translate PyTorch's own kwargs before
-# delegating to immlib.math, keeping torch.var(q, dim=0, correction=0)
-# behaving like ordinary PyTorch (just unit-aware) rather than switching
-# callers over to immlib.math's own argument names.
+# (var/prod), or which otherwise need immlib.math's unit handling rather
+# than PyTorch's. immlib.math takes PyTorch's own argument names and
+# defaults, so the arguments of a call such as torch.var(q, dim=0,
+# correction=0) are simply passed along.
 #
-# torch.min/torch.max are deliberately NOT included here (or anywhere in
-# __torch_function__): called with a `dim` argument, they return a
-# PyTorch-native ``(values, indices)`` named tuple, a result shape that
-# immlib.math.min/max (which, matching numpy.min/max, return only the
-# values--see its docstring) cannot reproduce without silently changing
-# torch.min/max's own documented contract for a Quantity input, which is
-# exactly the kind of surprising, backend-specific behavior the design
-# spec asks to avoid (section 9.3); they are left unhandled, so PyTorch
-# raises its own error for a Quantity argument, rather than immlib
-# guessing at a translation.
-_TORCH_MATH_REDUCTION_FUNCS = {'std': 'std', 'var': 'var', 'prod': 'prod'}
-_TORCH_KWARG_TRANSLATION = {
-    'dim': 'axis', 'keepdim': 'keepdims', 'correction': 'ddof'}
+# torch.min and torch.max are included: immlib.math.min/max return the same
+# ``(values, indices)`` pair that PyTorch's own do (with the values as a
+# quantity), so the contract PyTorch documents holds for a Quantity too.
+_TORCH_MATH_REDUCTION_FUNCS = {
+    'std': 'std', 'var': 'var', 'prod': 'prod',
+    'min': 'min', 'max': 'max', 'amin': 'amin', 'amax': 'amax',
+    'sum': 'sum', 'mean': 'mean', 'cumsum': 'cumsum'}
 # Reductions whose result is a plain bool tensor, never a Quantity (see
 # the immlib.math module docstring regarding comparisons/any/all).
 _TORCH_BOOL_REDUCTION_FUNCS = frozenset(['any', 'all'])
@@ -472,6 +462,34 @@ def _map_quantities(obj, fn):
         return {k: _map_quantities(v, fn) for (k,v) in obj.items()}
     else:
         return obj
+#: The PyTorch name for a NumPy ufunc that PyTorch spells differently. Most
+#: are spelled the same (PyTorch defines NumPy's names as aliases), so only
+#: the exceptions are listed. Note ``equal``: NumPy's ufunc is elementwise,
+#: and PyTorch's elementwise comparison is ``eq``--``torch.equal`` is the
+#: whole-array test instead.
+_TORCH_UFUNC_NAMES = {
+    'equal': 'eq',
+    'power': 'pow',
+    'conjugate': 'conj',
+    'invert': 'bitwise_not',
+    'degrees': 'rad2deg',
+    'radians': 'deg2rad',
+    'left_shift': 'bitwise_left_shift',
+    'right_shift': 'bitwise_right_shift'}
+
+def _torch_ufunc(ufunc):
+    """Returns the PyTorch function equivalent to the given NumPy ufunc, or
+    ``None`` if PyTorch has none.
+
+    A NumPy ufunc cannot simply be applied to a tensor: NumPy converts the
+    tensor with ``Tensor.__array__``, which computes a NumPy array and so
+    both changes the backend and discards gradient tracking--and raises
+    outright for a tensor that requires grad. The equivalent PyTorch
+    function is used instead.
+    """
+    name = _TORCH_UFUNC_NAMES.get(ufunc.__name__, ufunc.__name__)
+    return getattr(torch, name, None)
+
 def _none_ufunc(ufunc, method, inputs, kwargs):
     """Applies a NumPy ufunc (with any method: ``__call__``, ``reduce``,
     ``accumulate``, ``outer``, etc., and any keywords, including ``out``)
@@ -490,7 +508,13 @@ def _none_ufunc(ufunc, method, inputs, kwargs):
     unwrap = lambda q: q._magnitude
     mags = _map_quantities(inputs, unwrap)
     kw = _map_quantities(kwargs, unwrap)
-    result = getattr(ufunc, method)(*mags, **kw)
+    torch_fn = None
+    if method == '__call__' and any(torch.is_tensor(m) for m in mags):
+        torch_fn = _torch_ufunc(ufunc)
+    if torch_fn is not None:
+        result = torch_fn(*mags, **kw)
+    else:
+        result = getattr(ufunc, method)(*mags, **kw)
     out = kwargs.get('out')
     if out is not None:
         if isinstance(out, tuple):
@@ -500,6 +524,12 @@ def _none_ufunc(ufunc, method, inputs, kwargs):
     def wrap(r):
         if isinstance(r, (np.ndarray, np.generic)):
             if r.dtype == np.bool_:
+                return r
+            return qcls(r, None)
+        if torch.is_tensor(r):
+            # A tensor result is wrapped exactly as an array result is, so
+            # that the two backends agree about what comes back.
+            if r.dtype == torch.bool:
                 return r
             return qcls(r, None)
         return r
@@ -606,6 +636,33 @@ def _hashable_mag(mag):
     if isinstance(mag, np.ndarray) and mag.ndim == 0:
         return mag.item()
     return mag
+
+def _compare_units_error(units):
+    """Returns the error for ordering a value that has no units against a
+    quantity that has real dimensions.
+
+    A quantity whose units are ``None``, like any bare value, is
+    dimensionless for the purposes of a comparison, so ordering it against
+    a dimensional quantity is a dimensionality failure. Pint raises a
+    ``ValueError`` naming its own internal class for this in one operand
+    order and a ``DimensionalityError`` in the other; immlib always raises
+    the latter, which is also what ``immlib.math.maximum`` and friends raise
+    for the same units.
+    """
+    return pint.DimensionalityError(
+        'dimensionless', units,
+        extra_msg=(" A value with no units cannot be ordered against a"
+                   " quantity with dimensions."))
+
+def _math():
+    """Returns the ``immlib.math`` module.
+
+    The import is made here, on demand, rather than at the top of this
+    module: ``immlib.math`` is built on the ``Quantity`` class defined
+    below, so it cannot be imported while this module is being defined.
+    """
+    from .. import math as _math_module
+    return _math_module
 
 def _unpickle_quantity(mag, units):
     ureg = _default_ureg()
@@ -851,6 +908,106 @@ class Quantity(pint.Quantity):
             return bool(self._magnitude)
         return super().__bool__()
     __nonzero__ = __bool__
+
+    # Numerical methods ######################################################
+    # Pint implements the methods below against NumPy arrays: it converts the
+    # magnitude with numpy.asarray, then wraps the result up again. For a
+    # tensor magnitude that silently changes the backend (q.reshape() on a
+    # tensor quantity returned a NumPy array), which breaks the rule that a
+    # method must give equal results for equal arrays and tensors, and it
+    # destroys gradient tracking--for a tensor that requires grad it does not
+    # merely lose the graph, it raises. They are therefore implemented here
+    # by delegating to immlib.math, which honors both rules, and they take
+    # immlib.math's (i.e. PyTorch's) arguments: `dim` and `keepdim`, with
+    # `axis` and `keepdims` accepted as aliases.
+    def sum(self, dim=None, keepdim=False, **kwargs):
+        "Returns the sum of this quantity's elements; see ``immlib.math.sum``."
+        return _math().sum(self, dim, keepdim, **kwargs)
+    def prod(self, dim=None, keepdim=False, **kwargs):
+        "Returns the product of the elements; see ``immlib.math.prod``."
+        return _math().prod(self, dim, keepdim, **kwargs)
+    def mean(self, dim=None, keepdim=False, **kwargs):
+        "Returns the mean of the elements; see ``immlib.math.mean``."
+        return _math().mean(self, dim, keepdim, **kwargs)
+    def std(self, dim=None, keepdim=False, correction=1, **kwargs):
+        """Returns the standard deviation of the elements; see
+        ``immlib.math.std``, including the default ``correction=1``."""
+        return _math().std(self, dim, keepdim, correction, **kwargs)
+    def var(self, dim=None, keepdim=False, correction=1, **kwargs):
+        "Returns the variance of the elements; see ``immlib.math.var``."
+        return _math().var(self, dim, keepdim, correction, **kwargs)
+    def min(self, dim=None, keepdim=False, **kwargs):
+        """Returns the minimum element, or, for a given `dim`, a ``(values,
+        indices)`` tuple; see ``immlib.math.min``."""
+        return _math().min(self, dim, keepdim, **kwargs)
+    def max(self, dim=None, keepdim=False, **kwargs):
+        "Returns the maximum element; see ``immlib.math.max`` and ``min``."
+        return _math().max(self, dim, keepdim, **kwargs)
+    def amin(self, dim=None, keepdim=False, **kwargs):
+        "Returns the minimum value(s) alone; see ``immlib.math.amin``."
+        return _math().amin(self, dim, keepdim, **kwargs)
+    def amax(self, dim=None, keepdim=False, **kwargs):
+        "Returns the maximum value(s) alone; see ``immlib.math.amax``."
+        return _math().amax(self, dim, keepdim, **kwargs)
+    def all(self, dim=None, keepdim=False, **kwargs):
+        """Returns whether every element is truthy, as a plain bool array or
+        tensor; see ``immlib.math.all``."""
+        return _math().all(self, dim, keepdim, **kwargs)
+    def any(self, dim=None, keepdim=False, **kwargs):
+        """Returns whether any element is truthy, as a plain bool array or
+        tensor; see ``immlib.math.any``."""
+        return _math().any(self, dim, keepdim, **kwargs)
+    def cumsum(self, dim, **kwargs):
+        """Returns the cumulative sum along `dim`, which is required, as it is
+        in ``torch.cumsum``; see ``immlib.math.cumsum``."""
+        return _math().cumsum(self, dim, **kwargs)
+    def round(self, decimals=0):
+        "Returns the elements rounded; see ``immlib.math.round``."
+        return _math().round(self, decimals)
+    def conj(self):
+        "Returns the elementwise conjugate; see ``immlib.math.conj``."
+        return _math().conj(self)
+    def conjugate(self):
+        "An alias of ``conj``."
+        return _math().conj(self)
+    def reshape(self, *shape):
+        "Returns this quantity reshaped; see ``immlib.math.reshape``."
+        return _math().reshape(self, *shape)
+    def transpose(self, dim0=None, dim1=None):
+        """Returns this quantity with two dimensions exchanged; see
+        ``immlib.math.transpose``. Given no arguments, every dimension is
+        reversed, as ``permute`` does with none--the one concession to
+        ``numpy.ndarray.transpose``, whose no-argument form is common."""
+        if dim0 is None and dim1 is None:
+            return _math().permute(self)
+        return _math().transpose(self, dim0, dim1)
+    def permute(self, *dims):
+        "Returns this quantity with its dimensions permuted; see ``permute``."
+        return _math().permute(self, *dims)
+    def squeeze(self, dim=None, **kwargs):
+        "Returns this quantity with size-1 dimensions removed; see ``squeeze``."
+        return _math().squeeze(self, dim, **kwargs)
+    def unsqueeze(self, dim, **kwargs):
+        "Returns this quantity with a dimension inserted; see ``unsqueeze``."
+        return _math().unsqueeze(self, dim, **kwargs)
+    def ravel(self):
+        "Returns this quantity flattened; see ``immlib.math.ravel``."
+        return _math().ravel(self)
+    def flatten(self, start_dim=0, end_dim=-1):
+        "Returns this quantity flattened; see ``immlib.math.flatten``."
+        return _math().flatten(self, start_dim, end_dim)
+    def astype(self, dtype, **kwargs):
+        """Returns this quantity with its magnitude cast to `dtype`, keeping
+        its backend: a tensor magnitude stays a tensor (PyTorch spells this
+        ``Tensor.to``, a name Pint has already given to unit conversion). The
+        dtype may be given in either library's spelling."""
+        from ._numeric import to_numpydtype, to_torchdtype
+        m = self._magnitude
+        if torch.is_tensor(m):
+            return self.__class__(m.to(to_torchdtype(dtype), **kwargs),
+                                  self.units)
+        return self.__class__(m.astype(to_numpydtype(dtype), **kwargs),
+                              self.units)
     def __round__(self, ndigits=None):
         mag = self._magnitude
         if self._is_0d():
@@ -917,10 +1074,16 @@ class Quantity(pint.Quantity):
         return super().__itruediv__(other)
     __idiv__ = __itruediv__
     def __ifloordiv__(self, other):
+        if self._has_none_units(other):
+            return self._inplace_result(
+                self._binop_none(other, operator.floordiv))
         if self._is_0d():
             return self._inplace_0d(operator.floordiv, other)
         return super().__ifloordiv__(other)
     def __imod__(self, other):
+        if self._has_none_units(other):
+            return self._inplace_result(
+                self._binop_none(other, operator.mod))
         if self._is_0d():
             return self._inplace_0d(operator.mod, other)
         return super().__imod__(other)
@@ -968,6 +1131,90 @@ class Quantity(pint.Quantity):
         else:
             y = other.__class__(ym, other._units)
         return (x, y)
+    def __setitem__(self, key, value):
+        """Assigns into this quantity's magnitude, converting `value` into
+        this quantity's units first.
+
+        Pint's own implementation is used for a NumPy magnitude with real
+        units. It cannot be used for the other two cases: for a unit-less
+        quantity it computes ``self._units ** -1``, which has no meaning
+        here, and for a tensor magnitude it assigns a NumPy value into the
+        tensor. Both fail with a ``TypeError`` that Pint reports as "does
+        not support indexing".
+        """
+        m = self._magnitude
+        value_is_none_q = (isinstance(value, pint.Quantity)
+                           and value._units is None)
+        if (self._units is not None and not torch.is_tensor(m)
+                and not value_is_none_q):
+            return super().__setitem__(key, value)
+        if self._units is None:
+            # A unit-less quantity assigns like its bare magnitude would.
+            if isinstance(value, pint.Quantity):
+                if value._units is not None:
+                    raise pint.DimensionalityError(
+                        value.units, 'dimensionless',
+                        extra_msg=(" Cannot assign a quantity with units"
+                                   " into a unit-less (units=None)"
+                                   " quantity."))
+                value = value._magnitude
+        else:
+            # Convert value into this quantity's units. A bare value is
+            # dimensionless, as everywhere else, so assigning one into a
+            # quantity with real dimensions raises.
+            if isinstance(value, pint.Quantity) and value._units is not None:
+                q = value
+            else:
+                v = value._magnitude if isinstance(value, pint.Quantity) \
+                    else value
+                q = self.__class__(v, self.UnitsContainer())
+            value = q.m_as(self._units)
+        # The value must be in the magnitude's own backend.
+        if torch.is_tensor(m):
+            if not torch.is_tensor(value):
+                value = to_tensor(value, dtype=m.dtype, device=m.device)
+        elif torch.is_tensor(value):
+            value = to_array(value)
+        m[key] = value
+    def _has_none_units(self, other):
+        """Returns whether this quantity or `other` has units of ``None``,
+        in which case the operation is performed on bare magnitudes."""
+        return self._units is None or (
+            isinstance(other, pint.Quantity) and other._units is None)
+    def _rbinop_none(self, other, op):
+        "As ``_binop_none``, for a reflected operator (``op(other, self)``)."
+        return self._binop_none(other, lambda x, y: op(y, x))
+    def _divmod(self, other, reflected=False):
+        """Implements ``divmod`` as the pair ``(self // other, self %
+        other)``.
+
+        Pint's own implementation calls ``divmod`` on the magnitudes, which
+        a PyTorch tensor does not support although it supports both ``//``
+        and ``%``; computing the two separately is the same answer for a
+        NumPy magnitude and works for both (Rule 1).
+        """
+        (x, y) = (other, self) if reflected else (self, other)
+        return (x // y, x % y)
+    def __floordiv__(self, other):
+        if self._has_none_units(other):
+            return self._binop_none(other, operator.floordiv)
+        return super().__floordiv__(other)
+    def __rfloordiv__(self, other):
+        if self._has_none_units(other):
+            return self._rbinop_none(other, operator.floordiv)
+        return super().__rfloordiv__(other)
+    def __mod__(self, other):
+        if self._has_none_units(other):
+            return self._binop_none(other, operator.mod)
+        return super().__mod__(other)
+    def __rmod__(self, other):
+        if self._has_none_units(other):
+            return self._rbinop_none(other, operator.mod)
+        return super().__rmod__(other)
+    def __divmod__(self, other):
+        return self._divmod(other)
+    def __rdivmod__(self, other):
+        return self._divmod(other, reflected=True)
     def _binop_none(self, other, op):
         (x, y) = self._none_operands(other)
         result = op(x, y)
@@ -1010,8 +1257,7 @@ class Quantity(pint.Quantity):
                     self._is_multiplicative):
                 y = self.__class__(ym, self._units)
             elif compare and not self.dimensionless:
-                raise ValueError(
-                    f"Cannot compare PlainQuantity and {type(other)}")
+                raise _compare_units_error(self.units)
             else:
                 y = self.__class__(ym, self.UnitsContainer())
         return (x, y, promoted)
@@ -1111,7 +1357,16 @@ class Quantity(pint.Quantity):
                 return q.__eq__(v)
             elif qop is operator.ne:
                 return q.__ne__(v)
-            return q.compare(v, qop)
+            try:
+                return q.compare(v, qop)
+            except ValueError as e:
+                # Pint raises a ValueError naming its own class here ("Cannot
+                # compare PlainQuantity and <class 'numpy.ndarray'>"). The
+                # same comparison written the other way round raises a
+                # DimensionalityError, in Pint and here, as does
+                # immlib.math.maximum for the same units; this one is raised
+                # that way too rather than by operand order.
+                raise _compare_units_error(q.units) from e
         return op(x, y)
     # Pint's own `__eq__`/`__ne__` produce an elementwise result for a NumPy
     # magnitude, but for a PyTorch magnitude they misbehave: Pint's
@@ -1335,16 +1590,11 @@ class Quantity(pint.Quantity):
             if not args or not isinstance(args[0], pint.Quantity):
                 return NotImplemented
             (self, rest) = (args[0], args[1:])
-            if rest:
-                # A positional dim (torch.var(q, 0), say) isn't handled;
-                # use the dim= keyword instead.
-                return NotImplemented
-            translated = {
-                _TORCH_KWARG_TRANSLATION.get(k, k): v
-                for (k, v) in kwargs.items()}
             from ..math import _core as _immath
             fn = getattr(_immath, _TORCH_MATH_REDUCTION_FUNCS[name])
-            return fn(self, **translated)
+            # immlib.math uses PyTorch's own argument names and defaults, so
+            # the call is passed through as it was written.
+            return fn(self, *rest, **kwargs)
         elif name in _TORCH_BOOL_REDUCTION_FUNCS:
             if not args or not isinstance(args[0], pint.Quantity):
                 return NotImplemented
@@ -1599,10 +1849,14 @@ def quant(mag, /, unit=Ellipsis, *, ureg=None):
 
     ``quant(mag)`` is equivalent to ``quant(mag, Ellipsis)``. If `mag` is
     already a ``pint.Quantity`` object (of any kind, ``immlib.Quantity`` or
-    not), it is returned unchanged, in its own unit registry; a plain
-    ``pint.Quantity`` is not promoted to an ``immlib.Quantity`` by this
-    function. If `mag` is not a quantity, a unit-less (``units=None``)
-    quantity is created by default (see the ``unit=None`` note below).
+    not), it is returned unchanged, in its own unit registry: because `ureg`
+    defaults to ``None``, which requests no particular registry, a plain
+    ``pint.Quantity`` is not promoted to an ``immlib.Quantity``. Naming a
+    registry asks for one, so ``quant(mag, ureg=Ellipsis)`` returns an
+    ``immlib.Quantity`` in ``immlib.units`` whatever kind of quantity `mag`
+    is; ``immlib.ilquant`` is this function with that default. If `mag` is
+    not a quantity, a unit-less (``units=None``) quantity is created by
+    default (see the ``unit=None`` note below).
 
     .. Note:: ``unit=None`` is not equivalent to ``unit='dimensionless'``.
         ``immlib`` uses ``None`` to represent having no units at all--as
@@ -1670,9 +1924,12 @@ def quant(mag, /, unit=Ellipsis, *, ureg=None):
             # having no units at all, so we never invoke mag's own to().
             return qcls(_quant_magnitude(mag.magnitude), None)
         elif unit is Ellipsis:
-            # mag is returned exactly as given, in its own unit registry;
-            # a plain pint.Quantity is not promoted to immlib.Quantity here.
-            return mag
+            # mag keeps its own units. If the caller named a registry, the
+            # re-homing at the end of this function moves mag into it (and
+            # so promotes a plain pint.Quantity into an immlib.Quantity);
+            # if the caller named none, ureg is mag's own registry, above,
+            # and mag is returned exactly as given.
+            q = mag
         else:
             # mag.to() stays within mag's own unit registry; if the caller
             # also passed an explicit, different `ureg`, that is handled
@@ -1697,9 +1954,53 @@ def quant(mag, /, unit=Ellipsis, *, ureg=None):
         # The caller explicitly requested a different registry than the one
         # q ended up in (e.g., mag belonged to a different registry than an
         # explicitly-given ureg); re-home q into the requested registry.
+        if isinstance(q, Quantity) and q.units is None:
+            # A unit-less quantity cannot be represented outside of an
+            # immlib.UnitRegistry; moving it into a plain pint registry
+            # would silently turn "no units" into dimensionless.
+            if not issubclass(ureg.Quantity, Quantity):
+                raise ValueError(
+                    "quant: a unit-less quantity cannot be moved into a"
+                    " plain pint.UnitRegistry, which cannot represent one")
+            return ureg.Quantity(q._magnitude, None)
         return ureg.Quantity(q._magnitude, q._units)
     else:
         return q
+@docwrap(format='numpy', inheritparams=quant, inheritraises=quant)
+def ilquant(mag, /, unit=Ellipsis, *, ureg=Ellipsis):
+    """Returns an ``immlib.Quantity`` with the given magnitude and unit.
+
+    ``ilquant`` is ``immlib.quant`` with one difference: `ureg` defaults to
+    ``Ellipsis`` instead of to ``None``, so a unit registry is always
+    requested and the result is always an ``immlib.Quantity``.
+
+    The difference shows only for a `mag` that is already a quantity.
+    ``quant(q)`` requests no particular registry, so it returns `q`
+    untouched, including a plain ``pint.Quantity``; ``ilquant(q)`` requests
+    ``immlib.units``, so it returns an ``immlib.Quantity`` holding `q`'s
+    magnitude and units. For every other argument, and for a `mag` that is
+    not a quantity, the two functions are the same.
+
+    Parameters
+    ----------
+    ureg : pint.UnitRegistry, None, Ellipsis, optional
+        The ``pint.UnitRegistry`` object to use for units. If `ureg` is
+        ``Ellipsis`` (the default), then ``immlib.units`` is used. If `ureg`
+        is ``None``, then `mag`'s own unit registry is used when `mag` is
+        already a quantity, and ``immlib.units`` is used otherwise--i.e.,
+        ``ilquant(mag, ureg=None)`` is ``quant(mag)``.
+
+    Returns
+    -------
+    immlib.Quantity
+        A quantity object representing the given magnitude and unit, in the
+        requested unit registry.
+
+    See Also
+    --------
+    quant
+    """
+    return quant(mag, unit, ureg=ureg)
 def mag(obj, /, unit=Ellipsis, *, strict=False):
     """Returns the magnitude of the given object.
 

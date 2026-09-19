@@ -23,21 +23,39 @@ section 9, for the governing principles; in short:
     since Pint's own NumPy dispatch machinery does not understand immlib's
     ``None`` ("no units", as opposed to Pint's real ``dimensionless``) unit
     convention and fails outright for it;
-  * NumPy's public semantics and argument conventions (``axis``,
-    ``keepdims``, the behavior of functions like ``transpose``) are the
-    reference; where PyTorch's own same-named function differs (argument
-    names such as ``dim``/``keepdim``, differing defaults such as
-    ``std``/``var``'s degrees-of-freedom, or a differing result shape/type
-    such as ``torch.min``'s ``(values, indices)`` tuple), the PyTorch side is
-    implemented, per function, to match NumPy's behavior instead--using
-    whichever underlying PyTorch call achieves that (e.g. ``Tensor.permute``
-    for a NumPy-style ``transpose``, ``torch.amin``/``torch.amax`` rather
-    than ``torch.min``/``torch.max`` for ``min``/``max``);
-  * every magnitude computation on a tensor uses ordinary (differentiable)
-    PyTorch tensor operations directly on the tensor--never a NumPy
-    round-trip--so that gradients flow through ``immlib.math`` calls exactly
-    as they would through the equivalent raw PyTorch code, for any function
-    whose underlying operation is itself differentiable;
+
+and, governing every function here and every method of ``immlib.Quantity``,
+two rules:
+
+  * **Rule 1 (backend agreement).** A function must produce equal results
+    for a NumPy array and a PyTorch tensor that are equal; only the type of
+    the result differs, matching the type of the input. Where the two
+    libraries disagree--in a default (``torch.std``'s Bessel correction), in
+    a result shape (``torch.min``'s ``(values, indices)``), in strictness
+    (``numpy.squeeze`` raises for an axis that is not of size 1, where
+    ``torch.squeeze`` does nothing), or in the meaning of a name
+    (``numpy.transpose`` reverses every axis; ``torch.transpose`` swaps
+    two)--immlib picks one behavior and implements it for both backends.
+  * **Rule 2 (gradients).** Given a choice of implementations, immlib never
+    chooses one that breaks PyTorch's gradient tracking: every magnitude
+    computation on a tensor uses ordinary, differentiable PyTorch operations
+    directly on the tensor, never a NumPy round-trip, so that gradients flow
+    through ``immlib.math`` and through ``Quantity``'s methods exactly as
+    they would through the equivalent raw PyTorch code. The exception is a
+    function whose operation is not differentiable in any implementation
+    (the set operations, for instance), which is documented as such.
+
+  * The behavior chosen under Rule 1 is **PyTorch's**: ``immlib.math``
+    follows PyTorch's names, signatures, defaults and semantics, and the
+    NumPy backend is made to comply. PyTorch's API is generally the smaller
+    of the two, so meeting it with NumPy is a translation rather than a
+    reimplementation, and a PyTorch user's expectations hold here. Where
+    PyTorch accepts NumPy's spelling of an argument (``axis`` for ``dim``,
+    ``keepdims`` for ``keepdim``), so does immlib--uniformly, for every
+    function that has the argument, rather than reproducing the gaps in
+    PyTorch's own alias coverage. A function that exists only in NumPy is
+    provided when it is easy to implement for tensors, and documents what it
+    does with them.
   * SciPy sparse magnitudes stay sparse wherever the operation preserves
     sparsity (elementwise functions that map 0 to 0, arithmetic, reshaping,
     and 2-D concatenation); a reduction along an axis (``sum``, ``mean``,
@@ -46,16 +64,16 @@ section 9, for the governing principles; in short:
     operation whose result would be dense (e.g. ``exp``, ``cos``, or
     ``where``) raises ``TypeError`` rather than allocating a dense array
     implicitly (use ``immlib.to_dense`` first if that is what you want);
-  * a function whose NumPy and PyTorch semantics differ too materially to
-    unify (e.g. ``numpy.dot``, which behaves like matrix multiplication with
-    broadcasting for 2-D-and-higher input, versus ``torch.dot``, which is
-    restricted to a 1-D inner product) is simply not exposed here; use
-    ``immlib.math.matmul`` (backed by ``Quantity.__matmul__``) or the
-    backend's own function directly instead.
+  * a name that means different things in the two libraries takes PyTorch's
+    meaning, per Rule 1: ``equal`` is ``torch.equal``'s whole-array test,
+    not NumPy's elementwise comparison, which is spelled ``eq`` (and
+    ``not_equal``, ``less``, and the rest keep their elementwise meaning,
+    which both libraries agree on).
 """
 
 import builtins
 import operator
+from collections import namedtuple
 
 import numpy as np
 import pint
@@ -71,6 +89,49 @@ from ..util._quantity import (Quantity, quant, mag, alike_units,
 
 def _is_tensor_backed(*mags):
     return builtins.any(torch.is_tensor(m) for m in mags)
+
+#: A sentinel for a `dim` argument that the caller did not give, used by the
+#: functions whose own default for it is not ``None``.
+_UNSET = object()
+
+def _dimargs(fname, kwargs, *, dim=None, keepdim=False):
+    """Returns ``(dim, keepdim)`` after applying the NumPy spellings of those
+    arguments, ``axis`` and ``keepdims``.
+
+    PyTorch accepts both spellings for most, but not all, of the functions
+    that have these arguments; ``immlib.math`` accepts them for all of them,
+    so that there is one rule rather than a table of exceptions. Giving both
+    spellings of the same argument is an error, as is any other keyword.
+    """
+    if 'axis' in kwargs:
+        if dim is not None and dim is not _UNSET:
+            raise TypeError(
+                f"immlib.math.{fname}: 'dim' and 'axis' are the same"
+                f" argument; give only one of them")
+        dim = kwargs.pop('axis')
+    if 'keepdims' in kwargs:
+        if keepdim is not False:
+            raise TypeError(
+                f"immlib.math.{fname}: 'keepdim' and 'keepdims' are the same"
+                f" argument; give only one of them")
+        keepdim = kwargs.pop('keepdims')
+    if kwargs:
+        k = next(iter(kwargs))
+        raise TypeError(
+            f"immlib.math.{fname}: unexpected keyword argument '{k}'")
+    return (dim, keepdim)
+
+def _one_dim(fname, dim):
+    """Rejects a tuple/list `dim` for a function that reduces a single
+    dimension only. PyTorch's ``prod`` and ``cumsum`` take one dimension, so
+    (Rule 1) neither backend takes more than one here."""
+    if isinstance(dim, (tuple, list)):
+        raise TypeError(
+            f"immlib.math.{fname}: only one dimension may be reduced at a"
+            f" time (PyTorch's own {fname} does not accept several), so a"
+            f" tuple or list 'dim' is not supported for either backend;"
+            f" reduce one dimension at a time instead")
+    return dim
 
 def _require_unitless(q, fname):
     if q.units is not None:
@@ -297,9 +358,12 @@ def divide(a, b):
 
 true_divide = divide
 
-def power(a, b):
+def pow(a, b):
     """Returns ``a ** b``; see ``immlib.Quantity.__pow__``. `b` must be a
     plain number or a unit-less quantity unless `a` is itself unit-less.
+
+    This is PyTorch's name for the operation; NumPy calls it ``power``,
+    which PyTorch does not define and which is therefore not defined here.
     """
     return quant(a) ** b
 
@@ -316,7 +380,7 @@ def positive(a):
 # Each of these returns a plain NumPy array or PyTorch tensor of bool, not an
 # immlib.Quantity--see the module docstring.
 
-def equal(a, b):
+def eq(a, b):
     """Returns the elementwise result of ``a == b`` as a plain bool array or
     tensor.
 
@@ -326,11 +390,32 @@ def equal(a, b):
     compared as a bare value would be, i.e., as a dimensionless value, so it
     is unequal to a quantity with real dimensions (except that, as in Pint,
     an all-zero or NaN bare value is compared by magnitude alone).
+
+    ``eq`` is PyTorch's name for the elementwise comparison; note that
+    ``equal``, in PyTorch and here, is the whole-array test instead.
     """
     return quant(a) == quant(b)
 
+def equal(a, b):
+    """Returns whether `a` and `b` have the same shape and equal elements,
+    as a single ``bool``.
+
+    This is ``torch.equal``'s meaning rather than ``numpy.equal``'s: the
+    elementwise comparison is ``eq``. The one departure from
+    ``torch.equal`` is that a difference of dtype alone does not make two
+    otherwise-equal arguments unequal, since ``numpy`` has no such rule and
+    the two backends must agree.
+
+    Units are handled as in ``eq``, so quantities with compatible units are
+    converted before comparing and incompatible ones are simply unequal.
+    """
+    r = eq(a, b)
+    if np.shape(quant(a).m) != np.shape(quant(b).m):
+        return False
+    return builtins.bool(r.all())
+
 def not_equal(a, b):
-    """Returns the elementwise result of ``a != b``; see ``equal``."""
+    """Returns the elementwise result of ``a != b``; see ``eq``."""
     return quant(a) != quant(b)
 
 def less(a, b):
@@ -349,6 +434,17 @@ def greater(a, b):
 def greater_equal(a, b):
     """Returns the elementwise result of ``a >= b``; see ``less``."""
     return quant(a) >= quant(b)
+
+#: An alias of ``immlib.math.not_equal``, as in PyTorch.
+ne = not_equal
+#: An alias of ``immlib.math.less``, as in PyTorch.
+lt = less
+#: An alias of ``immlib.math.less_equal``, as in PyTorch.
+le = less_equal
+#: An alias of ``immlib.math.greater``, as in PyTorch.
+gt = greater
+#: An alias of ``immlib.math.greater_equal``, as in PyTorch.
+ge = greater_equal
 
 def maximum(a, b):
     """Returns the elementwise maximum of `a` and `b`.
@@ -455,6 +551,13 @@ def arctan(a):
     """Returns the elementwise arctangent of `a`; `a` must be unit-less."""
     return _unitless_elementwise('arctan', np.arctan, 'atan', a)
 
+#: An alias of ``immlib.math.arcsin``, as in PyTorch.
+asin = arcsin
+#: An alias of ``immlib.math.arccos``, as in PyTorch.
+acos = arccos
+#: An alias of ``immlib.math.arctan``, as in PyTorch.
+atan = arctan
+
 def arctan2(y, x):
     """Returns the elementwise ``arctan2(y, x)``; the units of `y` and `x`
     are aligned as in ``maximum``, and the angle result is always unit-less.
@@ -466,6 +569,9 @@ def arctan2(y, x):
     else:
         rmag = np.arctan2(my, mx)
     return quant(rmag, None)
+
+#: An alias of ``immlib.math.arctan2``, as in PyTorch.
+atan2 = arctan2
 
 def floor(a):
     """Returns the elementwise floor of `a`, preserving units."""
@@ -491,50 +597,49 @@ def ceil(a):
         rmag = np.ceil(m)
     return quant(rmag, a.units)
 
-def round(a, ndigits=0):
-    """Returns `a` elementwise-rounded to `ndigits` decimal places (default
-    0), preserving units."""
+def round(a, decimals=0):
+    """Returns `a` elementwise-rounded to `decimals` decimal places (default
+    0), preserving units. The argument is named as ``torch.round`` names it,
+    though it may be given positionally here, as in NumPy."""
     a = quant(a)
     m = a.m
     if torch.is_tensor(m):
-        rmag = torch.round(m, decimals=ndigits)
+        rmag = torch.round(m, decimals=decimals)
     elif sps.issparse(m):
         rmag = m.tocsr(copy=True)
-        rmag.data = np.round(rmag.data, decimals=ndigits)
+        rmag.data = np.round(rmag.data, decimals=decimals)
         rmag.eliminate_zeros()
     else:
-        rmag = np.round(m, decimals=ndigits)
+        rmag = np.round(m, decimals=decimals)
     return quant(rmag, a.units)
 
 
 # Reductions #####################################################################
 
-def sum(a, axis=None, keepdims=False):
-    """Returns the sum of `a`'s elements (optionally along `axis`),
+def sum(a, dim=None, keepdim=False, **kwargs):
+    """Returns the sum of `a`'s elements (optionally along `dim`),
     preserving units."""
+    (dim, keepdim) = _dimargs('sum', kwargs, dim=dim, keepdim=keepdim)
     a = quant(a)
-    rmag = _reduce_mag(np.sum, 'sum', a.m, axis, keepdims)
+    rmag = _reduce_mag(np.sum, 'sum', a.m, dim, keepdim)
     return quant(rmag, a.units)
 
-def prod(a, axis=None, keepdims=False):
-    """Returns the product of `a`'s elements (optionally along `axis`); the
+def prod(a, dim=None, keepdim=False, **kwargs):
+    """Returns the product of `a`'s elements (optionally along `dim`); the
     result's units are `a`'s units raised to the power of the number of
     elements combined into each output value (e.g. the product of 3
-    quantities in meters has units of ``m**3``). A tuple/list `axis` is
-    supported for a NumPy-backed quantity but not for a PyTorch-backed one
-    (PyTorch's own ``prod`` only reduces a single axis at a time); reduce
-    one axis at a time for a tensor-backed quantity instead.
+    quantities in meters has units of ``m**3``). Only one dimension may be
+    reduced at a time, for either backend, since PyTorch's own ``prod``
+    accepts only one.
     """
+    (dim, keepdim) = _dimargs('prod', kwargs, dim=dim, keepdim=keepdim)
+    axis = _one_dim('prod', dim)
+    keepdims = keepdim
     a = quant(a)
     m = a.m
     if sps.issparse(m):
         rmag = _sparse_reduce('prod', m, axis, keepdims)
     elif torch.is_tensor(m):
-        if isinstance(axis, (tuple, list)):
-            raise TypeError(
-                "immlib.math.prod: multi-axis reduction (axis as a tuple or"
-                " list) is not supported for tensor-backed quantities;"
-                " reduce one axis at a time instead")
         if axis is None:
             if keepdims:
                 dims = tuple(range(m.dim()))
@@ -564,70 +669,156 @@ def prod(a, axis=None, keepdims=False):
         u = a.units ** int(count)
     return quant(rmag, u)
 
-def mean(a, axis=None, keepdims=False):
-    """Returns the mean of `a`'s elements (optionally along `axis`),
+def mean(a, dim=None, keepdim=False, **kwargs):
+    """Returns the mean of `a`'s elements (optionally along `dim`),
     preserving units."""
+    (dim, keepdim) = _dimargs('mean', kwargs, dim=dim, keepdim=keepdim)
     a = quant(a)
-    rmag = _reduce_mag(np.mean, 'mean', a.m, axis, keepdims)
+    rmag = _reduce_mag(np.mean, 'mean', a.m, dim, keepdim)
     return quant(rmag, a.units)
 
-def min(a, axis=None, keepdims=False):
-    """Returns the minimum of `a`'s elements (optionally along `axis`),
-    preserving units. Unlike ``torch.min``, this always returns only the
-    value(s)--matching ``numpy.min``--never a ``(values, indices)`` tuple.
+#: The result of ``immlib.math.min`` when a dimension is given: the minimum
+#: values, as an ``immlib.Quantity``, and the index of the first minimum
+#: along that dimension, as a plain array or tensor of integers.
+min_result = namedtuple('min', ('values', 'indices'))
+#: The result of ``immlib.math.max`` when a dimension is given; see
+#: ``immlib.math.min_result``.
+max_result = namedtuple('max', ('values', 'indices'))
+
+def _minmax(fname, a, dim, keepdim, kwargs):
+    (dim, keepdim) = _dimargs(fname, kwargs, dim=dim, keepdim=keepdim)
+    amin_amax = 'amin' if fname == 'min' else 'amax'
+    argfn = np.argmin if fname == 'min' else np.argmax
+    a = quant(a)
+    if dim is None:
+        rmag = _reduce_mag(getattr(np, amin_amax), amin_amax, a.m, None,
+                           keepdim)
+        return quant(rmag, a.units)
+    dim = _one_dim(fname, dim)
+    m = a.m
+    if torch.is_tensor(m):
+        r = getattr(torch, fname)(m, dim=dim, keepdim=keepdim)
+        (vals, idcs) = (r.values, r.indices)
+    else:
+        if sps.issparse(m):
+            raise _sparse_dense_error(fname)
+        idcs = argfn(m, axis=dim)
+        vals = np.take_along_axis(m, np.expand_dims(idcs, dim), axis=dim)
+        if keepdim:
+            idcs = np.expand_dims(idcs, dim)
+        else:
+            vals = np.squeeze(vals, axis=dim)
+    cls = min_result if fname == 'min' else max_result
+    return cls(quant(vals, a.units), idcs)
+
+def min(a, dim=None, keepdim=False, **kwargs):
+    """Returns the minimum of `a`'s elements, preserving units.
+
+    ``min(a)`` returns the smallest element of `a` as an
+    ``immlib.Quantity``. ``min(a, dim)`` returns a ``(values, indices)``
+    named tuple, as ``torch.min`` does: `values` is an ``immlib.Quantity``
+    of the minima along `dim` and `indices` is a plain array or tensor
+    giving, for each of them, the index of the first minimal element along
+    `dim`.
+
+    Use ``amin`` for the values alone, and ``minimum`` for the elementwise
+    minimum of two arguments (as in PyTorch, whose own two-argument ``min``
+    is deprecated in favor of ``torch.minimum``).
     """
-    a = quant(a)
-    rmag = _reduce_mag(np.amin, 'amin', a.m, axis, keepdims)
-    return quant(rmag, a.units)
+    return _minmax('min', a, dim, keepdim, kwargs)
 
-def max(a, axis=None, keepdims=False):
-    """Returns the maximum of `a`'s elements (optionally along `axis`),
-    preserving units. See ``min``."""
-    a = quant(a)
-    rmag = _reduce_mag(np.amax, 'amax', a.m, axis, keepdims)
-    return quant(rmag, a.units)
+def max(a, dim=None, keepdim=False, **kwargs):
+    """Returns the maximum of `a`'s elements, preserving units; see
+    ``min``, whose behavior this mirrors (including the ``(values,
+    indices)`` result when `dim` is given)."""
+    return _minmax('max', a, dim, keepdim, kwargs)
 
-def any(a, axis=None, keepdims=False):
+def amin(a, dim=None, keepdim=False, **kwargs):
+    """Returns the minimum of `a`'s elements (optionally along `dim`),
+    preserving units, as an ``immlib.Quantity``--never the ``(values,
+    indices)`` tuple that ``min`` returns for a given `dim`. Unlike ``min``,
+    several dimensions may be reduced at once."""
+    (dim, keepdim) = _dimargs('amin', kwargs, dim=dim, keepdim=keepdim)
+    a = quant(a)
+    return quant(_reduce_mag(np.amin, 'amin', a.m, dim, keepdim), a.units)
+
+def amax(a, dim=None, keepdim=False, **kwargs):
+    """Returns the maximum of `a`'s elements (optionally along `dim`),
+    preserving units; see ``amin``."""
+    (dim, keepdim) = _dimargs('amax', kwargs, dim=dim, keepdim=keepdim)
+    a = quant(a)
+    return quant(_reduce_mag(np.amax, 'amax', a.m, dim, keepdim), a.units)
+
+def any(a, dim=None, keepdim=False, **kwargs):
     """Returns whether any of `a`'s elements are truthy (optionally along
-    `axis`), as a plain bool array or tensor (not an ``immlib.Quantity``)."""
+    `dim`), as a plain bool array or tensor (not an ``immlib.Quantity``)."""
+    (dim, keepdim) = _dimargs('any', kwargs, dim=dim, keepdim=keepdim)
     a = quant(a)
-    return _reduce_mag(np.any, 'any', a.m, axis, keepdims)
+    return _reduce_mag(np.any, 'any', a.m, dim, keepdim)
 
-def all(a, axis=None, keepdims=False):
+def all(a, dim=None, keepdim=False, **kwargs):
     """Returns whether all of `a`'s elements are truthy (optionally along
-    `axis`), as a plain bool array or tensor (not an ``immlib.Quantity``)."""
+    `dim`), as a plain bool array or tensor (not an ``immlib.Quantity``)."""
+    (dim, keepdim) = _dimargs('all', kwargs, dim=dim, keepdim=keepdim)
     a = quant(a)
-    return _reduce_mag(np.all, 'all', a.m, axis, keepdims)
+    return _reduce_mag(np.all, 'all', a.m, dim, keepdim)
 
-def std(a, axis=None, ddof=0, keepdims=False):
+def std(a, dim=None, keepdim=False, correction=1, **kwargs):
     """Returns the standard deviation of `a`'s elements (optionally along
-    `axis`), preserving units. `ddof` (delta degrees of freedom; default 0,
-    matching ``numpy.std``'s population-std default--note this differs from
-    ``torch.std``'s own default of a Bessel-corrected sample std) is passed
-    to PyTorch as ``correction``.
+    `dim`), preserving units.
+
+    `correction` is the difference between the number of elements and the
+    denominator's degrees of freedom, and defaults to ``1``--a
+    Bessel-corrected sample standard deviation, as in ``torch.std``. This
+    differs from ``numpy.std``, whose ``ddof`` defaults to ``0``; pass
+    ``correction=0`` for a population standard deviation. The NumPy backend
+    is given the same correction, so both backends agree.
     """
+    (dim, keepdim) = _dimargs('std', kwargs, dim=dim, keepdim=keepdim)
     a = quant(a)
-    rmag = _reduce_mag(np.std, 'std', a.m, axis, keepdims,
-                        np_kwargs={'ddof': ddof},
-                        torch_kwargs={'correction': ddof})
+    rmag = _reduce_mag(np.std, 'std', a.m, dim, keepdim,
+                        np_kwargs={'ddof': correction},
+                        torch_kwargs={'correction': correction})
     return quant(rmag, a.units)
 
-def var(a, axis=None, ddof=0, keepdims=False):
-    """Returns the variance of `a`'s elements (optionally along `axis`); the
-    result's units are `a`'s units squared. See ``std`` regarding `ddof`.
+def var(a, dim=None, keepdim=False, correction=1, **kwargs):
+    """Returns the variance of `a`'s elements (optionally along `dim`); the
+    result's units are `a`'s units squared. See ``std`` regarding
+    `correction`, which defaults to ``1`` here as it does in PyTorch.
     """
+    (dim, keepdim) = _dimargs('var', kwargs, dim=dim, keepdim=keepdim)
     a = quant(a)
-    rmag = _reduce_mag(np.var, 'var', a.m, axis, keepdims,
-                        np_kwargs={'ddof': ddof},
-                        torch_kwargs={'correction': ddof})
+    rmag = _reduce_mag(np.var, 'var', a.m, dim, keepdim,
+                        np_kwargs={'ddof': correction},
+                        torch_kwargs={'correction': correction})
     u = None if a.units is None else (a.units ** 2)
     return quant(rmag, u)
+
+def cumsum(a, dim, **kwargs):
+    """Returns the cumulative sum of `a`'s elements along `dim`, preserving
+    units. `dim` is required, as it is in ``torch.cumsum``."""
+    (dim, _) = _dimargs('cumsum', kwargs, dim=dim)
+    dim = _one_dim('cumsum', dim)
+    if dim is None:
+        raise TypeError("immlib.math.cumsum: 'dim' is required")
+    a = quant(a)
+    m = a.m
+    if torch.is_tensor(m):
+        rmag = torch.cumsum(m, dim=dim)
+    elif sps.issparse(m):
+        raise _sparse_dense_error('cumsum')
+    else:
+        rmag = np.cumsum(m, axis=dim)
+    return quant(rmag, a.units)
 
 
 # Shape / combination ############################################################
 
-def reshape(a, shape):
-    """Returns `a` reshaped to `shape`, preserving units."""
+def reshape(a, *shape):
+    """Returns `a` reshaped to `shape`, preserving units. The shape may be
+    given as a single tuple or as separate arguments."""
+    if len(shape) == 1 and isinstance(shape[0], (tuple, list)):
+        shape = tuple(shape[0])
     a = quant(a)
     m = a.m
     if torch.is_tensor(m) or sps.issparse(m):
@@ -636,50 +827,159 @@ def reshape(a, shape):
         rmag = np.reshape(m, shape)
     return quant(rmag, a.units)
 
-def transpose(a, axes=None):
-    """Returns `a` with its axes permuted according to `axes` (or fully
-    reversed, if `axes` is not given), matching ``numpy.transpose``'s
-    semantics for both backends (a PyTorch tensor is permuted via
-    ``Tensor.permute``, since ``torch.transpose`` itself only swaps a single
-    pair of axes and has no ``numpy.transpose``-style default behavior).
-    Units are preserved.
+def transpose(a, dim0, dim1):
+    """Returns `a` with the dimensions `dim0` and `dim1` exchanged,
+    preserving units.
+
+    This is ``torch.transpose``'s meaning, for both backends: it swaps two
+    dimensions and takes both of them. ``numpy.transpose``'s meaning--a full
+    permutation of the dimensions, reversing all of them by default--is
+    ``permute``. ``swapaxes`` and ``swapdims`` are aliases of this function,
+    as they are in PyTorch.
     """
     a = quant(a)
     m = a.m
     if torch.is_tensor(m):
-        if axes is None:
-            axes = tuple(reversed(range(m.dim())))
-        rmag = m.permute(*axes)
+        rmag = torch.transpose(m, dim0, dim1)
     elif sps.issparse(m):
-        rmag = m.transpose(axes)
+        rmag = m.transpose()
     else:
-        rmag = np.transpose(m, axes)
+        rmag = np.swapaxes(m, dim0, dim1)
     return quant(rmag, a.units)
 
-def squeeze(a, axis=None):
-    """Returns `a` with size-1 axes removed (all of them, or only `axis` if
-    given), preserving units."""
+#: An alias of ``immlib.math.transpose``, as in PyTorch.
+swapaxes = transpose
+#: An alias of ``immlib.math.transpose``, as in PyTorch.
+swapdims = transpose
+
+def permute(a, *dims):
+    """Returns `a` with its dimensions permuted into the order `dims`,
+    preserving units. The dimensions may be given as a single tuple or as
+    separate arguments, and giving none reverses them, as
+    ``numpy.transpose`` does.
+    """
+    if len(dims) == 1 and isinstance(dims[0], (tuple, list)):
+        dims = tuple(dims[0])
+    a = quant(a)
+    m = a.m
+    if not dims:
+        dims = tuple(reversed(range(np.ndim(m))))
+    if torch.is_tensor(m):
+        rmag = m.permute(*dims)
+    elif sps.issparse(m):
+        rmag = m.transpose(dims)
+    else:
+        rmag = np.transpose(m, dims)
+    return quant(rmag, a.units)
+
+def squeeze(a, dim=None, **kwargs):
+    """Returns `a` with size-1 dimensions removed, preserving units.
+
+    All of them are removed when `dim` is not given; otherwise only the
+    given dimension or dimensions are, and one that is not of size 1 is left
+    alone. That last part is ``torch.squeeze``'s behavior, and applies to
+    both backends: ``numpy.squeeze`` raises a ``ValueError`` instead, which
+    would make the same call succeed for a tensor and fail for an array.
+    """
+    (dim, _) = _dimargs('squeeze', kwargs, dim=dim)
+    a = quant(a)
+    m = a.m
+    if sps.issparse(m):
+        raise TypeError(
+            "immlib.math.squeeze: SciPy sparse arrays are not supported")
+    if dim is None:
+        rmag = m.squeeze() if torch.is_tensor(m) else np.squeeze(m)
+        return quant(rmag, a.units)
+    dims = dim if isinstance(dim, (tuple, list)) else (dim,)
+    ndim = np.ndim(m)
+    # Only the size-1 dimensions are dropped; the rest are left alone.
+    dims = tuple(d for d in (int(x) % ndim for x in dims)
+                 if np.shape(m)[d] == 1)
+    if torch.is_tensor(m):
+        rmag = m
+        for d in sorted(dims, reverse=True):
+            rmag = rmag.squeeze(d)
+    else:
+        rmag = np.squeeze(m, axis=dims) if dims else m
+    return quant(rmag, a.units)
+
+def unsqueeze(a, dim, **kwargs):
+    """Returns `a` with a new size-1 dimension inserted at `dim`, preserving
+    units. This is ``torch.unsqueeze``; ``numpy.expand_dims`` is the same
+    operation under another name."""
+    (dim, _) = _dimargs('unsqueeze', kwargs, dim=dim)
     a = quant(a)
     m = a.m
     if torch.is_tensor(m):
-        rmag = m.squeeze() if axis is None else m.squeeze(axis)
+        rmag = torch.unsqueeze(m, dim)
     elif sps.issparse(m):
-        raise TypeError(
-            "immlib.math.squeeze: SciPy sparse arrays are not supported")
+        raise _sparse_dense_error('unsqueeze')
     else:
-        rmag = np.squeeze(m, axis=axis)
+        rmag = np.expand_dims(m, dim)
     return quant(rmag, a.units)
 
-def stack(seq, axis=0):
+def ravel(a):
+    """Returns `a` flattened into one dimension, preserving units."""
+    a = quant(a)
+    m = a.m
+    if torch.is_tensor(m):
+        rmag = torch.ravel(m)
+    elif sps.issparse(m):
+        raise _sparse_dense_error('ravel')
+    else:
+        rmag = np.ravel(m)
+    return quant(rmag, a.units)
+
+def flatten(a, start_dim=0, end_dim=-1):
+    """Returns `a` with the dimensions from `start_dim` through `end_dim`
+    (inclusive) flattened into one, preserving units. This is
+    ``torch.flatten``, which flattens every dimension by default; see
+    ``ravel`` for the simpler always-everything form."""
+    a = quant(a)
+    m = a.m
+    if torch.is_tensor(m):
+        rmag = torch.flatten(m, start_dim, end_dim)
+    elif sps.issparse(m):
+        raise _sparse_dense_error('flatten')
+    else:
+        shape = np.shape(m)
+        ndim = len(shape)
+        s = int(start_dim) % ndim if ndim else 0
+        e = int(end_dim) % ndim if ndim else 0
+        if e < s:
+            raise ValueError(
+                "immlib.math.flatten: end_dim must not precede start_dim")
+        n = 1
+        for k in shape[s:e+1]:
+            n *= k
+        rmag = np.reshape(m, shape[:s] + (n,) + shape[e+1:])
+    return quant(rmag, a.units)
+
+def conj(a):
+    """Returns the elementwise complex conjugate of `a`, preserving units."""
+    a = quant(a)
+    m = a.m
+    if torch.is_tensor(m):
+        rmag = torch.conj(m)
+    elif sps.issparse(m):
+        rmag = m.conj()
+    else:
+        rmag = np.conj(m)
+    return quant(rmag, a.units)
+
+def stack(seq, dim=_UNSET, **kwargs):
     """Returns the quantities/arrays/tensors in `seq` stacked along a new
-    `axis`. If any element has real units, the result has the units of the
-    first such element, and all elements are converted into them (unit-less
-    elements are treated as dimensionless values, as in ``maximum``)."""
+    dimension `dim`. If any element has real units, the result has the units
+    of the first such element, and all elements are converted into them
+    (unit-less elements are treated as dimensionless values, as in
+    ``maximum``)."""
+    (dim, _) = _dimargs('stack', kwargs, dim=dim)
+    axis = 0 if dim is None or dim is _UNSET else dim
     (mags, u) = _reconcile_seq(seq, 'stack')
     if builtins.any(sps.issparse(x) for x in mags):
         raise TypeError(
             "immlib.math.stack: SciPy sparse arrays are not supported; use"
-            " concatenate for 2-D sparse arrays")
+            " cat for 2-D sparse arrays")
     if _is_tensor_backed(*mags):
         mags = promote(*mags)
         rmag = torch.stack(mags, dim=axis)
@@ -687,17 +987,20 @@ def stack(seq, axis=0):
         rmag = np.stack(mags, axis=axis)
     return quant(rmag, u)
 
-def concatenate(seq, axis=0):
+def cat(seq, dim=_UNSET, **kwargs):
     """Returns the quantities/arrays/tensors in `seq` concatenated along an
-    existing `axis`; see ``stack`` regarding units."""
-    (mags, u) = _reconcile_seq(seq, 'concatenate')
+    existing dimension `dim`; see ``stack`` regarding units.
+    ``concatenate`` and ``concat`` are aliases, as they are in PyTorch."""
+    (dim, _) = _dimargs('cat', kwargs, dim=dim)
+    axis = 0 if dim is None or dim is _UNSET else dim
+    (mags, u) = _reconcile_seq(seq, 'cat')
     if builtins.any(sps.issparse(x) for x in mags):
         if _is_tensor_backed(*mags) or axis not in (0, 1, -1, -2) or (
                 builtins.any(np.ndim(x) != 2 for x in mags)):
             raise TypeError(
-                "immlib.math.concatenate: SciPy sparse arrays can only be"
+                "immlib.math.cat: SciPy sparse arrays can only be"
                 " concatenated with other 2-D NumPy or SciPy arrays along"
-                " axis 0 or 1")
+                " dimension 0 or 1")
         combine = sps.vstack if axis in (0, -2) else sps.hstack
         rmag = combine(mags)
         return quant(rmag, u)
@@ -708,18 +1011,21 @@ def concatenate(seq, axis=0):
         rmag = np.concatenate(mags, axis=axis)
     return quant(rmag, u)
 
+#: An alias of ``immlib.math.cat``, as in PyTorch.
+concatenate = cat
+#: An alias of ``immlib.math.cat``, as in PyTorch.
+concat = cat
+
 
 # Linear algebra ##################################################################
 
 def matmul(a, b):
     """Returns ``a @ b``; see ``immlib.Quantity.__matmul__``.
 
-    ``immlib.math.dot`` is intentionally not provided: ``numpy.dot`` and
-    ``torch.dot`` have materially different semantics for anything beyond a
-    1-D inner product (``numpy.dot`` behaves like broadcasting matrix
-    multiplication for 2-D-and-higher input; ``torch.dot`` is restricted to
-    a 1-D inner product and raises for anything else), so unifying them
-    behind one name would mean silently different behavior by backend. Use
-    ``immlib.math.matmul`` (or the ``@`` operator) instead.
+    ``immlib.math.dot`` is not provided yet. When it is, it will mean what
+    ``torch.dot`` means--a 1-D inner product, raising for anything else--and
+    not what ``numpy.dot`` means, which is matrix multiplication with
+    broadcasting for 2-D-and-higher input; use ``matmul`` (or the ``@``
+    operator) for that.
     """
     return quant(a) @ quant(b)

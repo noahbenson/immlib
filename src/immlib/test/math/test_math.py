@@ -31,7 +31,7 @@ class TestMath(TestCase):
         self.assertEqual(str(r.units), 'meter / second')
         r = im.true_divide(a, il.quant(2.0, 's'))
         self.assertEqual(str(r.units), 'meter / second')
-        r = im.power(il.quant(np.array([2.0, 3.0]), 'm'), 2)
+        r = im.pow(il.quant(np.array([2.0, 3.0]), 'm'), 2)
         self.assertEqual(str(r.units), 'meter ** 2')
         self.assertTrue(np.allclose(r.m, [4.0, 9.0]))
         self.assertTrue(np.allclose(im.negative(a).m, [-1, -2, -3]))
@@ -72,7 +72,7 @@ class TestMath(TestCase):
         import numpy as np
         a = il.quant(np.array([1.0, 2.0, 3.0]), 'm')
         same = il.quant(np.array([1.0, 2.0, 3.0]), 'm')
-        r = im.equal(a, same)
+        r = im.eq(a, same)
         # Comparisons return a plain bool array/tensor, never a Quantity.
         self.assertIsInstance(r, np.ndarray)
         self.assertTrue(r.all())
@@ -88,7 +88,7 @@ class TestMath(TestCase):
         import torch
         a = il.quant(torch.tensor([1.0, 2.0, 3.0]), 'm')
         b = il.quant(torch.tensor([1.0, 2.0, 3.0]), 'm')
-        r = im.equal(a, b)
+        r = im.eq(a, b)
         self.assertTrue(torch.is_tensor(r))
         self.assertTrue(bool(r.all()))
         # Incompatible units, or a unit-less value compared with a quantity
@@ -98,16 +98,16 @@ class TestMath(TestCase):
         s = il.quant(torch.tensor([1.0, 2.0, 3.0]), 's')
         n = il.quant(torch.tensor([1.0, 2.0, 3.0]))
         for other in (s, n):
-            r = im.equal(a, other)
+            r = im.eq(a, other)
             self.assertTrue(torch.equal(r, torch.zeros(3, dtype=torch.bool)))
-            r = im.equal(other, a)
+            r = im.eq(other, a)
             self.assertTrue(torch.equal(r, torch.zeros(3, dtype=torch.bool)))
             r = im.not_equal(a, other)
             self.assertTrue(bool(r.all()))
         anp = il.quant(np.array([1.0, 2.0, 3.0]), 'm')
         for other in (il.quant(np.array([1.0, 2.0, 3.0]), 's'),
                       il.quant(np.array([1.0, 2.0, 3.0]))):
-            r = im.equal(anp, other)
+            r = im.eq(anp, other)
             self.assertTrue(np.array_equal(r, [False, False, False]))
 
     def test_maximum_minimum_where(self):
@@ -219,13 +219,25 @@ class TestMath(TestCase):
         self.assertTrue(np.allclose(im.sum(q, axis=0).m, [4, 6]))
         self.assertEqual(im.sum(q, axis=0, keepdims=True).m.shape, (1, 2))
         self.assertEqual(im.mean(q).m, 2.5)
-        self.assertTrue(np.allclose(im.min(q, axis=1).m, [1, 3]))
-        self.assertTrue(np.allclose(im.max(q, axis=1).m, [2, 4]))
+        self.assertTrue(np.allclose(im.min(q, dim=1).values.m, [1, 3]))
+        self.assertTrue(np.allclose(im.max(q, dim=1).values.m, [2, 4]))
         self.assertTrue(bool(im.any(il.quant(np.array([0, 0, 1])))))
         self.assertFalse(bool(im.all(il.quant(np.array([1, 1, 0])))))
-        self.assertTrue(np.isclose(im.std(q, ddof=0).m, np.std(q.m)))
+        self.assertTrue(np.isclose(im.std(q, correction=0).m, np.std(q.m)))
         self.assertEqual(str(im.var(q).units), 'meter ** 2')
-        self.assertTrue(np.isclose(im.var(q).m, np.var(q.m)))
+        # correction defaults to 1 (torch's default), not numpy's ddof=0.
+        self.assertTrue(np.isclose(im.var(q).m, np.var(q.m, ddof=1)))
+        self.assertTrue(np.isclose(im.var(q, correction=0).m, np.var(q.m)))
+        # min/max return (values, indices), as torch.min/torch.max do;
+        # amin/amax return the values alone.
+        r = im.min(q, dim=1)
+        self.assertTrue(np.allclose(r.values.m, [1, 3]))
+        self.assertTrue(np.array_equal(r.indices, [0, 0]))
+        self.assertTrue(np.allclose(im.amin(q, dim=1).m, [1, 3]))
+        self.assertTrue(np.allclose(im.amax(q, dim=1).m, [2, 4]))
+        # A whole-quantity min/max is just the value.
+        self.assertEqual(im.min(q).m, 1.0)
+        self.assertEqual(im.max(q).m, 4.0)
         r = im.prod(il.quant(np.array([2.0, 3.0, 4.0]), 'm'))
         self.assertEqual(str(r.units), 'meter ** 3')
         self.assertEqual(r.m, 24.0)
@@ -244,20 +256,24 @@ class TestMath(TestCase):
         self.assertTrue(torch.allclose(im.sum(q, axis=0).m, torch.tensor([4.0, 6.0])))
         self.assertEqual(tuple(im.sum(q, axis=0, keepdims=True).m.shape), (1, 2))
         self.assertEqual(tuple(im.sum(q, keepdims=True).m.shape), (1, 1))
-        # min/max must return only values (matching numpy.min/max), never
-        # torch.min/torch.max's (values, indices) tuple.
-        r = im.min(q, axis=1)
-        self.assertTrue(torch.is_tensor(r.m))
-        self.assertTrue(torch.allclose(r.m, torch.tensor([1.0, 3.0])))
-        r = im.max(q, axis=1)
-        self.assertTrue(torch.allclose(r.m, torch.tensor([2.0, 4.0])))
+        # min/max return torch's (values, indices) tuple for both backends.
+        r = im.min(q, dim=1)
+        self.assertTrue(torch.is_tensor(r.values.m))
+        self.assertTrue(torch.allclose(r.values.m, torch.tensor([1.0, 3.0])))
+        self.assertTrue(torch.equal(r.indices, torch.tensor([0, 0])))
+        r = im.max(q, dim=1)
+        self.assertTrue(torch.allclose(r.values.m, torch.tensor([2.0, 4.0])))
+        self.assertTrue(torch.is_tensor(im.amin(q, dim=1).m))
         self.assertTrue(bool(im.any(il.quant(torch.tensor([0, 0, 1])))))
         self.assertFalse(bool(im.all(il.quant(torch.tensor([1, 1, 0])))))
-        # std/var default to ddof=0 (numpy's population default), not
-        # PyTorch's own default of a Bessel-corrected (ddof=1) sample stat.
+        # std/var default to correction=1, PyTorch's own default (a
+        # Bessel-corrected sample statistic), not numpy's ddof=0.
         r = im.std(q)
-        self.assertTrue(torch.allclose(r.m, torch.std(q.m, correction=0)))
-        r = im.var(q, ddof=1)
+        self.assertTrue(torch.allclose(r.m, torch.std(q.m, correction=1)))
+        self.assertTrue(
+            torch.allclose(im.std(q, correction=0).m,
+                           torch.std(q.m, correction=0)))
+        r = im.var(q, correction=1)
         self.assertTrue(torch.allclose(r.m, torch.var(q.m, correction=1)))
         self.assertEqual(str(r.units), 'meter ** 2')
         # prod supports a single axis for tensors, but not a tuple of axes.
@@ -280,9 +296,9 @@ class TestMath(TestCase):
         r = im.reshape(q, (3, 2))
         self.assertEqual(r.m.shape, (3, 2))
         self.assertEqual(str(r.units), 'meter')
-        r = im.transpose(q)
+        r = im.permute(q)
         self.assertTrue(np.array_equal(r.m, q.m.T))
-        r = im.transpose(q, axes=(1, 0))
+        r = im.permute(q, (1, 0))
         self.assertTrue(np.array_equal(r.m, q.m.T))
         q4 = il.quant(np.array([[[1.0, 2.0]]]), 'm')
         r = im.squeeze(q4)
@@ -310,7 +326,7 @@ class TestMath(TestCase):
         import immlib.math as im
         import torch
         q = il.quant(torch.arange(6.0).reshape(2, 3), 'm')
-        r = im.transpose(q)
+        r = im.permute(q)
         # transpose must match numpy.transpose's full-axis-reversal default,
         # not torch.transpose's single-pair-swap-only behavior.
         self.assertEqual(tuple(r.m.shape), (3, 2))
@@ -374,14 +390,17 @@ class TestMath(TestCase):
         import numpy as np
         import scipy.sparse as sps
         dense = np.array([[1.0, 0.0, 2.0], [3.0, 4.0, 5.0], [0.0, 0.0, 0.0]])
-        reductions = [('sum', {}), ('mean', {}), ('min', {}), ('max', {}),
+        reductions = [('sum', {}), ('mean', {}), ('amin', {}), ('amax', {}),
                       ('any', {}), ('all', {}), ('std', {}), ('var', {}),
-                      ('std', {'ddof': 1}), ('prod', {})]
+                      ('std', {'correction': 1}), ('prod', {})]
         for fmt in (sps.csr_matrix, sps.csr_array, sps.coo_array):
             sp = il.quant(fmt(dense), 'm')
             dn = il.quant(dense, 'm')
             for (name, kw) in reductions:
-                for axis in (None, 0, 1, -1, (0, 1)):
+                # prod reduces one dimension at a time, as torch.prod does.
+                axes = (None, 0, 1, -1) if name == 'prod' else \
+                       (None, 0, 1, -1, (0, 1))
+                for axis in axes:
                     for keepdims in (False, True):
                         with self.subTest(fmt=fmt.__name__, fn=name,
                                           axis=axis, keepdims=keepdims):
@@ -419,14 +438,14 @@ class TestMath(TestCase):
                   im.sqrt(q), im.floor(q), im.ceil(q), im.round(q, 1),
                   im.maximum(q, q), im.minimum(q, q),
                   im.sin(sp), im.tan(sp), im.arcsin(sp / 10), im.arctan(sp),
-                  im.reshape(q, (3, 2)), im.transpose(q),
+                  im.reshape(q, (3, 2)), im.permute(q),
                   im.concatenate([q, q]), im.concatenate([q, q], axis=1)):
             self.assertTrue(sps.issparse(r.m))
         self.assertTrue(np.allclose(im.round(q, 1).m.toarray(),
                                     np.round(dense, 1)))
         self.assertTrue(np.allclose(im.floor(q).m.toarray(), np.floor(dense)))
         self.assertEqual(im.sqrt(q).units, il.unit('m') ** 0.5)
-        self.assertEqual(im.transpose(q).m.shape, (3, 2))
+        self.assertEqual(im.permute(q).m.shape, (3, 2))
         r = im.concatenate([q, il.quant(dense, 'cm')])
         self.assertTrue(np.allclose(r.m.toarray(),
                                     np.vstack([dense, dense / 100])))
