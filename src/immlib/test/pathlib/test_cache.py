@@ -46,6 +46,28 @@ class TestPathlibCache(TestCase):
         client = LocalS3Client(local_storage_dir=storage, local_cache_dir=cache)
         return (client, storage, cache)
 
+    def _delegates(self, p, name, *args):
+        """Asserts that ``p.<name>(*args)`` does the same thing as
+        ``Path(p.cloud_path.fspath).<name>(*args)``.
+
+        Several of CloudCachePath's methods exist only to hand the call to
+        the cached file, and several of those are not supported on every
+        platform: `group` and `owner` are implemented with the pwd and grp
+        modules, so a Path raises for them on Windows, and `lchmod` raises
+        wherever chmod cannot follow symlinks. Asserting a return value
+        would make this test a test of the platform. Asserting that the two
+        agree--including that they raise the same kind of error--is what
+        the delegation actually promises.
+        """
+        ref = Path(p.cloud_path.fspath)
+        try:
+            want = getattr(ref, name)(*args)
+        except Exception as e:
+            with self.assertRaises(type(e), msg=name):
+                getattr(p, name)(*args)
+        else:
+            self.assertEqual(getattr(p, name)(*args), want, name)
+
     def test_construction(self):
         """Tests the CloudCachePath constructor."""
         from contextlib import ExitStack
@@ -138,15 +160,22 @@ class TestPathlibCache(TestCase):
             # stat and lstat describe the cached file.
             self.assertEqual(p.stat().st_size, 5)
             self.assertEqual(p.lstat().st_size, 5)
-            # As do these.
-            self.assertIsInstance(p.group(), str)
-            self.assertIsInstance(p.owner(), str)
+            # As do these. group, owner, and lchmod are asked of the cached
+            # file, and what they do is whatever a Path does with it: on
+            # POSIX they answer, and on Windows they raise, because CPython
+            # implements them with the pwd and grp modules. The test is
+            # that the CloudCachePath and the Path agree, which is the
+            # whole promise of the delegation.
+            self._delegates(p, 'group')
+            self._delegates(p, 'owner')
+            self._delegates(p, 'lchmod', 0o644)
             self.assertEqual(Path(p.expanduser()), Path(p))
             self.assertEqual(Path(p.resolve()), Path(p).resolve())
             self.assertTrue(p.samefile(p.cloud_path.fspath))
-            # readlink raises, as it does for any ordinary file.
-            with self.assertRaises(OSError):
-                p.readlink()
+            # readlink raises, as it does for any ordinary file. Which
+            # error it is differs by platform, so this too is checked
+            # against what a Path does.
+            self._delegates(p, 'readlink')
     def test_is_dir_is_file(self):
         """Tests is_dir and is_file, which answer from the cache when the
         object has been downloaded and from the cloud when it has not."""
@@ -210,5 +239,6 @@ class TestPathlibCache(TestCase):
             # The cached file is untouched by all of that.
             self.assertEqual(p.read_text(), 'hello')
             # lchmod is the one metadata call that is not refused, since it
-            # acts on the cache entry only.
-            p.lchmod(0o644)
+            # acts on the cache entry only; it is checked in test_reading,
+            # against what a Path does with the same call, because it is not
+            # supported on every platform.
