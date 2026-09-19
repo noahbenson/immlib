@@ -1017,15 +1017,488 @@ concatenate = cat
 concat = cat
 
 
+# Sorting and order statistics ##################################################
+
+#: The result of ``immlib.math.sort``: the sorted values, as an
+#: ``immlib.Quantity``, and the index each value came from, as a plain array
+#: or tensor of integers.
+sort_result = namedtuple('sort', ('values', 'indices'))
+#: The result of ``immlib.math.median`` when a dimension is given; see
+#: ``immlib.math.sort_result``.
+median_result = namedtuple('median', ('values', 'indices'))
+
+def _signed(m):
+    """Returns `m` in a dtype that can be negated, for a descending sort."""
+    if isinstance(m, np.ndarray) and m.dtype.kind in 'ub':
+        return m.astype(np.int64)
+    return m
+
+def _sort_indices(m, dim, descending, stable):
+    """Returns the NumPy indices that sort `m` along `dim`."""
+    kind = 'stable' if stable else None
+    if descending:
+        # Negating rather than reversing keeps equal elements in their
+        # original order, as PyTorch's descending sort does.
+        return np.argsort(-_signed(m), axis=dim, kind=kind)
+    return np.argsort(m, axis=dim, kind=kind)
+
+def sort(a, dim=-1, descending=False, stable=False, **kwargs):
+    """Returns `a`'s elements sorted along `dim`, preserving units.
+
+    The result is a ``(values, indices)`` named tuple, as ``torch.sort``
+    returns: `values` is an ``immlib.Quantity`` and `indices` is a plain
+    array or tensor giving the index each value came from. Sorting is along
+    the last dimension by default, and ascending unless `descending`;
+    `stable` keeps equal elements in their original order.
+    """
+    (dim, _) = _dimargs('sort', kwargs, dim=dim)
+    dim = -1 if dim is None else dim
+    a = quant(a)
+    m = a.m
+    if sps.issparse(m):
+        raise _sparse_dense_error('sort')
+    if torch.is_tensor(m):
+        r = torch.sort(m, dim=dim, descending=descending, stable=stable)
+        (vals, idcs) = (r.values, r.indices)
+    else:
+        idcs = _sort_indices(m, dim, descending, stable)
+        vals = np.take_along_axis(m, idcs, axis=dim)
+    return sort_result(quant(vals, a.units), idcs)
+
+def argsort(a, dim=-1, descending=False, stable=False, **kwargs):
+    """Returns the indices that sort `a` along `dim`, as a plain array or
+    tensor of integers; see ``sort``."""
+    (dim, _) = _dimargs('argsort', kwargs, dim=dim)
+    dim = -1 if dim is None else dim
+    a = quant(a)
+    m = a.m
+    if sps.issparse(m):
+        raise _sparse_dense_error('argsort')
+    if torch.is_tensor(m):
+        return torch.argsort(m, dim=dim, descending=descending,
+                             stable=stable)
+    return _sort_indices(m, dim, descending, stable)
+
+def _argminmax(fname, a, dim, keepdim, kwargs):
+    (dim, keepdim) = _dimargs(fname, kwargs, dim=dim, keepdim=keepdim)
+    a = quant(a)
+    m = a.m
+    if sps.issparse(m):
+        raise _sparse_dense_error(fname)
+    if torch.is_tensor(m):
+        return getattr(torch, fname)(m, dim=dim, keepdim=keepdim)
+    r = getattr(np, fname)(m, axis=dim, keepdims=keepdim)
+    # NumPy's keepdims is ignored for a full reduction; PyTorch's is too.
+    return r
+
+def argmin(a, dim=None, keepdim=False, **kwargs):
+    """Returns the index of `a`'s smallest element, as a plain integer array
+    or tensor: the index along `dim`, or, when `dim` is not given, the index
+    into the flattened input, as in both NumPy and PyTorch."""
+    return _argminmax('argmin', a, dim, keepdim, kwargs)
+
+def argmax(a, dim=None, keepdim=False, **kwargs):
+    """Returns the index of `a`'s largest element; see ``argmin``."""
+    return _argminmax('argmax', a, dim, keepdim, kwargs)
+
+def median(a, dim=None, keepdim=False, **kwargs):
+    """Returns the median of `a`'s elements, preserving units.
+
+    ``median(a)`` returns the median element itself and ``median(a, dim)``
+    returns a ``(values, indices)`` named tuple, as ``torch.median`` does.
+
+    For an even number of elements this is the lower of the two middle
+    values--an element of `a`, which is why it has an index--rather than
+    their mean, which is what ``numpy.median`` returns. The lower value is
+    used for both backends, since one behavior must be chosen for both;
+    ``mean(sort(a).values[..., k:k+2])`` gives the interpolated median.
+    """
+    (dim, keepdim) = _dimargs('median', kwargs, dim=dim, keepdim=keepdim)
+    a = quant(a)
+    m = a.m
+    if sps.issparse(m):
+        raise _sparse_dense_error('median')
+    if torch.is_tensor(m):
+        if dim is None:
+            return quant(torch.median(m), a.units)
+        r = torch.median(m, dim=dim, keepdim=keepdim)
+        return median_result(quant(r.values, a.units), r.indices)
+    if dim is None:
+        flat = np.sort(m, axis=None)
+        return quant(flat[(flat.size - 1) // 2], a.units)
+    dim = _one_dim('median', dim)
+    order = np.argsort(m, axis=dim, kind='stable')
+    k = (m.shape[dim] - 1) // 2
+    idcs = np.take(order, k, axis=dim)
+    vals = np.take_along_axis(m, np.expand_dims(idcs, dim), axis=dim)
+    if keepdim:
+        idcs = np.expand_dims(idcs, dim)
+    else:
+        vals = np.squeeze(vals, axis=dim)
+    return median_result(quant(vals, a.units), idcs)
+
+def quantile(a, q, dim=None, keepdim=False, interpolation='linear',
+             **kwargs):
+    """Returns the `q`-th quantile of `a`'s elements, preserving units.
+
+    `q` is a fraction between 0 and 1, or several of them, and
+    `interpolation` is the rule for a quantile that falls between two
+    elements (``'linear'``, ``'lower'``, ``'higher'``, ``'nearest'`` or
+    ``'midpoint'``), as in ``torch.quantile``. See ``percentile`` for the
+    same thing on a 0-to-100 scale.
+    """
+    (dim, keepdim) = _dimargs('quantile', kwargs, dim=dim, keepdim=keepdim)
+    a = quant(a)
+    m = a.m
+    if sps.issparse(m):
+        raise _sparse_dense_error('quantile')
+    if torch.is_tensor(m):
+        qq = q if torch.is_tensor(q) else torch.as_tensor(
+            q, dtype=m.dtype, device=m.device)
+        if dim is None:
+            rmag = torch.quantile(m, qq, keepdim=keepdim,
+                                  interpolation=interpolation)
+        else:
+            rmag = torch.quantile(m, qq, dim=dim, keepdim=keepdim,
+                                  interpolation=interpolation)
+    else:
+        rmag = np.quantile(m, q, axis=dim, keepdims=keepdim,
+                           method=interpolation)
+    return quant(rmag, a.units)
+
+def percentile(a, q, dim=None, keepdim=False, interpolation='linear',
+               **kwargs):
+    """Returns the `q`-th percentile of `a`'s elements, preserving units;
+    this is ``quantile(a, q / 100)``, the scale ``numpy.percentile`` uses.
+    PyTorch has no ``percentile`` of its own."""
+    q = np.asarray(q) / 100 if not torch.is_tensor(q) else q / 100
+    return quantile(a, q, dim, keepdim, interpolation, **kwargs)
+
+def ptp(a, dim=None, keepdim=False, **kwargs):
+    """Returns the range of `a`'s elements--the largest minus the smallest,
+    "peak to peak"--preserving units.
+
+    ``numpy.ptp`` is the origin of the name; PyTorch has no equivalent, so
+    this is computed as ``amax(a, dim) - amin(a, dim)`` for both backends,
+    which keeps a tensor's gradient tracking.
+    """
+    (dim, keepdim) = _dimargs('ptp', kwargs, dim=dim, keepdim=keepdim)
+    return amax(a, dim, keepdim) - amin(a, dim, keepdim)
+
+def average(a, dim=None, weights=None, keepdim=False, **kwargs):
+    """Returns the weighted mean of `a`'s elements, preserving units.
+
+    With no `weights` this is ``mean``. With them it is ``sum(a * weights,
+    dim) / sum(weights, dim)``, computed that way for both backends, so a
+    tensor keeps its gradient tracking. ``numpy.average`` is the origin of
+    the name; PyTorch has no equivalent.
+
+    The weights must be unit-less (their units would cancel in any case),
+    and must broadcast against `a`.
+    """
+    (dim, keepdim) = _dimargs('average', kwargs, dim=dim, keepdim=keepdim)
+    if weights is None:
+        return mean(a, dim, keepdim)
+    a = quant(a)
+    w = quant(weights)
+    _require_unitless(w, 'average')
+    # The weights are summed over the same elements as the values are, so
+    # weights of a broadcastable shape are broadcast to `a`'s shape first.
+    (am, wm) = (a.m, w.m)
+    if np.shape(wm) != np.shape(am):
+        if torch.is_tensor(am) or torch.is_tensor(wm):
+            (am, wm) = promote(am, wm)
+            wm = torch.broadcast_to(wm, am.shape)
+        else:
+            wm = np.broadcast_to(wm, np.shape(am))
+        w = quant(wm)
+    total = sum(multiply(a, w), dim, keepdim)
+    norm = sum(w, dim, keepdim)
+    return divide(total, norm)
+
+
+# Set operations ################################################################
+# These are NumPy's; PyTorch has no equivalent for most of them, and none of
+# them is differentiable in any implementation (their results are drawn from
+# their inputs by comparison, not computed from them), so a tensor magnitude
+# is detached and handed to NumPy, and the result is returned as a tensor on
+# the same device. See the module docstring's Rule 2.
+
+def _setop_mags(fname, a, b=None):
+    """Returns ``(mags, units, like)`` for a set operation: the magnitudes as
+    NumPy arrays, the units of the result, and the magnitude whose backend
+    the result must be returned in."""
+    if b is None:
+        a = quant(a)
+        (mags, u) = ([a.m], a.units)
+    else:
+        (ma, mb, u) = _align_units(a, b, fname)
+        mags = [ma, mb]
+    like = next((m for m in mags if torch.is_tensor(m)), None)
+    out = []
+    for m in mags:
+        if sps.issparse(m):
+            raise _sparse_dense_error(fname)
+        out.append(m.detach().cpu().numpy() if torch.is_tensor(m)
+                   else np.asarray(m))
+    return (out, u, like)
+
+def _setop_result(r, u, like):
+    """Returns the result `r` of a set operation in `like`'s backend."""
+    if like is not None:
+        r = torch.as_tensor(r, device=like.device)
+    return r if u is Ellipsis else quant(r, u)
+
+def unique(a, sorted=True, return_inverse=False, return_counts=False,
+           dim=None, **kwargs):
+    """Returns `a`'s distinct elements in order, preserving units.
+
+    ``return_inverse`` and ``return_counts`` add the index of each input
+    element among the distinct ones, and the number of times each distinct
+    element occurs, as plain arrays or tensors; the result is then a tuple.
+    `sorted` is accepted for ``torch.unique``'s sake and is always true, as
+    it is in ``numpy.unique``.
+
+    This is not differentiable in either backend: a tensor is detached, and
+    the result carries no gradient.
+    """
+    (dim, _) = _dimargs('unique', kwargs, dim=dim)
+    ((m,), u, like) = _setop_mags('unique', a)
+    r = np.unique(m, return_inverse=return_inverse,
+                  return_counts=return_counts, axis=dim)
+    if not (return_inverse or return_counts):
+        return _setop_result(r, u, like)
+    return (_setop_result(r[0], u, like),
+            *(_setop_result(x, Ellipsis, like) for x in r[1:]))
+
+def union1d(a, b):
+    """Returns the sorted, distinct elements of `a` and `b` together, in the
+    units of the first argument that has them; see ``unique`` regarding
+    gradients."""
+    (mags, u, like) = _setop_mags('union1d', a, b)
+    return _setop_result(np.union1d(*mags), u, like)
+
+def intersect1d(a, b, assume_unique=False):
+    """Returns the sorted, distinct elements common to `a` and `b`, in the
+    units of the first argument that has them; see ``unique`` regarding
+    gradients."""
+    (mags, u, like) = _setop_mags('intersect1d', a, b)
+    return _setop_result(
+        np.intersect1d(*mags, assume_unique=assume_unique), u, like)
+
+def setdiff1d(a, b, assume_unique=False):
+    """Returns the sorted, distinct elements of `a` that are not in `b`, in
+    the units of the first argument that has them; see ``unique`` regarding
+    gradients."""
+    (mags, u, like) = _setop_mags('setdiff1d', a, b)
+    return _setop_result(
+        np.setdiff1d(*mags, assume_unique=assume_unique), u, like)
+
+def setxor1d(a, b, assume_unique=False):
+    """Returns the sorted, distinct elements of exactly one of `a` and `b`,
+    in the units of the first argument that has them; see ``unique``
+    regarding gradients."""
+    (mags, u, like) = _setop_mags('setxor1d', a, b)
+    return _setop_result(
+        np.setxor1d(*mags, assume_unique=assume_unique), u, like)
+
+def isin(elements, test_elements, assume_unique=False, invert=False):
+    """Returns, for each element of `elements`, whether it occurs in
+    `test_elements`, as a plain bool array or tensor of `elements`' shape.
+    The two are unit-aligned as in ``maximum``; see ``unique`` regarding
+    gradients."""
+    (mags, _u, like) = _setop_mags('isin', elements, test_elements)
+    r = np.isin(*mags, assume_unique=assume_unique, invert=invert)
+    return _setop_result(r, Ellipsis, like)
+
+
+# Indexing and rearrangement ####################################################
+
+def _index_mag(m, index, fname):
+    """Returns `index` as an integer array or tensor in `m`'s backend."""
+    if isinstance(index, pint.Quantity):
+        if index.units is not None:
+            raise TypeError(
+                f"immlib.math.{fname}: an index must be unit-less; got units"
+                f" {index.units}")
+        index = index.m
+    if torch.is_tensor(m):
+        if not torch.is_tensor(index):
+            index = torch.as_tensor(np.asarray(index), device=m.device)
+        return index.long()
+    if torch.is_tensor(index):
+        index = index.detach().cpu().numpy()
+    return np.asarray(index)
+
+def gather(a, dim, index, **kwargs):
+    """Returns the elements of `a` at `index` along `dim`, preserving units:
+    the result has `index`'s shape, and its element at position ``(i, j)``
+    is ``a[index[i, j], j]`` for ``dim=0``. This is ``torch.gather``;
+    ``numpy.take_along_axis`` is the same operation."""
+    (dim, _) = _dimargs('gather', kwargs, dim=dim)
+    a = quant(a)
+    m = a.m
+    if sps.issparse(m):
+        raise _sparse_dense_error('gather')
+    idx = _index_mag(m, index, 'gather')
+    if torch.is_tensor(m):
+        rmag = torch.gather(m, dim, idx)
+    else:
+        rmag = np.take_along_axis(m, idx, axis=dim)
+    return quant(rmag, a.units)
+
+def index_select(a, dim, index, **kwargs):
+    """Returns the slices of `a` along `dim` at the entries of the 1-D
+    `index`, preserving units. This is ``torch.index_select``;
+    ``numpy.take`` with an axis is the same operation."""
+    (dim, _) = _dimargs('index_select', kwargs, dim=dim)
+    a = quant(a)
+    m = a.m
+    if sps.issparse(m):
+        raise _sparse_dense_error('index_select')
+    idx = _index_mag(m, index, 'index_select')
+    if torch.is_tensor(m):
+        rmag = torch.index_select(m, dim, idx)
+    else:
+        rmag = np.take(m, idx, axis=dim)
+    return quant(rmag, a.units)
+
+def take(a, index):
+    """Returns the elements of `a` at the entries of `index`, which are
+    indices into `a` flattened, preserving units. The result has `index`'s
+    shape. This is ``torch.take`` and ``numpy.take`` without an axis."""
+    a = quant(a)
+    m = a.m
+    if sps.issparse(m):
+        raise _sparse_dense_error('take')
+    idx = _index_mag(m, index, 'take')
+    rmag = torch.take(m, idx) if torch.is_tensor(m) else np.take(m, idx)
+    return quant(rmag, a.units)
+
+def masked_select(a, mask):
+    """Returns the elements of `a` where `mask` is true, as a 1-D quantity
+    in `a`'s units. This is ``torch.masked_select``; indexing an array with
+    a boolean array of the same shape is the same operation."""
+    a = quant(a)
+    m = a.m
+    if sps.issparse(m):
+        raise _sparse_dense_error('masked_select')
+    msk = mask.m if isinstance(mask, pint.Quantity) else mask
+    if torch.is_tensor(m):
+        if not torch.is_tensor(msk):
+            msk = torch.as_tensor(np.asarray(msk), device=m.device)
+        rmag = torch.masked_select(m, msk.bool())
+    else:
+        if torch.is_tensor(msk):
+            msk = msk.detach().cpu().numpy()
+        rmag = m[np.asarray(msk).astype(bool)]
+    return quant(rmag, a.units)
+
+def flip(a, dims=None, **kwargs):
+    """Returns `a` with the order of its elements reversed along `dims` (or
+    along every dimension, if `dims` is not given), preserving units."""
+    (dims, _) = _dimargs('flip', kwargs, dim=dims)
+    a = quant(a)
+    m = a.m
+    if sps.issparse(m):
+        raise _sparse_dense_error('flip')
+    if dims is None:
+        dims = tuple(range(np.ndim(m)))
+    elif not isinstance(dims, (tuple, list)):
+        dims = (dims,)
+    if torch.is_tensor(m):
+        rmag = torch.flip(m, tuple(dims))
+    else:
+        rmag = np.flip(m, axis=tuple(dims))
+    return quant(rmag, a.units)
+
+def roll(a, shifts, dims=None, **kwargs):
+    """Returns `a` with its elements shifted by `shifts` along `dims`,
+    wrapping around, and preserving units. With no `dims`, `a` is flattened,
+    shifted and restored to its shape, as in both libraries."""
+    (dims, _) = _dimargs('roll', kwargs, dim=dims)
+    a = quant(a)
+    m = a.m
+    if sps.issparse(m):
+        raise _sparse_dense_error('roll')
+    if torch.is_tensor(m):
+        sh = tuple(shifts) if isinstance(shifts, (tuple, list)) else shifts
+        if dims is None:
+            rmag = torch.roll(m, sh)
+        else:
+            dd = tuple(dims) if isinstance(dims, (tuple, list)) else dims
+            rmag = torch.roll(m, sh, dd)
+    else:
+        rmag = np.roll(m, shifts, axis=dims)
+    return quant(rmag, a.units)
+
+def repeat_interleave(a, repeats, dim=None, **kwargs):
+    """Returns `a` with each of its elements repeated `repeats` times along
+    `dim`, preserving units; with no `dim`, `a` is flattened first. This is
+    ``torch.repeat_interleave``; ``numpy.repeat`` is the same operation.
+    (``numpy.ndarray.repeat``'s meaning, tiling the whole array, is
+    ``tile``.)"""
+    (dim, _) = _dimargs('repeat_interleave', kwargs, dim=dim)
+    a = quant(a)
+    m = a.m
+    if sps.issparse(m):
+        raise _sparse_dense_error('repeat_interleave')
+    if torch.is_tensor(m):
+        reps = repeats
+        if not isinstance(reps, int) and not torch.is_tensor(reps):
+            reps = torch.as_tensor(np.asarray(reps), device=m.device)
+        rmag = torch.repeat_interleave(m, reps, dim=dim)
+    else:
+        if torch.is_tensor(repeats):
+            repeats = repeats.detach().cpu().numpy()
+        rmag = np.repeat(m, repeats, axis=dim)
+    return quant(rmag, a.units)
+
+def tile(a, dims):
+    """Returns `a` tiled `dims` times along each dimension, preserving
+    units. This is ``torch.tile`` and ``numpy.tile``."""
+    a = quant(a)
+    m = a.m
+    if sps.issparse(m):
+        raise _sparse_dense_error('tile')
+    dd = tuple(dims) if isinstance(dims, (tuple, list)) else (dims,)
+    rmag = torch.tile(m, dd) if torch.is_tensor(m) else np.tile(m, dd)
+    return quant(rmag, a.units)
+
+
 # Linear algebra ##################################################################
 
 def matmul(a, b):
     """Returns ``a @ b``; see ``immlib.Quantity.__matmul__``.
 
-    ``immlib.math.dot`` is not provided yet. When it is, it will mean what
-    ``torch.dot`` means--a 1-D inner product, raising for anything else--and
-    not what ``numpy.dot`` means, which is matrix multiplication with
-    broadcasting for 2-D-and-higher input; use ``matmul`` (or the ``@``
-    operator) for that.
+    See ``dot`` for the 1-D inner product.
     """
     return quant(a) @ quant(b)
+
+def dot(a, b):
+    """Returns the inner product of the 1-dimensional `a` and `b`; the
+    result's units are the product of theirs.
+
+    This is ``torch.dot``'s meaning, for both backends: both arguments must
+    be 1-dimensional, and anything else is an error. ``numpy.dot`` instead
+    behaves like matrix multiplication with broadcasting for 2-dimensional
+    and higher input, which is ``matmul`` (or the ``@`` operator) here. The
+    two libraries would otherwise disagree about the same call, so immlib
+    takes the narrower meaning and leaves the wider one to ``matmul``.
+    """
+    a = quant(a)
+    b = quant(b)
+    (ma, mb) = (a.m, b.m)
+    if np.ndim(ma) != 1 or np.ndim(mb) != 1:
+        raise ValueError(
+            f"immlib.math.dot: both arguments must be 1-dimensional (got"
+            f" {np.ndim(ma)} and {np.ndim(mb)} dimensions); use"
+            f" immlib.math.matmul, or the @ operator, for matrix"
+            f" multiplication")
+    # The lengths are checked here rather than by the backend, which would
+    # raise a ValueError for an array and a RuntimeError for a tensor.
+    if np.shape(ma) != np.shape(mb):
+        raise ValueError(
+            f"immlib.math.dot: both arguments must have the same length"
+            f" (got {np.shape(ma)[0]} and {np.shape(mb)[0]})")
+    return a @ b

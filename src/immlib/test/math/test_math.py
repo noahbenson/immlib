@@ -366,10 +366,17 @@ class TestMath(TestCase):
             il.quant(np.eye(2), 'm'), il.quant(np.array([[1.0], [2.0]]), 's'))
         self.assertEqual(str(r.units), 'meter * second')
         self.assertTrue(np.allclose(r.m, [[1], [2]]))
-        # immlib.math.dot is intentionally not provided (np.dot and
-        # torch.dot have materially different N-D semantics); matmul is the
-        # supported replacement.
-        self.assertFalse(hasattr(im, 'dot'))
+        # immlib.math.dot means what torch.dot means: a 1-D inner product,
+        # and an error for anything else. numpy.dot's wider meaning, matrix
+        # multiplication with broadcasting, is matmul.
+        v = il.quant(np.array([1.0, 2.0, 3.0]), 'm')
+        r = im.dot(v, v)
+        self.assertEqual(str(r.units), 'meter ** 2')
+        self.assertEqual(float(r.m), 14.0)
+        with self.assertRaises(ValueError):
+            im.dot(il.quant(np.eye(2), 'm'), il.quant(np.eye(2), 'm'))
+        with self.assertRaises(ValueError):
+            im.dot(v, il.quant(np.array([1.0, 2.0]), 'm'))
 
     def test_matmul_tensor_grad(self):
         import immlib as il
@@ -494,3 +501,104 @@ class TestMath(TestCase):
         self.assertIs(q.as_input_type(np.ones(2), il.quant(1.0)), q)
         self.assertIs(q.as_input_type(), q.m)
         self.assertIs(q.as_input_type(np.ones(2), 5), q.m)
+
+    def test_order_statistics(self):
+        """sort, argsort, median, quantile, percentile, ptp and average."""
+        import immlib as il
+        import immlib.math as im
+        import numpy as np
+        a = il.quant(np.array([[3.0, 1.0, 2.0], [6.0, 5.0, 4.0]]), 'm')
+        v = il.quant(np.array([1.0, 2.0, 3.0, 4.0]), 'm')
+        # sort returns (values, indices), as torch.sort does.
+        r = im.sort(a, 1)
+        self.assertTrue(np.allclose(r.values.m, [[1, 2, 3], [4, 5, 6]]))
+        self.assertTrue(np.array_equal(r.indices, [[1, 2, 0], [2, 1, 0]]))
+        self.assertEqual(r.values.units, a.units)
+        r = im.sort(a, 1, descending=True)
+        self.assertTrue(np.allclose(r.values.m, [[3, 2, 1], [6, 5, 4]]))
+        self.assertTrue(np.array_equal(im.argsort(a, 1), [[1, 2, 0],
+                                                          [2, 1, 0]]))
+        # argmin/argmax give a flat index when no dimension is given.
+        self.assertEqual(int(im.argmin(a)), 1)
+        self.assertTrue(np.array_equal(im.argmax(a, 1), [0, 0]))
+        # The median is the lower of the two middle values (torch.median's
+        # rule), not numpy.median's interpolated 2.5.
+        self.assertEqual(float(im.median(v).m), 2.0)
+        self.assertEqual(im.median(v).units, v.units)
+        r = im.median(a, 1)
+        self.assertTrue(np.allclose(r.values.m, [2.0, 5.0]))
+        self.assertTrue(np.array_equal(r.indices, [2, 1]))
+        # quantile and percentile are the same scale apart.
+        self.assertTrue(np.isclose(float(im.quantile(v, 0.25).m), 1.75))
+        self.assertTrue(np.isclose(float(im.percentile(v, 25).m), 1.75))
+        self.assertEqual(im.quantile(v, 0.25).units, v.units)
+        # ptp is the range; average is the weighted mean.
+        self.assertEqual(float(im.ptp(a).m), 5.0)
+        self.assertTrue(np.allclose(im.ptp(a, 1).m, [2.0, 2.0]))
+        self.assertEqual(im.ptp(a).units, a.units)
+        self.assertEqual(float(im.average(a).m), 3.5)
+        w = np.array([1.0, 2.0, 3.0])
+        self.assertTrue(
+            np.allclose(im.average(a, 1, weights=w).m,
+                        np.average(a.m, axis=1, weights=w)))
+        # The weights must be unit-less.
+        with self.assertRaises(TypeError):
+            im.average(a, 1, weights=il.quant(w, 's'))
+
+    def test_set_operations(self):
+        """unique and the set operations, including their units."""
+        import immlib as il
+        import immlib.math as im
+        import numpy as np
+        a = il.quant(np.array([3.0, 1.0, 2.0, 1.0]), 'm')
+        b = il.quant(np.array([200.0, 400.0]), 'cm')
+        self.assertTrue(np.allclose(im.unique(a).m, [1.0, 2.0, 3.0]))
+        self.assertEqual(im.unique(a).units, a.units)
+        (vals, counts) = im.unique(a, return_counts=True)
+        self.assertTrue(np.array_equal(counts, [2, 1, 1]))
+        self.assertFalse(isinstance(counts, il.Quantity))
+        # The second argument is converted into the first's units.
+        self.assertTrue(np.allclose(im.union1d(a, b).m, [1, 2, 3, 4]))
+        self.assertEqual(im.union1d(a, b).units, a.units)
+        self.assertTrue(np.allclose(im.intersect1d(a, b).m, [2.0]))
+        self.assertTrue(np.allclose(im.setdiff1d(a, b).m, [1.0, 3.0]))
+        self.assertTrue(np.allclose(im.setxor1d(a, b).m, [1.0, 3.0, 4.0]))
+        self.assertTrue(np.array_equal(im.isin(a, b),
+                                       [False, False, True, False]))
+        # Incompatible units are an error, as in maximum.
+        import pint
+        with self.assertRaises(pint.DimensionalityError):
+            im.union1d(a, il.quant(np.array([1.0]), 's'))
+
+    def test_indexing_functions(self):
+        """gather, index_select, take, masked_select, flip, roll,
+        repeat_interleave and tile."""
+        import immlib as il
+        import immlib.math as im
+        import numpy as np
+        a = il.quant(np.array([[3.0, 1.0, 2.0], [6.0, 5.0, 4.0]]), 'm')
+        self.assertTrue(
+            np.allclose(im.gather(a, 1, [[0, 2], [1, 0]]).m,
+                        [[3.0, 2.0], [5.0, 6.0]]))
+        self.assertTrue(
+            np.allclose(im.index_select(a, 1, [0, 2]).m,
+                        [[3.0, 2.0], [6.0, 4.0]]))
+        self.assertTrue(np.allclose(im.take(a, [0, 4]).m, [3.0, 5.0]))
+        mask = im.greater(a, il.quant(2.0, 'm'))
+        self.assertTrue(
+            np.allclose(im.masked_select(a, mask).m, [3.0, 6.0, 5.0, 4.0]))
+        self.assertTrue(
+            np.allclose(im.flip(a, 1).m, [[2.0, 1.0, 3.0], [4.0, 5.0, 6.0]]))
+        self.assertTrue(
+            np.allclose(im.roll(a, 1, 1).m, [[2.0, 3.0, 1.0],
+                                             [4.0, 6.0, 5.0]]))
+        self.assertTrue(
+            np.allclose(im.repeat_interleave(a, 2, 1).m,
+                        np.repeat(a.m, 2, axis=1)))
+        self.assertTrue(np.allclose(im.tile(a, (1, 2)).m, np.tile(a.m, (1, 2))))
+        # Units are preserved throughout, and an index must be unit-less.
+        for r in (im.gather(a, 1, [[0], [1]]), im.take(a, [0]),
+                  im.flip(a, 1), im.tile(a, (1, 2))):
+            self.assertEqual(r.units, a.units)
+        with self.assertRaises(TypeError):
+            im.take(a, il.quant(np.array([0]), 'm'))

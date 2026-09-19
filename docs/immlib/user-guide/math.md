@@ -266,9 +266,77 @@ im.stack([il.quant([1.0, 2.0], 'm'), il.quant([300.0, 400.0], 'cm')])
 ```
 
 
+## Sorting and Order Statistics
+
+`sort` returns a `(values, indices)` named tuple, as `torch.sort` does;
+`argsort` returns the indices alone, and `argmin`/`argmax` the index of the
+single smallest or largest element (an index into the flattened input when
+no dimension is given).
+
+```{code-cell}
+im.sort(il.quant([[3.0, 1.0, 2.0]], 'm'), dim=1)
+```
+
+`median` follows `torch.median`: for an even number of elements it is the
+*lower* of the two middle values, an element of the input rather than the
+mean of two, which is why it has an index to return. `numpy.median`
+interpolates instead, and one behavior has to hold for both backends.
+
+`quantile` and `percentile` are the same function on the 0-to-1 and 0-to-100
+scales. `ptp` is the range, largest minus smallest, and `average` is the
+weighted mean; NumPy has these two and PyTorch does not, so they are
+computed from `amax`/`amin` and from `sum` for both backends, which keeps a
+tensor's gradient tracking.
+
+```{code-cell}
+im.average(il.quant([1.0, 2.0, 3.0], 'm'), weights=[1.0, 1.0, 4.0])
+```
+
+
+## Set Operations
+
+`unique`, `union1d`, `intersect1d`, `setdiff1d`, `setxor1d` and `isin` are
+NumPy's; PyTorch has no equivalent for most of them. Units are handled as in
+`maximum`: the result takes the units of the first argument that has them
+and the other is converted into them.
+
+```{code-cell}
+im.union1d(il.quant([3.0, 1.0, 2.0], 'm'), il.quant([200.0], 'cm'))
+```
+
+```{important}
+These are the one group that does not keep a tensor's gradient tracking, and
+cannot: their results are *selected* from their inputs by comparison rather
+than computed from them, so there is no gradient to propagate in any
+implementation. A tensor magnitude is detached and handed to NumPy, and the
+result comes back as a tensor on the same device.
+```
+
+
+## Indexing and Rearrangement
+
+`gather`, `index_select`, `take`, `masked_select`, `flip`, `roll`,
+`repeat_interleave` and `tile` all take PyTorch's arguments and preserve
+units. `repeat_interleave` is the one whose name is worth care:
+`numpy.repeat` is this function, while `numpy.ndarray.repeat`'s meaning,
+tiling the whole array, is `tile`.
+
+```{code-cell}
+im.gather(il.quant([[3.0, 1.0, 2.0], [6.0, 5.0, 4.0]], 'm'),
+          1, [[0, 2], [1, 0]])
+```
+
+
 ## Linear Algebra
 
 `matmul(a, b)` is exactly `a @ b`, including its tensor-safe handling for
 PyTorch magnitudes (in particular, it never risks silently converting a
-gradient-tracking PyTorch tensor to NumPy). There is no `dot` function; see
-[Design Principles](#design-principles) above for why.
+gradient-tracking PyTorch tensor to NumPy).
+
+`dot(a, b)` is the inner product of two 1-dimensional arguments, which is
+what `torch.dot` means; anything else is an error. `numpy.dot`'s wider
+meaning, matrix multiplication with broadcasting, is `matmul`.
+
+```{code-cell}
+im.dot(il.quant([1.0, 2.0, 3.0], 'm'), il.quant([1.0, 1.0, 1.0], 's'))
+```

@@ -89,6 +89,46 @@ UNARY_CALLS = [
     ('ravel', (), {}, 'mm'),
     ('flatten', (), {}, 'mm'),
     ('flatten', (0, 1), {}, 'mm'),
+    # Sorting and order statistics.
+    ('sort', (), {}, 'mm'),
+    ('sort', (1,), {}, 'mm'),
+    ('sort', (), {'descending': True, 'stable': True}, 'mm'),
+    ('argsort', (1,), {}, 'mm'),
+    ('argmin', (), {}, 'mm'),
+    ('argmax', (1,), {}, 'mm'),
+    ('median', (), {}, 'mm'),
+    ('median', (1,), {}, 'mm'),
+    ('median', (), {'dim': 0, 'keepdim': True}, 'mm'),
+    ('quantile', (0.25,), {}, 'mm'),
+    ('quantile', (0.5, 1), {}, 'mm'),
+    ('percentile', (25,), {}, 'mm'),
+    ('ptp', (), {}, 'mm'),
+    ('ptp', (1,), {}, 'mm'),
+    ('average', (), {}, 'mm'),
+    ('average', (1,), {}, 'mm'),
+    # Set operations.
+    ('unique', (), {}, 'mm'),
+    ('unique', (), {'return_counts': True}, 'mm'),
+    ('unique', (), {'return_inverse': True}, 'mm'),
+    # Indexing and rearrangement.
+    ('gather', (1, [[0, 2], [1, 0]]), {}, 'mm'),
+    ('index_select', (1, [0, 2]), {}, 'mm'),
+    ('take', ([0, 4],), {}, 'mm'),
+    ('flip', (), {}, 'mm'),
+    ('flip', (1,), {}, 'mm'),
+    ('roll', (1,), {}, 'mm'),
+    ('roll', (1, 1), {}, 'mm'),
+    ('repeat_interleave', (2,), {}, 'mm'),
+    ('repeat_interleave', (2, 1), {}, 'mm'),
+    ('tile', ((1, 2),), {}, 'mm'),
+]
+
+# Calls whose second argument is a quantity of the same kind as the first,
+# beyond the elementwise binary functions: (name, args-after-both, units).
+PAIR_CALLS = [
+    ('union1d', 'mm'), ('intersect1d', 'mm'), ('setdiff1d', 'mm'),
+    ('setxor1d', 'mm'), ('isin', 'mm'), ('masked_select', 'mm'),
+    ('dot', 'mm'),
 ]
 
 BINARY_CALLS = [
@@ -249,6 +289,24 @@ class TestRules(TestCase):
                                   self._call(fn, a, a),
                                   self._call(fn, b, b))
 
+    def test_rule1_math_pairs(self):
+        """The set operations and the other two-quantity calls agree across
+        the backends. Each is given a 1-D quantity and an overlapping part
+        of it, so that the results are not trivially empty or everything.
+        """
+        for (name, units) in PAIR_CALLS:
+            with self.subTest(fn=name):
+                fn = getattr(im, name)
+                (a, b) = self._quants(units)
+                def call(q):
+                    v = im.ravel(q)
+                    other = v[:3]
+                    if name == 'masked_select':
+                        other = im.greater(v, quant(2.0, units))
+                    return fn(v, other)
+                self._assert_same(f"im.{name}",
+                                  self._call(call, a), self._call(call, b))
+
     def test_rule1_math_sequence(self):
         "stack/cat agree across the backends."
         for name in ('stack', 'cat', 'concatenate', 'concat'):
@@ -310,9 +368,14 @@ class TestRules(TestCase):
     # Rule 2 -------------------------------------------------------------
     def test_rule2_math(self):
         "immlib.math keeps a tensor's gradient tracking."
+        # The comparisons and the roundings have no gradient of their own,
+        # and the set operations are documented as not differentiable in
+        # either backend (see the module docstring's Rule 2).
         skip = ('floor', 'ceil', 'round', 'any', 'all', 'eq', 'equal',
                 'not_equal', 'less', 'less_equal', 'greater',
-                'greater_equal')
+                'greater_equal', 'unique', 'union1d', 'intersect1d',
+                'setdiff1d', 'setxor1d', 'isin', 'argmin', 'argmax',
+                'argsort')
         for (name, args, kwargs, units) in UNARY_CALLS:
             if name in skip:
                 continue
@@ -383,11 +446,12 @@ class TestRules(TestCase):
         that a function added later is not silently left untested."""
         covered = {name for (name, _, _, _) in UNARY_CALLS}
         covered |= {name for (name, _) in BINARY_CALLS}
+        covered |= {name for (name, _) in PAIR_CALLS}
         covered |= {'stack', 'cat', 'concatenate', 'concat'}
         # Functions tested elsewhere, or not of the shape tested here.
         covered |= {'quant', 'ilquant', 'mag', 'promote', 'to_array',
                     'to_tensor', 'matmul', 'where', 'min_result',
-                    'max_result'}
+                    'max_result', 'sort_result', 'median_result'}
         # Aliases of a covered function are covered by it.
         aliases = {'swapaxes': 'transpose', 'swapdims': 'transpose',
                    'acos': 'arccos', 'atan': 'arctan', 'atan2': 'arctan2',
