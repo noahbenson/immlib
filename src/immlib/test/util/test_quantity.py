@@ -1537,3 +1537,212 @@ class TestUtilQuantity(TestCase):
         g.persist()
         (g * g).sum().m.backward()
         self.assertTrue(np.allclose(g.m.grad.numpy(), np.array([2.0, 4.0])))
+    def test_quantity_inplace_floordiv_mod(self):
+        """Tests the in-place //= and %= operators on mutable quantities.
+
+        These have three paths: a unit-less operand, a 0-dimensional
+        magnitude (which quant stores as a 0-d array, and which Pint's own
+        in-place code cannot handle), and everything else, which Pint
+        handles.
+        """
+        import numpy as np, torch, pint
+        from immlib import quant
+        # A unit-less quantity divides and takes remainders like its own
+        # magnitude, and does it in place.
+        for mk in (lambda: quant(np.array([5.0, 7.0])),
+                   lambda: quant(torch.tensor([5.0, 7.0]))):
+            q = mk()
+            r = q
+            r //= 2
+            self.assertIs(r, q)
+            self.assertIsNone(r.units)
+            self.assertTrue(np.allclose(np.asarray(r.m), [2.0, 3.0]))
+            q = mk()
+            r = q
+            r %= 2
+            self.assertIs(r, q)
+            self.assertIsNone(r.units)
+            self.assertTrue(np.allclose(np.asarray(r.m), [1.0, 1.0]))
+        # The same for a 0-dimensional magnitude, which is what quant makes
+        # of a scalar.
+        q = quant(5.0)
+        r = q
+        r //= 2
+        self.assertIs(r, q)
+        self.assertEqual(float(r.m), 2.0)
+        q = quant(5.0)
+        r = q
+        r %= 2
+        self.assertIs(r, q)
+        self.assertEqual(float(r.m), 1.0)
+        # /= on a 0-d magnitude goes through the same machinery and keeps
+        # real units.
+        q = quant(5.0, 'mm')
+        r = q
+        r /= 2
+        self.assertIs(r, q)
+        self.assertEqual(float(r.m), 2.5)
+        self.assertEqual(str(r.units), 'millimeter')
+        # With real units, // and % are not meaningful, and Pint's error is
+        # what comes out, whether the magnitude is 0-d or not.
+        for q in (quant(5.0, 'mm'), quant(np.array([5.0, 7.0]), 'mm')):
+            with self.assertRaises(pint.DimensionalityError):
+                q //= 2
+            with self.assertRaises(pint.DimensionalityError):
+                q %= 2
+        # A real dimensionless quantity, however, is fine, and that is the
+        # path that Pint itself handles.
+        q = quant(np.array([5.0, 7.0]), 'dimensionless')
+        r = q
+        r //= 2
+        self.assertIs(r, q)
+        self.assertTrue(np.allclose(r.m, [2.0, 3.0]))
+    def test_quantity_reflected_divmod_and_pow(self):
+        """Tests divmod and ** with the quantity on the right."""
+        import numpy as np
+        from immlib import quant, Quantity
+        # divmod(x, q) for a unit-less q.
+        for q in (quant(2.0), quant(np.array([2.0, 4.0]))):
+            (d, m) = divmod(7, q)
+            self.assertIsInstance(d, Quantity)
+            self.assertIsNone(d.units)
+            self.assertTrue(np.allclose(np.asarray(d.m), 7 // np.asarray(q.m)))
+            self.assertTrue(np.allclose(np.asarray(m.m), 7 % np.asarray(q.m)))
+        # x ** q for a unit-less q gives a bare value, since the exponent
+        # carries no units and neither does the base.
+        self.assertEqual(2 ** quant(3.0), 8.0)
+        # A real dimensionless quantity is Pint's own path.
+        self.assertEqual(2 ** quant(3.0, 'dimensionless'), 8.0)
+        # **= on a quantity with real units is Pint's path too, and it
+        # changes the units.
+        q = quant(np.array([2.0, 3.0]), 'mm')
+        q **= 2
+        self.assertEqual(str(q.units), 'millimeter ** 2')
+        self.assertTrue(np.allclose(q.m, [4.0, 9.0]))
+    def test_quantity_round_and_complex(self):
+        """Tests __round__ for each kind of magnitude, and __complex__."""
+        import numpy as np, torch, pint
+        from immlib import quant, Quantity
+        # A 0-d array magnitude, which is what quant makes of a scalar.
+        r = round(quant(1.2345, 'mm'), 2)
+        self.assertAlmostEqual(float(r.m), 1.23)
+        self.assertEqual(str(r.units), 'millimeter')
+        # An array magnitude.
+        r = round(quant(np.array([1.2345, 2.3456]), 'mm'), 2)
+        self.assertTrue(np.allclose(r.m, [1.23, 2.35]))
+        # A tensor magnitude, which Pint would have converted to an array.
+        r = round(quant(torch.tensor([1.2345, 2.3456]), 'mm'), 2)
+        self.assertTrue(torch.is_tensor(r.m))
+        self.assertTrue(np.allclose(r.m.numpy(), [1.23, 2.35]))
+        # With no digits, rounding is to the nearest integer.
+        r = round(quant(torch.tensor([1.6, 2.4]), 'mm'))
+        self.assertTrue(np.allclose(r.m.numpy(), [2.0, 2.0]))
+        # A plain Python number magnitude, which a Quantity built directly
+        # (rather than through quant) can have.
+        q = Quantity(1.2345, 'mm')
+        self.assertIsInstance(q._magnitude, float)
+        self.assertAlmostEqual(float(round(q, 2).m), 1.23)
+        # complex() works for a unit-less quantity and for a real
+        # dimensionless one, and raises for anything with dimensions.
+        self.assertEqual(complex(quant(1.0)), 1 + 0j)
+        self.assertEqual(complex(quant(1.0, 'dimensionless')), 1 + 0j)
+        with self.assertRaises(pint.DimensionalityError):
+            complex(quant(1.0, 'mm'))
+    def test_quantity_torch_function_declines(self):
+        """Tests the cases in which __torch_function__ declines to handle a
+        call, and the unary-operator functions that it does handle."""
+        import numpy as np, torch
+        from immlib import quant, Quantity
+        q = quant(torch.tensor([1.0, -2.0]), 'mm')
+        # The unary operators are handled by calling the quantity's own
+        # dunder method, so units are preserved.
+        for (fn, want) in ((torch.neg, [-1.0, 2.0]),
+                           (torch.negative, [-1.0, 2.0]),
+                           (torch.abs, [1.0, 2.0]),
+                           (torch.absolute, [1.0, 2.0]),
+                           (torch.positive, [1.0, -2.0])):
+            r = fn(q)
+            self.assertIsInstance(r, Quantity)
+            self.assertEqual(str(r.units), 'millimeter')
+            self.assertTrue(np.allclose(r.m.numpy(), want))
+        # A unary call with keyword arguments is declined, and PyTorch then
+        # reports that no implementation accepted it.
+        with self.assertRaises(TypeError):
+            torch.neg(q, out=None)
+        # So is a delegated math function with the wrong number of arguments
+        # or with no quantity among them.
+        with self.assertRaises(TypeError):
+            torch.exp(q, out=None)
+        self.assertTrue(torch.is_tensor(torch.exp(torch.tensor([1.0]))))
+        # A unit-preserving function and a reduction both need a quantity as
+        # their first argument; with a plain tensor they are ordinary torch
+        # calls.
+        self.assertTrue(torch.is_tensor(torch.squeeze(torch.tensor([[1.0]]))))
+        self.assertTrue(torch.is_tensor(torch.sum(torch.tensor([1.0]))))
+        # And with a quantity they keep the units.
+        self.assertEqual(str(torch.sum(q).units), 'millimeter')
+        self.assertEqual(str(torch.squeeze(q).units), 'millimeter')
+    def test_quantity_cross_registry_none_units(self):
+        """Tests a unit-less quantity combined with a quantity from another
+        registry, which must come back in this registry's Quantity class."""
+        import pint
+        from immlib import quant, Quantity, units
+        other = pint.UnitRegistry()
+        r = quant(2.0) * other.Quantity(3.0, 'mm')
+        # The result is an immlib Quantity in immlib's registry, not the
+        # other registry's class.
+        self.assertIsInstance(r, Quantity)
+        self.assertIs(r._REGISTRY, units)
+        self.assertEqual(str(r.units), 'millimeter')
+        self.assertEqual(float(r.m), 6.0)
+    def test_quantity_nonmultiplicative_tensor_eq(self):
+        """Tests comparing a quantity in a non-multiplicative unit to zero.
+
+        Degrees Celsius has an offset, so comparing it to a bare zero is
+        ambiguous: Pint raises unless the registry is set to convert offset
+        units to base units automatically, in which case it compares in base
+        units. Rule 1 requires the tensor path to do the same as the array
+        path in both settings; it used to convert unconditionally, so the
+        array comparison raised while the tensor comparison answered False.
+        """
+        import numpy as np, torch, pint
+        from immlib import quant, UnitRegistry
+        # By default the comparison is ambiguous and raises, for both
+        # backends and both operators.
+        for mag in (np.array(0.0), torch.tensor(0.0),
+                    np.array([0.0, 100.0]), torch.tensor([0.0, 100.0])):
+            q = quant(mag, 'degC')
+            with self.assertRaises(pint.OffsetUnitCalculusError):
+                q == 0
+            with self.assertRaises(pint.OffsetUnitCalculusError):
+                q != 0
+        # With autoconvert_offset_to_baseunit, both backends compare in base
+        # units and give the same answer: 0 degC is 273.15 K, not zero.
+        ureg = UnitRegistry(autoconvert_offset_to_baseunit=True)
+        for (mag_np, mag_t) in ((np.array(0.0), torch.tensor(0.0)),
+                                (np.array([0.0, 100.0]),
+                                 torch.tensor([0.0, 100.0]))):
+            qn = ureg.Quantity(mag_np, 'degC')
+            qt = ureg.Quantity(mag_t, 'degC')
+            self.assertTrue(
+                np.array_equal(np.asarray(qn == 0), (qt == 0).numpy()))
+            self.assertTrue(
+                np.array_equal(np.asarray(qn != 0), (qt != 0).numpy()))
+            self.assertFalse(np.any(np.asarray(qn == 0)))
+    def test_promote_mixed_quantities(self):
+        """Tests promote with several quantities, only one of which is a
+        tensor."""
+        import numpy as np, torch
+        from immlib import promote, quant, Quantity
+        args = promote(
+            quant(torch.tensor([1.0]), 'mm'),
+            quant(np.array([2.0]), 'mm'),
+            quant(3.0, 'mm'),
+            4.0)
+        # Everything becomes a tensor, and the quantities stay quantities
+        # with their units.
+        for a in args[:3]:
+            self.assertIsInstance(a, Quantity)
+            self.assertTrue(torch.is_tensor(a.m))
+            self.assertEqual(str(a.units), 'millimeter')
+        self.assertTrue(torch.is_tensor(args[3]))

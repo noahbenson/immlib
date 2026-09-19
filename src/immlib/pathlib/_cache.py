@@ -33,7 +33,7 @@ class CloudCachePath(_pathbase):
     def __new__(cls, cloud_path):
         if not isinstance(cloud_path, CloudPath):
             raise TypeError(
-                f"CloudCachePath requiers a CloudPath object, not"
+                f"CloudCachePath requires a CloudPath object, not"
                 f" {type(cloud_path)}")
         pre = cloud_path.cloud_prefix
         lcd = cloud_path.client._local_cache_dir
@@ -49,8 +49,6 @@ class CloudCachePath(_pathbase):
             super().__init__(fspath)
     def __truediv__(self, other):
         return CloudCachePath(self.cloud_path / other)
-    def iterdir(self):
-        return map(CloudCachePath, self.cloud_path.iterdir())
     @property
     def parents(self):
         return tuple(map(CloudCachePath, self.cloud_path.parents))
@@ -80,18 +78,26 @@ class CloudCachePath(_pathbase):
             return os.path.isfile(self)
         else:
             return self.cloud_path.is_file()
+    # The predicates below all ask whether this path is some kind of special
+    # file. A cloud object is never any of them: it is an object in a
+    # bucket, and the local cache entry that stands for it is an ordinary
+    # file or directory. They answer False rather than delegating to the
+    # CloudPath, which has none of these methods (delegating raised an
+    # AttributeError), and rather than consulting the cache entry, which
+    # would download the object only to answer a question whose answer is
+    # already known. Path-consuming code such as shutil calls these.
     def is_mount(self):
-        return self.cloud_path.is_mount()
+        return False
     def is_symlink(self):
-        return self.cloud_path.is_symlink()
+        return False
     def is_socket(self):
-        return self.cloud_path.is_socket()
+        return False
     def is_fifo(self):
-        return self.cloud_path.is_fifo()
+        return False
     def is_block_device(self):
-        return self.cloud_path.is_block_device()
+        return False
     def is_char_device(self):
-        return self.cloud_path.is_char_device()
+        return False
     def iterdir(self):
         return map(CloudCachePath, self.cloud_path.iterdir())
     def lchmod(self, mode):

@@ -129,3 +129,51 @@ The following formats are predefined in `immlib`:
    `pandas`.
  * `'tsv'` (`*.tsv`). Reads or writes a tab-separated-value file using
    `pandas`.
+
+## Formats and Threads
+
+`immlib.save` and `immlib.load` are single objects shared by the whole
+program, so registering a format is a change that every thread sees. Both are
+safe to use from several threads at once, including in a free-threaded
+interpreter, and no locking is needed by the caller.
+
+The registry each of them keeps is two maps that have to agree: one from a
+format's name to the format, and one from each of its suffixes to the same
+format. It is held as a single immutable snapshot of both maps, which is
+replaced wholesale whenever it changes. A call that reads the registry ---
+`deduce_format`, or any `save`/`load` call that deduces a format from a path
+--- takes the snapshot it is going to use in one step, so it never sees a
+format that has been registered under its name but not yet under its
+suffixes, or one whose suffixes have been removed but whose name has not.
+
+```{code-cell}
+il.save.formats['json']
+```
+
+Registration itself is serialized, which is what makes its duplicate checks
+mean anything: `register` refuses a name or a suffix that is already taken,
+and without a lock two threads could both find the same name free and both
+claim it.
+
+```{code-cell}
+fmt = il.save.copy()
+
+try:
+    fmt.register(fmt.formats['json'])
+except RuntimeError as e:
+    print(e)
+```
+
+Two things are left to the caller. A `Format` object must not be modified
+after it has been registered --- build a new one and register it under a new
+name instead. And saving to or loading from the same path in two threads at
+once is an ordinary file-level race, which the format system does not and
+cannot arbitrate; `immlib.save` writes wherever it is told to write.
+
+```{note}
+The usual advice applies here as it does for unit registries: register the
+formats a program needs while it is starting up, before the threads that use
+them exist. The guarantees above are about not corrupting the registry, not
+about making a format appear at a well-defined moment in another thread's
+work.
+```

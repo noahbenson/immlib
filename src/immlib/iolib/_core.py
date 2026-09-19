@@ -9,6 +9,7 @@
 
 import os, io, gzip, numbers
 from pathlib import Path
+from threading import RLock
 
 import numpy as np
 from pcollections import pdict, plist, pset, ldict, lazy
@@ -39,9 +40,12 @@ class Format:
         for suff in suffixes:
             if is_str(suff):
                 suff = (suff,)
-            elif all(map(is_str, suff)):
+            elif is_aseq(suff) and all(map(is_str, suff)):
                 suff = tuple(suff)
             else:
+                # is_aseq is tested first so that a suffix that is not a
+                # sequence at all (a number, say) raises the ValueError
+                # documented here rather than a TypeError from map().
                 raise ValueError(f"invalid path suffix: {suff}")
             self.suffixes.append(suff)
         if mode != 'b' and mode != 't':
@@ -81,27 +85,60 @@ class Formatter:
     """Base class for the Save and Load classes.
 
     Handles common operations between saving and loading systems.
+
+    A `Formatter`'s registry of formats is safe to use from several threads
+    at once, including in a free-threaded interpreter. It is kept as a
+    single immutable snapshot--a `(formats, format_by_suffix)` pair of
+    persistent dictionaries--which is replaced wholesale by one attribute
+    assignment whenever it changes. A reader therefore takes the pair it is
+    going to use in one step and is unaffected by anything that happens
+    afterwards, and never sees a format that is registered under its name
+    but not yet under its suffixes (or the reverse, while one is being
+    unregistered). Writers hold a lock, which is what makes `register`'s
+    check for a duplicate name or suffix mean anything: without it two
+    threads can both find a name free and both claim it.
     """
     # The mode use for opening streams from paths ('r' or 'w' typically).
     stream_mode = ''
-    # Data/Details of the Save/Load classes.
-    __slots__ = ("formats", "_format_by_suffix")
+    # Data/Details of the Save/Load classes. `_state` is the (formats,
+    # format_by_suffix) pair described above; `_lock` serializes the
+    # writers. Everything else about a Formatter is read-only.
+    __slots__ = ("_state", "_lock")
     # Constructor.
     def __init__(self, template=None):
-        self.formats = {}
-        self._format_by_suffix = {}
+        self._lock = RLock()
+        self._state = (pdict(), pdict())
         if template is not None:
             cls = type(self)
             if isinstance(template, cls):
+                # One snapshot of the template, so that a registration in
+                # another thread cannot change what is being copied
+                # half-way through the copy.
                 formats = template.formats
             elif is_amap(template):
-                formats = templates
+                formats = template
             else:
                 raise TypeError(f"template must be a {cls} object or a mapping")
             for (k,format) in formats.items():
                 if not isinstance(format, Format):
                     raise TypeError(f"template contains non-format named {k}")
                 self.register(format)
+    @property
+    def formats(self):
+        """The formats registered here, as a persistent map of name to
+        `Format`.
+
+        The map is a snapshot: registering or unregistering a format
+        afterwards gives the `Formatter` a new map and leaves this one
+        alone. Use `register` and `unregister` to change what is
+        registered; the map itself cannot be modified.
+        """
+        return self._state[0]
+    @property
+    def _format_by_suffix(self):
+        """The same formats, as a persistent map of suffix tuple to
+        `Format`. A snapshot, as `formats` is."""
+        return self._state[1]
     def deduce_format(self, arg, ignore_gz=True):
         """Deduces the file format for a given path or suffix.
 
@@ -120,10 +157,16 @@ class Formatter:
             raise ValueError(
                 f"deduce_format given invalid argument of type {type(arg)}")
         suff = tuple(suffixes)
-        if ignore_gz and suff[-1] == '.gz':
+        # (suff can be empty, for a path with no suffix at all, in which case
+        # there is nothing to deduce from and the loop below is skipped.)
+        if ignore_gz and suff and suff[-1] == '.gz':
             suff = suff[:-1]
+        # One snapshot for the whole walk, so that the answer is the one a
+        # single consistent registry would have given, even if another
+        # thread registers or unregisters a format while we look.
+        by_suffix = self._format_by_suffix
         while suff:
-            format = self._format_by_suffix.get(suff)
+            format = by_suffix.get(suff)
             if format:
                 return format
             suff = suff[1:]
@@ -249,20 +292,29 @@ class Formatter:
         # (2) save.register(format) where format is already a Format object. In
         # the latter case we aren't a decorator.
         if isinstance(name, Format):
-            # We're in case 2, so we register this format specifically.
+            # We're in case 2, so we register this format specifically. The
+            # checks below and the update that follows them are one
+            # operation: without the lock, two threads could both find the
+            # name free and both claim it, and the registry could end up
+            # mapping a name to one format and its suffixes to another.
             format = name
-            if format.name in self.formats:
-                raise RuntimeError(f"format {format.name} already registered")
             suffs = tuple(format.suffixes) + format.gzip_suffix
-            for suff in suffs:
-                ex = self._format_by_suffix.get(suff)
-                if ex is not None:
+            with self._lock:
+                (formats, by_suffix) = self._state
+                if format.name in formats:
                     raise RuntimeError(
-                        f"suffix {suff} already mapped to format {ex.name}")
-            # We pass the criteria; go ahead and add this format.
-            self.formats[format.name] = format
-            for suff in suffs:
-                self._format_by_suffix[suff] = format
+                        f"format {format.name} already registered")
+                for suff in suffs:
+                    ex = by_suffix.get(suff)
+                    if ex is not None:
+                        raise RuntimeError(
+                            f"suffix {suff} already mapped to format {ex.name}")
+                # We pass the criteria; go ahead and add this format. The
+                # name and every suffix appear together, in one assignment,
+                # so no reader ever sees half of a registration.
+                self._state = (
+                    formats.set(format.name, format),
+                    by_suffix.setall(suffs, [format] * len(suffs)))
             # Return the format itself.
             return format
         else:
@@ -308,18 +360,22 @@ class Formatter:
             If the given name does not map to a format in the save manager and
             the `error_on_missing` option is `True`.
         """
-        format = self.formats.get(name)
-        if format is None:
-            if error_on_missing:
-                fnnm = type(self).__name__.lower()
-                raise RuntimeError(
-                    f"format {name} not found in immlib {fnnm} system")
-            else:
-                return None
-        # Actually remove things:
-        for suff in (format.suffixes + format.gzip_suffix):
-            del self._format_by_suffix[suff]
-        del self.formats[name]
+        # As in register, the lookup and the removal are one operation.
+        with self._lock:
+            (formats, by_suffix) = self._state
+            format = formats.get(name)
+            if format is None:
+                if error_on_missing:
+                    fnnm = type(self).__name__.lower()
+                    raise RuntimeError(
+                        f"format {name} not found in immlib {fnnm} system")
+                else:
+                    return None
+            # Actually remove things. (suffixes is a list and gzip_suffix a
+            # tuple, so one is converted before they are joined; this is the
+            # same expression register uses.)
+            suffs = tuple(format.suffixes) + format.gzip_suffix
+            self._state = (formats.delete(name), by_suffix.dropall(suffs))
         return format
     def copy(self):
         """Returns a copy of the given save manager.
@@ -707,7 +763,9 @@ def load_yaml(stream, /, safe=True):
     if safe:
         return yaml.safe_load(stream)
     else:
-        return yaml.load(stream)
+        # PyYAML 6 requires an explicit Loader for yaml.load, and
+        # yaml.unsafe_load is its spelling of the unrestricted loader.
+        return yaml.unsafe_load(stream)
 @load.register('csv', '.csv', mode='t')
 def load_csv(stream, /, sep=',', **kwargs):
     """Loads a pandas DataFrame from a CSV file.

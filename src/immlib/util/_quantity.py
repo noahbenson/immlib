@@ -1661,6 +1661,14 @@ class Quantity(pint.Quantity):
         if not other_is_q:
             if bool(((ym == 0) | torch.isnan(ym)).all()):
                 if not self._is_multiplicative:
+                    # Pint compares a non-multiplicative quantity (degC,
+                    # say) against zero by converting it to base units,
+                    # but only when the registry is set to make that
+                    # conversion; otherwise the comparison is ambiguous
+                    # and Pint raises. Rule 1 requires the tensor path to
+                    # do the same as the NumPy path in both settings.
+                    if not self._REGISTRY.autoconvert_offset_to_baseunit:
+                        raise pint.OffsetUnitCalculusError(self._units)
                     xm = self.to_base_units()._magnitude
                 return op(xm, ym)
             if self.dimensionless:

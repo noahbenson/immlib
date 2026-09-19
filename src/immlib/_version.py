@@ -116,7 +116,13 @@ class Version(VersionTuple):
         in_project_section = False
         for ln in toml_lines:
             ln = ln.strip()
-            if ln == '[project]':
+            if not ln or ln.startswith('#'):
+                # A blank line or a comment: neither starts a section nor
+                # declares anything. (The emptiness test must come first;
+                # ln[0] below would raise for a blank line, and every real
+                # pyproject.toml has blank lines in it.)
+                continue
+            elif ln == '[project]':
                 in_project_section = True
             elif ln[0] == '[' and ln[-1] == ']':
                 in_project_section = False
@@ -176,7 +182,7 @@ class Version(VersionTuple):
                 micro = '0'
                 last = minor
             elif nss == 1:
-                major = ss
+                (major,) = ss
                 (minor, micro) = ('0', '0')
                 last = major
             else:

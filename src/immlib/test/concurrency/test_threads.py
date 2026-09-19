@@ -424,3 +424,107 @@ class TestThreads(TestCase):
         p = quant(ref.copy(), 'mm').persist()
         with self.assertRaises(TypeError):
             p.ito('cm')
+    def test_formatter_registry_threads(self):
+        """Tests that the save/load format registry is safe under threads.
+
+        The registry is two maps that must agree: one from format name to
+        format, one from suffix to format. Registration checks that a name
+        and its suffixes are free and then claims them, which is only
+        meaningful if the check and the claim happen together.
+        """
+        from immlib import save
+        from immlib.iolib._core import Format
+        def fn(stream, obj):
+            stream.write(str(obj))
+        # Distinct formats registered at the same time all arrive, and every
+        # one of their suffixes maps to the right format.
+        fmt = save.copy()
+        def register_distinct(i):
+            f = Format(f'thr_{i}', fn, f'.thr{i}', mode='t',
+                       gzip_suffix=f'.thr{i}z')
+            return fmt.register(f)
+        made = run_threads(register_distinct)
+        self.assertEqual(len(made), NTHREADS)
+        for (i, f) in enumerate(made):
+            self.assertIs(fmt.formats[f'thr_{i}'], f)
+            self.assertIs(fmt.deduce_format(f'x.thr{i}'), f)
+            self.assertIs(fmt.deduce_format(f'x.thr{i}z'), f)
+        # Every thread trying to claim the same name: exactly one wins, and
+        # the rest are told the name is taken. Without a lock around the
+        # check and the claim, more than one can win, and the registry can
+        # end up mapping the name to one format and its suffix to another.
+        # The window is narrow--against the unlocked version this shows up
+        # in roughly one trial in a hundred on a free-threaded
+        # interpreter--so the trial is repeated.
+        for trial in range(50):
+            fmt = save.copy()
+            def register_same(i):
+                f = Format('thr_same', fn, '.thrsame', mode='t')
+                try:
+                    fmt.register(f)
+                    return f
+                except RuntimeError:
+                    return None
+            winners = [f for f in run_threads(register_same) if f is not None]
+            self.assertEqual(len(winners), 1)
+            self.assertIs(fmt.formats['thr_same'], winners[0])
+            self.assertIs(fmt.deduce_format('x.thrsame'), winners[0])
+        # The same for a name that is free but a suffix that is not.
+        for trial in range(50):
+            fmt = save.copy()
+            def register_same_suffix(i):
+                f = Format(f'thr_sfx_{i}', fn, '.thrsfx', mode='t')
+                try:
+                    fmt.register(f)
+                    return f
+                except RuntimeError:
+                    return None
+            winners = [
+                f for f in run_threads(register_same_suffix) if f is not None]
+            self.assertEqual(len(winners), 1)
+            self.assertIs(fmt.deduce_format('x.thrsfx'), winners[0])
+            self.assertEqual(
+                [k for k in fmt.formats if k.startswith('thr_sfx_')],
+                [winners[0].name])
+    def test_formatter_registry_readers_and_writers(self):
+        """Tests that reading the format registry is unaffected by writes.
+
+        A reader must never see a format registered under its name but not
+        yet under its suffixes, or the reverse while one is being removed.
+        """
+        from immlib import save
+        from immlib.iolib._core import Format
+        from io import StringIO
+        def fn(stream, obj):
+            stream.write(str(obj))
+        fmt = save.copy()
+        stop = threading.Event()
+        def churn(i):
+            # Register and unregister a format over and over.
+            for k in range(200):
+                f = Format(f'thr_churn_{i}', fn, f'.thrchurn{i}', mode='t')
+                fmt.register(f)
+                self.assertIs(fmt.unregister(f'thr_churn_{i}'), f)
+            stop.set()
+            return True
+        def read(i):
+            while not stop.is_set():
+                # A format that is found by its suffix is always the one
+                # registered under its own name, and every format that is
+                # registered is findable by all of its suffixes.
+                (formats, by_suffix) = fmt._state
+                for (suff, f) in by_suffix.items():
+                    self.assertIs(formats.get(f.name), f)
+                for f in formats.values():
+                    for suff in (tuple(f.suffixes) + f.gzip_suffix):
+                        self.assertIs(by_suffix.get(suff), f)
+                # And the formats that were there at the start are still
+                # usable while all of this goes on.
+                self.assertEqual(fmt.deduce_format('x.json').name, 'json')
+                s = fmt(StringIO(), {'a': 1}, 'json')
+                self.assertEqual(s.getvalue(), '{"a": 1}')
+            return True
+        self.assertTrue(
+            all(run_threads(lambda i: churn(i) if i < 2 else read(i))))
+        # The churn left nothing behind.
+        self.assertEqual(set(fmt.formats), set(save.formats))

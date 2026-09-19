@@ -219,8 +219,14 @@ def osfpath(obj, /, *args,
         obj = pathstr(obj)
         if scheme_sep not in obj:
             obj = 'osf://' + obj
-    # Interpret the local_cache_dir:
-    local_cache_dir = _interp_cache(local_cache_dir, cache_path, 'osf')
+    # Interpret the local_cache_dir, unless we are reusing a client and no
+    # cache was asked for: _interp_cache answers None in that case, and
+    # None is a real answer here ("let cloudpathlib pick a temporary
+    # directory"), so passing it on would replace the cache directory the
+    # client we just inherited is already using. Ellipsis is how OSFPath is
+    # told to leave a client's option alone.
+    if client is None or local_cache_dir is not Ellipsis or cache_path:
+        local_cache_dir = _interp_cache(local_cache_dir, cache_path, 'osf')
     # At this point we can go ahead and create the initial path.
     path = OSFPath(obj,
                    client=client,
@@ -634,10 +640,11 @@ def filepath(p, *args):
             p = p[7:]
         return Path(p)
     elif isinstance(p, bytes):
-        # Same as above but with bytes.
+        # Same as above but with bytes. Path does not accept bytes at all,
+        # so the argument is decoded first, as pathtype decodes it.
         if p.startswith(b'file://'):
             p = p[7:]
-        return Path(p)
+        return Path(p.decode('utf-8'))
     else:
         # Try to convert it to a pathstr then turn it into a path.
         return Path(pathstr(p))

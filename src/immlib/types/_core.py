@@ -245,7 +245,9 @@ class ArrayIndex:
             If `default` is not given, then an error is raised when an identity
             is not found. If `default` is given, however, the default value is
             inserted into the place of any missing indices and no error is
-            raised.
+            raised. When `ravel` is ``False``, `default` may instead be a tuple
+            with one element per dimension of the indexed array, in which case
+            each element is the default for the corresponding coordinate.
 
         Returns
         -------
@@ -287,13 +289,24 @@ class ArrayIndex:
         if anymissing:
             if error:
                 raise KeyError(ids[bad].flat[0])
-            else:
+            elif ravel or not is_tuple(default):
                 ins[bad] = default
+            # A per-dimension default (a tuple) cannot be written into
+            # `ins`, which is a flat index; it is applied below, after the
+            # unravelling, which rewrites these entries anyway.
         if not ravel:
             if anymissing:
                 unrav = np.unravel_index(ins[ok], self.array.shape)
-                if not is_tuple(default):
-                    default = (default,) * np.size(ins)
+                if is_tuple(default):
+                    if len(default) != len(unrav):
+                        raise ValueError(
+                            f"find: default has {len(default)} elements but"
+                            f" the indexed array has {len(unrav)} dimensions")
+                else:
+                    # One default per dimension of the indexed array--not
+                    # per identity looked up, which is a different number
+                    # except by coincidence.
+                    default = (default,) * len(unrav)
                 ins = tuple(np.empty_like(ins) for u in unrav)
                 for (u,r,d) in zip(ins, unrav, default):
                     u[bad] = d

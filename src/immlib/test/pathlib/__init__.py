@@ -5,7 +5,8 @@
 """Test module for the pimms.pathlib submodule."""
 
 # Import tests
-from .test_core import TestPathlibCore
-from .test_osf  import TestPathlibOSF
+from .test_core  import TestPathlibCore
+from .test_cache import TestPathlibCache
+from .test_osf   import TestPathlibOSF
 
 
