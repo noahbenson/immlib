@@ -274,15 +274,140 @@ thread) that refers to it, and these changes are not thread-safe: some of
 them replace a quantity's magnitude and units one after the other, so another
 thread can briefly see the new magnitude with the old units. The
 non-mutating forms, such as `q = q + x` and `q = q.to('mm')`, return new
-quantities and are always safe to use.
+quantities and are always safe to use. A quantity that is shared can be made
+immutable outright with `persist`, described next.
+
+
+(quantity-persist)=
+### Making a Quantity Immutable: `persist`
+
+`q.persist()` makes `q` immutable from then on, and returns it, so that a
+quantity can be persisted in the expression that creates it. Quantities are
+created mutable, which `pint`'s own internal operations rely on; persisting
+one is a decision made after it is fully built, usually just before it is
+returned or stored somewhere that other code can see it.
+
+```{code-cell}
+import numpy as np
+
+q = il.quant(np.array([1.0, 2.0, 3.0]), 'mm').persist()
+q.is_persistent
+```
+
+Everything in the list above that would change the quantity itself now raises
+a `TypeError`: the `ito` family, item assignment, assigning or deleting an
+attribute, and a NumPy `out=` argument naming it.
+
+```{code-cell}
+try:
+    q.ito('cm')
+except TypeError as e:
+    print(e)
+```
+
+The in-place *operators* are the exception: they are not refused. `q += x` on
+a persistent quantity computes a new quantity and rebinds the name to it,
+leaving the original untouched, exactly as `n += 1` does for an `int` and for
+every other immutable Python object. Code written for mutable quantities
+therefore keeps working, without mutating anything another reference can see.
+
+```{code-cell}
+p = q
+p += il.quant(1.0, 'mm')
+
+(p.m, q.m)
+```
+
+Reading and computing are unaffected, including gradient tracking for a
+tensor magnitude: persistence is a rule about the quantity object, not about
+the values inside it.
+
+```{code-cell}
+(q + q).to('cm')
+```
 
 ```{note}
-A future release is planned to add a `persist()` method that makes a quantity
-immutable in place, so that its mutating features raise errors. Quantities
-would still be created mutable (which `pint`'s own internal operations rely
-on), but could be made immutable as soon as they are returned; an immutable
-quantity could be copied into a new, mutable quantity, but could not be made
-mutable again. This method is not available yet.
+This method is named `persist` rather than `persistent`, which is what
+`pcollections` calls the corresponding method, because it does something
+different. A transient collection's `d.persistent()` returns a *new*,
+persistent collection and leaves `d` alone; a quantity's `q.persist()` changes
+`q` itself into a persistent quantity, and returns it only so that it can be
+called in an expression.
+```
+
+What is frozen is the quantity: its units, and which array or tensor is its
+magnitude. The *contents* of that magnitude are not, since a quantity does not
+own them--`q.m[0] = 5` still works, just as mutating a list stored in a
+`pcollections.pdict` still works. Freeze a NumPy magnitude with
+`il.freezearray` before persisting the quantity if the values must not change
+either; PyTorch has no equivalent, which is the other reason `persist` does
+not attempt this itself.
+
+```{code-cell}
+arr = np.array([1.0, 2.0, 3.0])
+il.freezearray(arr)
+qf = il.quant(arr, 'mm').persist()
+
+try:
+    qf.m[0] = 99.0
+except ValueError as e:
+    print(e)
+```
+
+Copying a persistent quantity, with `copy.copy`, `copy.deepcopy`, or
+`pickle`, gives a persistent quantity; `il.quant(q.m, q.u)` gives an equal
+quantity that is mutable. A quantity can never be made mutable again in
+place.
+
+(quantity-thread-safety)=
+### Persistence and Threads
+
+A persistent quantity can be read from any number of threads at once,
+including in a free-threaded interpreter, without a lock. This is the main
+reason to persist one.
+
+The race it removes is not a stale read, which would be harmless, but a
+*wrong* one. `ito` and its relatives assign the magnitude and then the
+units, in two separate statements:
+
+```python
+self._magnitude = self._convert_magnitude(other, *contexts, **ctx_kwargs)
+self._units = other
+```
+
+While that is in progress, another thread reading the quantity can see the
+converted magnitude together with the units it had before the conversion --
+a value wrong by whatever the conversion factor was. With eight threads
+reading a millimeter quantity while one thread flips it between millimeters
+and centimeters, every reader sees such a pair within a few hundred
+iterations. Persisting the quantity removes the window by removing the
+assignments; `immlib`'s own test suite checks both halves of this, in
+`immlib/test/concurrency/test_threads.py`.
+
+Persisting also settles the one write that a quantity would otherwise still
+make on its own: `pint` computes `dimensionality` the first time it is asked
+for and caches it on the quantity. `persist` computes it up front, so a
+persistent quantity's `__dict__` stops changing at the moment it becomes
+persistent, rather than on whichever thread happens to ask first.
+
+Two things remain the caller's responsibility.
+
+* **The contents of the magnitude.** A NumPy array that another thread
+  writes to is a data race whoever holds it, and persisting the quantity
+  that wraps it changes nothing about that. Use `il.freezearray` on the
+  magnitude before persisting, as above. PyTorch has no equivalent, so a
+  tensor magnitude that is shared between threads must simply not be
+  written to.
+* **`persist` itself**, which is a write like any other. Persist a quantity
+  before sharing it with other threads, not afterwards.
+
+```{note}
+Thread safety here is a property of the quantity, not of the unit registry.
+A `pint.UnitRegistry` is mutable -- `ureg.define(...)` adds units at
+runtime -- and defining new units while other threads are parsing or
+converting is a separate concern that persistence does not address. The
+usual advice applies: finish setting up the registry before the threads
+start.
 ```
 
 

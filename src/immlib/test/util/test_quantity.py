@@ -1411,3 +1411,129 @@ class TestUtilQuantity(TestCase):
         # Real dimensionless quantities keep their units.
         res = np.cumsum(quant(a, 'dimensionless'))
         self.assertEqual(res.units, quant(1, 'dimensionless').units)
+    def test_quantity_persist(self):
+        """Tests Quantity.persist, is_persistent, and the refusals they
+        imply."""
+        import copy, pickle
+        import numpy as np, torch, pint
+        from immlib import quant, Quantity
+        for make in (lambda: quant(np.array([1.0, 2.0, 3.0]), 'mm'),
+                     lambda: quant(torch.tensor([1.0, 2.0, 3.0]), 'mm')):
+            q = make()
+            # A new quantity is not persistent, and persist returns the
+            # same object rather than a copy.
+            self.assertFalse(q.is_persistent)
+            self.assertIs(q.persist(), q)
+            self.assertTrue(q.is_persistent)
+            # Persisting twice is fine.
+            self.assertIs(q.persist(), q)
+            # The in-place unit conversions are refused.
+            for name in ('ito', 'ito_root_units', 'ito_base_units'):
+                with self.assertRaises(TypeError):
+                    if name == 'ito':
+                        q.ito('cm')
+                    else:
+                        getattr(q, name)()
+            # So is item assignment, and attribute assignment or deletion.
+            with self.assertRaises(TypeError):
+                q[0] = quant(5.0, 'mm')
+            with self.assertRaises(TypeError):
+                q._magnitude = None
+            with self.assertRaises(TypeError):
+                q._units = None
+            with self.assertRaises(TypeError):
+                q._persistent = False
+            with self.assertRaises(TypeError):
+                q.newattr = 10
+            with self.assertRaises(TypeError):
+                del q._units
+            # None of that changed the quantity.
+            self.assertEqual(str(q.units), 'millimeter')
+            self.assertTrue(np.allclose(
+                np.asarray(q.m), np.array([1.0, 2.0, 3.0])))
+            # Reading and computing all still work; in particular the
+            # dimensionality property, which pint computes lazily and
+            # caches on the quantity itself.
+            self.assertEqual(q.dimensionality, make().dimensionality)
+            self.assertEqual(q.dimensionality, make().dimensionality)
+            self.assertEqual(float(q.sum().m), 6.0)
+            self.assertTrue(np.allclose(np.asarray((q + q).m),
+                                        np.array([2.0, 4.0, 6.0])))
+            self.assertAlmostEqual(float(q.to('cm').m[0]), 0.1, places=5)
+            # The in-place operators return new quantities instead of
+            # mutating, as they do for an int.
+            for op in ('__iadd__', '__isub__'):
+                r = getattr(q, op)(quant(1.0, 'mm'))
+                self.assertIsNot(r, q)
+                self.assertFalse(r.is_persistent)
+            for op in ('__imul__', '__itruediv__', '__ipow__'):
+                r = getattr(q, op)(2)
+                self.assertIsNot(r, q)
+                self.assertFalse(r.is_persistent)
+            # (//= and %= are meaningful only without real units.)
+            nq = quant(q.m, None).persist()
+            for op in ('__ifloordiv__', '__imod__'):
+                r = getattr(nq, op)(2)
+                self.assertIsNot(r, nq)
+                self.assertFalse(r.is_persistent)
+            self.assertTrue(np.allclose(
+                np.asarray(q.m), np.array([1.0, 2.0, 3.0])))
+            # The statement form rebinds the name and leaves q alone.
+            p = q
+            p += quant(1.0, 'mm')
+            self.assertIsNot(p, q)
+            self.assertEqual(float(q.m[0]), 1.0)
+            # Copies of a persistent quantity are persistent; a quantity
+            # rebuilt from the magnitude and units is not.
+            self.assertTrue(copy.copy(q).is_persistent)
+            self.assertTrue(copy.deepcopy(q).is_persistent)
+            self.assertTrue(pickle.loads(pickle.dumps(q)).is_persistent)
+            self.assertFalse(quant(q.m, q.u).is_persistent)
+            # A mutable quantity is unaffected by any of this.
+            m = make()
+            m += quant(1.0, 'mm')
+            self.assertEqual(float(m.m[0]), 2.0)
+            m.ito('cm')
+            self.assertEqual(str(m.units), 'centimeter')
+            m[0] = quant(5.0, 'cm')
+            self.assertEqual(float(m.m[0]), 5.0)
+        # A unit-less quantity persists in the same way.
+        qn = quant(np.array([1.0, 2.0])).persist()
+        self.assertTrue(qn.is_persistent)
+        self.assertIsNone(qn.units)
+        with self.assertRaises(TypeError):
+            qn[0] = 5.0
+        self.assertTrue(np.allclose((qn + qn).m, np.array([2.0, 4.0])))
+        # A NumPy out= argument naming a persistent quantity is refused,
+        # whether the quantity has units or not, and whether the call
+        # goes through the ufunc protocol or the function protocol.
+        out = quant(np.zeros(2)).persist()
+        with self.assertRaises(TypeError):
+            np.add(qn, qn, out=out)
+        self.assertTrue(np.allclose(out.m, np.zeros(2)))
+        rout = quant(np.zeros(2), 'mm').persist()
+        rq = quant(np.array([1.0, 2.0]), 'mm')
+        with self.assertRaises(TypeError):
+            np.add(rq, rq, out=rout)
+        with self.assertRaises(TypeError):
+            np.cumsum(rq, out=rout)
+        self.assertTrue(np.allclose(rout.m, np.zeros(2)))
+        # A mutable out= still works.
+        mout = quant(np.zeros(2))
+        self.assertIs(np.add(qn, qn, out=mout), mout)
+        # The contents of the magnitude are not frozen by persist; that is
+        # what immlib.freezearray is for.
+        from immlib import freezearray
+        qm = quant(np.array([1.0, 2.0]), 'mm').persist()
+        qm.m[0] = 99.0
+        self.assertEqual(float(qm.m[0]), 99.0)
+        arr = np.array([1.0, 2.0])
+        freezearray(arr)
+        qf = quant(arr, 'mm').persist()
+        with self.assertRaises(ValueError):
+            qf.m[0] = 99.0
+        # Persistence does not interfere with gradient tracking.
+        g = quant(torch.tensor([1.0, 2.0], requires_grad=True), 'mm')
+        g.persist()
+        (g * g).sum().m.backward()
+        self.assertTrue(np.allclose(g.m.grad.numpy(), np.array([2.0, 4.0])))

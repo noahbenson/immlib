@@ -617,6 +617,25 @@ _NUMPY_UNARY_OPERATOR_METHODS = {
 }
 
 
+def _check_out_persistent(kwargs):
+    """Raises a ``TypeError`` if the ``out`` argument in `kwargs` names a
+    persistent quantity.
+
+    NumPy's ``out=`` argument writes into the object it is given, so it is
+    one of the ways a quantity's magnitude can be changed in place. It is
+    checked here, before any dispatch, because the quantity that ``out``
+    names need not be one of the inputs and need not be the ``self`` whose
+    ``__array_ufunc__`` or ``__array_function__`` NumPy chose to call.
+    """
+    out = kwargs.get('out')
+    if out is None:
+        return
+    if not isinstance(out, tuple):
+        out = (out,)
+    for o in out:
+        if isinstance(o, Quantity) and o._persistent:
+            raise o._refuse("writing into it with a NumPy out= argument")
+
 _REFLECTED_COMPARISONS = {
     operator.lt: operator.gt, operator.le: operator.ge,
     operator.gt: operator.lt, operator.ge: operator.le,
@@ -664,11 +683,14 @@ def _math():
     from .. import math as _math_module
     return _math_module
 
-def _unpickle_quantity(mag, units):
+def _unpickle_quantity(mag, units, persistent=False):
     ureg = _default_ureg()
     if not issubclass(ureg.Quantity, Quantity):
         ureg = _initial_global_ureg
-    return ureg.Quantity(mag, units)
+    q = ureg.Quantity(mag, units)
+    # `persistent` has a default because pickles written before
+    # Quantity.persist existed call this function with two arguments.
+    return q.persist() if persistent else q
 
 
 class Quantity(pint.Quantity):
@@ -719,13 +741,12 @@ class Quantity(pint.Quantity):
         equivalent non-mutating forms (``q = q + x``, ``q.to(u)``, etc.),
         which return new quantities.
 
-    .. Note:: A future release is planned to add a ``persist()`` method that
-        makes a quantity immutable in place (enforced by its API: the
-        mutating features above would raise errors). Newly created
-        quantities would remain mutable, so that ``pint``'s own internal
-        operations continue to work, and an immutable quantity could be
-        copied into a new, mutable quantity but never made mutable again.
-        This method is not yet available.
+        The ``persist`` method makes a quantity immutable in place, and is
+        the way to be sure none of this happens to a quantity that is
+        shared. Newly created quantities are mutable, so that ``pint``'s
+        own internal operations continue to work; a persistent quantity
+        can be copied into a new, mutable quantity with ``quant(q.m,
+        q.u)``, but never made mutable again.
     """
     __slots__ = ()
     def __new__(cls, value, units=_omitted):
@@ -797,6 +818,131 @@ class Quantity(pint.Quantity):
         SciPy sparse array/matrix, or ``torch`` if it is a PyTorch tensor.
         """
         return torch if torch.is_tensor(self._magnitude) else np
+    # Persistence ---------------------------------------------------------
+    #: Whether this quantity has been made immutable. It is a class
+    #: attribute so that every quantity has it without paying for an
+    #: instance attribute it does not need; ``persist`` sets an instance
+    #: attribute that shadows it.
+    _persistent = False
+
+    @property
+    def is_persistent(self):
+        """Whether this quantity has been made immutable by ``persist``."""
+        return self._persistent
+    def persist(self):
+        """Makes this quantity immutable, and returns it.
+
+        A persistent quantity's ``units`` and ``magnitude`` refer to the
+        same unit and the same array or tensor for the rest of its life.
+        Anything that would change either of them is refused: ``ito``,
+        ``ito_root_units``, ``ito_base_units``, item assignment, attribute
+        assignment, and a NumPy ``out=`` argument naming it all raise a
+        ``TypeError``.
+
+        The in-place *operators* are not refused. ``q += 1`` on a
+        persistent quantity computes a new quantity and rebinds the name to
+        it, leaving the original untouched, exactly as ``n += 1`` does for
+        an ``int`` and for every other immutable Python object. Code
+        written for mutable quantities therefore keeps working, without
+        mutating anything another reference can see.
+
+        .. Note:: This method is named ``persist`` rather than
+            ``persistent``, which is what ``pcollections`` calls the
+            corresponding method, because it does something different. A
+            transient collection's ``d.persistent()`` returns a *new*,
+            persistent collection and leaves ``d`` alone; a quantity's
+            ``q.persist()`` changes ``q`` itself into a persistent
+            quantity, and returns it only so that it can be called in an
+            expression. The different name is meant to keep the two from
+            being confused.
+
+        What is frozen is this quantity: its units and which array or
+        tensor is its magnitude. The *contents* of that magnitude are not,
+        since a quantity does not own them--``q.m[0] = 5`` still works, as
+        mutating a list stored in a ``pcollections.pdict`` still works.
+        Freeze a NumPy magnitude with ``immlib.freezearray`` before
+        persisting the quantity if the values must not change either;
+        PyTorch has no equivalent, which is the other reason this method
+        does not attempt it.
+
+        Copying a persistent quantity, with ``copy.copy``,
+        ``copy.deepcopy`` or ``pickle``, gives a persistent quantity.
+        ``immlib.quant(q.m, q.u)`` gives an equal quantity that is not.
+
+        **Thread safety.** A persistent quantity can be read from any
+        number of threads at once, including in a free-threaded
+        interpreter, without a lock. This is what persisting one is for:
+        the mutating methods assign the magnitude and the units one after
+        the other, so while any of them can run, another thread can see
+        the new magnitude with the old units--a value wrong by whatever
+        the conversion factor was, not merely stale. Persisting the
+        quantity removes that window by removing the assignments.
+
+        Two things are outside that guarantee. The first is the contents
+        of the magnitude, as above: a NumPy array that another thread
+        writes to is a data race whoever holds it, which
+        ``immlib.freezearray`` is the answer to. The second is
+        ``persist`` itself, which is a write like any other--persist a
+        quantity before sharing it with other threads, not afterwards.
+
+        Returns
+        -------
+        immlib.Quantity
+            This quantity, now persistent.
+        """
+        if not self._persistent:
+            # Pint computes `dimensionality` lazily and caches it on the
+            # quantity itself, which is a write--the one write a
+            # persistent quantity would otherwise still make, and it
+            # would make it on whichever thread asked first. Doing it
+            # here means the object's __dict__ stops changing at the
+            # moment it becomes persistent. A quantity with units of None
+            # has no dimensionality (immlib's property raises), and a
+            # failure to precompute a cache is never a reason for
+            # persist to fail, so the attempt is guarded.
+            try:
+                self.dimensionality
+            except Exception:
+                pass
+            # The assignment must happen last, or __setattr__ would
+            # refuse the line above.
+            self.__dict__['_persistent'] = True
+        return self
+    def _refuse(self, what):
+        """Returns the error raised when `what` is attempted on a
+        persistent quantity."""
+        return TypeError(
+            f"{what} is not possible for a persistent quantity; see"
+            f" immlib.Quantity.persist. Use immlib.quant(q.m, q.u) for a"
+            f" quantity with the same value that can be changed")
+    #: The private attributes that a persistent quantity refuses to have
+    #: assigned. Other private attributes are allowed through because Pint
+    #: uses them for values it computes lazily and caches: the
+    #: ``dimensionality`` property computes ``self._dimensionality`` the
+    #: first time it is asked for and assigns it, so refusing every private
+    #: assignment would make ``q + q`` raise on a persistent quantity. A
+    #: cache is not part of the quantity's value; the two names here are.
+    _FROZEN_ATTRS = frozenset(['_magnitude', '_units', '_persistent'])
+    @classmethod
+    def _is_frozen_attr(cls, name):
+        """Returns whether `name` is an attribute a persistent quantity
+        refuses to have assigned or deleted."""
+        return name in cls._FROZEN_ATTRS or not name.startswith('_')
+    def __setattr__(self, name, value):
+        if self._persistent and self._is_frozen_attr(name):
+            raise self._refuse(f"setting the attribute '{name}'")
+        return super().__setattr__(name, value)
+    def __delattr__(self, name):
+        if self._persistent and self._is_frozen_attr(name):
+            raise self._refuse(f"deleting the attribute '{name}'")
+        return super().__delattr__(name)
+    def __copy__(self):
+        r = super().__copy__()
+        return r.persist() if self._persistent else r
+    def __deepcopy__(self, memo):
+        r = super().__deepcopy__(memo)
+        return r.persist() if self._persistent else r
+
     # Units of None ------------------------------------------------------
     @property
     def units(self):
@@ -894,8 +1040,11 @@ class Quantity(pint.Quantity):
 
         This is one of the mutating operations that ``immlib.Quantity``
         keeps from Pint but discourages; see ``immlib.Quantity``. ``to``
-        returns a new quantity instead.
+        returns a new quantity instead, and is the only choice for a
+        persistent quantity, which refuses this.
         """
+        if self._persistent:
+            raise self._refuse("converting the units in place (ito)")
         if self._units is None or other is None or self._is_0d():
             new = self.to(other, *contexts, **ctx_kwargs)
             self._magnitude = new._magnitude
@@ -995,6 +1144,21 @@ class Quantity(pint.Quantity):
             return bool(self._magnitude)
         return super().__bool__()
     __nonzero__ = __bool__
+
+    def ito_root_units(self):
+        """Converts this quantity into its root units in place, and returns
+        ``None``; ``to_root_units`` returns a new quantity instead."""
+        if self._persistent:
+            raise self._refuse(
+                "converting the units in place (ito_root_units)")
+        return super().ito_root_units()
+    def ito_base_units(self):
+        """Converts this quantity into its base units in place, and returns
+        ``None``; ``to_base_units`` returns a new quantity instead."""
+        if self._persistent:
+            raise self._refuse(
+                "converting the units in place (ito_base_units)")
+        return super().ito_base_units()
 
     # Numerical methods ######################################################
     # Pint implements the methods below against NumPy arrays: it converts the
@@ -1161,6 +1325,8 @@ class Quantity(pint.Quantity):
         return super().__itruediv__(other)
     __idiv__ = __itruediv__
     def __ifloordiv__(self, other):
+        if self._persistent:
+            return self.__floordiv__(other)
         if self._has_none_units(other):
             return self._inplace_result(
                 self._binop_none(other, operator.floordiv))
@@ -1168,6 +1334,8 @@ class Quantity(pint.Quantity):
             return self._inplace_0d(operator.floordiv, other)
         return super().__ifloordiv__(other)
     def __imod__(self, other):
+        if self._persistent:
+            return self.__mod__(other)
         if self._has_none_units(other):
             return self._inplace_result(
                 self._binop_none(other, operator.mod))
@@ -1229,6 +1397,8 @@ class Quantity(pint.Quantity):
         tensor. Both fail with a ``TypeError`` that Pint reports as "does
         not support indexing".
         """
+        if self._persistent:
+            raise self._refuse("item assignment")
         m = self._magnitude
         value_is_none_q = (isinstance(value, pint.Quantity)
                            and value._units is None)
@@ -1366,6 +1536,11 @@ class Quantity(pint.Quantity):
             return pint.Quantity._add_sub(x, y, op)
         return super()._add_sub(other, op)
     def _iadd_sub(self, other, op):
+        if self._persistent:
+            # An in-place operator on an immutable object computes a new
+            # one, as it does for an int or a tuple; the name the caller
+            # used is then rebound to it by Python itself.
+            return self._add_sub(other, self._INPLACE_OPS.get(op, op))
         if self._units is None or (
                 isinstance(other, pint.Quantity) and other._units is None):
             return self._inplace_result(self._binop_none(other, op))
@@ -1387,6 +1562,10 @@ class Quantity(pint.Quantity):
             return pint.Quantity._mul_div(x, y, magnitude_op, units_op)
         return super()._mul_div(other, magnitude_op, units_op)
     def _imul_div(self, other, magnitude_op, units_op=None):
+        if self._persistent:
+            return self._mul_div(
+                other, self._INPLACE_OPS.get(magnitude_op, magnitude_op),
+                self._INPLACE_OPS.get(units_op, units_op))
         if self._units is None or (
                 isinstance(other, pint.Quantity) and other._units is None):
             return self._inplace_result(self._binop_none(other, magnitude_op))
@@ -1404,6 +1583,8 @@ class Quantity(pint.Quantity):
             return self._binop_none(other, operator.pow)
         return super().__pow__(other)
     def __ipow__(self, other):
+        if self._persistent:
+            return self.__pow__(other)
         if self._is_0d():
             return self._inplace_0d(operator.pow, other)
         if self._units is None or (
@@ -1532,8 +1713,11 @@ class Quantity(pint.Quantity):
         # application registry, which would lose both the immlib.Quantity type
         # and units of None. We instead reattach unpickled quantities to the
         # global immlib registry (unit registries themselves are not pickled,
-        # just as in Pint).
-        return (_unpickle_quantity, (self._magnitude, self._units))
+        # just as in Pint). Persistence is carried across as well, so that
+        # unpickling a persistent quantity gives a persistent quantity.
+        return (
+            _unpickle_quantity,
+            (self._magnitude, self._units, self._persistent))
     def compare(self, other, op):
         """Returns the elementwise result of the ordered comparison `op`
         between this quantity and `other`.
@@ -1606,6 +1790,7 @@ class Quantity(pint.Quantity):
         calling the Quantity operand's own dunder method directly--see
         the comment above _NUMPY_MATH_DELEGATE_FUNCS for why.
         """
+        _check_out_persistent(kwargs)
         result = _none_ufunc(ufunc, method, inputs, kwargs)
         if result is not NotImplemented:
             return result
@@ -1641,6 +1826,7 @@ class Quantity(pint.Quantity):
         implementation otherwise (see ``_pint_numpy_dispatch`` for how
         unit-less quantities are passed to Pint).
         """
+        _check_out_persistent(kwargs)
         result = _numpy_math_dispatch(func.__name__, args, kwargs)
         if result is not NotImplemented:
             return result

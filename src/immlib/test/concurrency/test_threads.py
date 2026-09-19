@@ -309,3 +309,118 @@ class TestThreads(TestCase):
                 quant(float(i), 'mm/s').to('m/s')
             return True
         self.assertTrue(all(run_threads(compute)))
+    def test_persistent_quantity_threads(self):
+        """A persistent quantity can be read from many threads at once
+        while other threads attempt to mutate it, and every reader sees a
+        consistent magnitude and units.
+
+        This is the race that Quantity.persist exists to remove: the
+        mutating methods assign the magnitude and the units one after the
+        other, so a reader can otherwise see the new magnitude with the
+        old units. The mutable half of the same test is
+        test_mutable_quantity_is_racy below, which documents the behavior
+        persist is the alternative to.
+        """
+        import numpy as np
+        from immlib import quant
+        ref = np.arange(1.0, 101.0)
+        q = quant(ref.copy(), 'mm').persist()
+        want_dim = quant(ref.copy(), 'mm').dimensionality
+        def read(i):
+            for _ in range(200):
+                # The (magnitude, units) pair is always consistent.
+                self.assertEqual(str(q.units), 'millimeter')
+                self.assertTrue(np.allclose(q.m, ref))
+                self.assertTrue(np.allclose(q.to('cm').m, ref / 10))
+                self.assertEqual(q.dimensionality, want_dim)
+                self.assertTrue(np.allclose((q + q).m, 2 * ref))
+            return True
+        def mutate(i):
+            for _ in range(200):
+                for attempt in (lambda: q.ito('cm'),
+                                lambda: q.ito_base_units(),
+                                lambda: q.__setitem__(0, quant(9.0, 'mm')),
+                                lambda: setattr(q, '_magnitude', None),
+                                lambda: setattr(q, '_units', None)):
+                    with self.assertRaises(TypeError):
+                        attempt()
+            return True
+        def task(i):
+            return read(i) if i % 4 else mutate(i)
+        self.assertTrue(all(run_threads(task)))
+        # Nothing any of those threads did changed the quantity.
+        self.assertEqual(str(q.units), 'millimeter')
+        self.assertTrue(np.allclose(q.m, ref))
+    def test_persistent_quantity_is_write_once(self):
+        """A persistent quantity never writes to itself again.
+
+        Pint computes ``dimensionality`` lazily and caches it on the
+        quantity, which is a write; ``persist`` precomputes it so that the
+        object's ``__dict__`` stops changing at the moment it becomes
+        persistent. This test checks the property rather than that one
+        cache, so that a lazily cached attribute added by a future version
+        of Pint is caught here.
+        """
+        import copy, pickle
+        import numpy as np, torch
+        from immlib import quant
+        import immlib.math as im
+        for mag in (np.array([1.0, 2.0, 3.0]), torch.tensor([1.0, 2.0, 3.0])):
+            q = quant(mag, 'mm').persist()
+            before = {k: id(v) for (k, v) in q.__dict__.items()}
+            self.assertIn('_dimensionality', before)
+            # A broad battery of things that only read the quantity.
+            q.dimensionality; q.units; q.u; q.m; q.dimensionless
+            q.to('cm'); q.m_as('m'); q.to_base_units(); q.to_root_units()
+            q.sum(); q.mean(); q.min(); q.max(); q.reshape(3)
+            q + q; q - q; q * 2; q / 2; q ** 2; -q; abs(q)
+            q == q; q < q + q; q[0]
+            str(q); repr(q); format(q, ''); q.check('[length]')
+            im.sqrt(q * q)
+            copy.copy(q); copy.deepcopy(q); pickle.loads(pickle.dumps(q))
+            self.assertEqual(before, {k: id(v) for (k, v) in q.__dict__.items()})
+    def test_mutable_quantity_is_racy(self):
+        """Documents the race that persist removes.
+
+        One thread calling ``ito`` in a loop is enough for other threads to
+        observe a magnitude that does not match the units, because ``ito``
+        assigns the two one after the other. The test asserts only that the
+        readers never crash and that every pair they see is one of the two
+        possibilities or a torn one; it does not assert that a torn read
+        *happens*, since that is a race and need not occur on every
+        machine or interpreter.
+        """
+        import numpy as np
+        from immlib import quant
+        ref = np.arange(1.0, 51.0)
+        q = quant(ref.copy(), 'mm')
+        torn = []
+        stop = threading.Event()
+        def read(i):
+            while not stop.is_set():
+                mag = np.asarray(q._magnitude).copy()
+                units = str(q._units)
+                if units == 'millimeter':
+                    if not np.allclose(mag, ref):
+                        torn.append(units)
+                elif units == 'centimeter':
+                    if not np.allclose(mag, ref / 10):
+                        torn.append(units)
+                else:
+                    torn.append(units)
+            return True
+        def flip(i):
+            for _ in range(500):
+                q.ito('cm')
+                q.ito('mm')
+            stop.set()
+            return True
+        def task(i):
+            return flip(i) if i == 0 else read(i)
+        self.assertTrue(all(run_threads(task)))
+        # The quantity is back in millimeters, whatever the readers saw.
+        self.assertEqual(str(q.units), 'millimeter')
+        # And a persistent quantity cannot get into that state at all.
+        p = quant(ref.copy(), 'mm').persist()
+        with self.assertRaises(TypeError):
+            p.ito('cm')
