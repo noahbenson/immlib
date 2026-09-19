@@ -139,3 +139,73 @@ class TestDocs(TestCase):
         # Nothing is left interpolated.
         for obj in (streq, strcmp, is_quant, is_unit, to_dense, to_numeric):
             self.assertNotIn('%(', obj.__doc__)
+
+    def test_math_documents_its_arguments(self):
+        """Every public immlib.math function documents every argument it
+        takes and the value it returns.
+
+        The descriptions are inherited from the prototypes in
+        immlib.math._core (see its "Shared documentation" section), so a
+        function that takes a familiar argument needs no new text; this
+        test is what keeps a new function from being added without any.
+        """
+        import immlib.math as im
+        for name in im.__all__:
+            obj = getattr(im, name)
+            if not inspect.isfunction(obj):
+                continue
+            with self.subTest(name=f'immlib.math.{name}'):
+                doc = docparse(obj, format='numpy')
+                sections = {s.name.lower() for s in doc.sections}
+                params = inspect.signature(obj).parameters
+                named = [p for p in params if p != 'kwargs']
+                if named:
+                    self.assertIn(
+                        'parameters', sections,
+                        f"immlib.math.{name} documents no parameters")
+                    documented = {nm for item in doc.section('parameters').items
+                                  for nm in item.names}
+                    for p in named:
+                        self.assertIn(
+                            p, documented,
+                            f"immlib.math.{name} does not document '{p}'")
+                self.assertIn('returns', sections,
+                              f"immlib.math.{name} documents no return value")
+
+    def test_quantity_documents_its_members(self):
+        """Quantity's own methods and properties are documented here rather
+        than left to inherit Pint's, which describe Pint's behavior and not
+        immlib's."""
+        import immlib
+        cls = immlib.Quantity
+        for name in ('units', 'u', 'dimensionless', 'dimensionality',
+                     'backend', 'check', 'to', 'ito', 'm_as', 'compare',
+                     'sum', 'mean', 'reshape', 'astype'):
+            with self.subTest(name=f'Quantity.{name}'):
+                member = cls.__dict__.get(name)
+                self.assertIsNotNone(
+                    member, f"Quantity has no member '{name}'")
+                fn = member.fget if isinstance(member, property) else member
+                self.assertTrue(
+                    fn.__doc__ and fn.__doc__.strip(),
+                    f"Quantity.{name} has no docstring of its own")
+
+    def test_sections_are_in_numpy_order(self):
+        """Parameters precedes Returns in every public docstring.
+
+        docshare appends an inherited section after the sections an object
+        documents for itself, so a function that writes its own Returns and
+        inherits its Parameters gets them in the wrong order unless it
+        declares an empty Parameters header for them to fill. Sphinx and
+        numpydoc both expect the standard order, so it is checked here.
+        """
+        order = ('Parameters', 'Returns', 'Raises')
+        for (name, obj) in public_objects():
+            doc = inspect.getdoc(obj)
+            positions = [(doc.find(f'{s}\n{"-" * len(s)}'), s) for s in order]
+            positions = [(i, s) for (i, s) in positions if i >= 0]
+            with self.subTest(name=name):
+                self.assertEqual(
+                    positions, sorted(positions),
+                    f"{name}'s sections are out of order:"
+                    f" {[s for (_, s) in positions]}")

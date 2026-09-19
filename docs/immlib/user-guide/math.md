@@ -327,6 +327,53 @@ im.gather(il.quant([[3.0, 1.0, 2.0], [6.0, 5.0, 4.0]], 'm'),
 ```
 
 
+## Predicates, Bounds, Padding and Splitting
+
+`isnan`, `isinf` and `isfinite` answer elementwise questions about the
+magnitude, whatever the units, and return plain boolean arrays or tensors.
+`nonzero` returns the indices of the non-zero elements as a single
+`(n, ndim)` array of index rows, which is `torch.nonzero`'s form;
+`as_tuple=True` gives one index per dimension, which is `numpy.nonzero`'s.
+
+`clamp` limits the elements to a range, with each bound unit-aligned as in
+`maximum`, and at least one bound required, as `torch.clamp` requires.
+`clip` is its alias, as in PyTorch.
+
+```{code-cell}
+im.clamp(il.quant([1.0, 5.0, 9.0], 'm'), il.quant(200.0, 'cm'))
+```
+
+`pad` follows `torch.nn.functional.pad` rather than `numpy.pad`, which
+differ in two ways worth care: the amounts are given as one flat sequence
+starting with the *last* dimension, and the modes are named `'constant'`,
+`'reflect'`, `'replicate'` and `'circular'` (NumPy calls the last two
+`'edge'` and `'wrap'`). A bare `value` is taken to be in the argument's own
+units, since a fill value replaces an element rather than combining with
+one.
+
+```{code-cell}
+im.pad(il.quant([[1.0, 2.0], [3.0, 4.0]], 'm'), (1, 0), value=9)
+```
+
+```{note}
+Every mode but `'constant'` requires that the number of padded dimensions be
+one or two fewer than the argument's number of dimensions. That is PyTorch's
+restriction rather than a mathematical one, and it is enforced for the NumPy
+backend too, so that the same call behaves the same way on both.
+```
+
+`split` and `chunk` both cut an argument into pieces along a dimension, and
+differ in what their integer argument means: `split`'s is the *size* of each
+piece and `chunk`'s is a maximum *number* of pieces. `chunk`'s sizes are
+PyTorch's, which are not `numpy.array_split`'s: every piece but the last has
+size `ceil(n / chunks)`, so `chunk(a, 4)` of a dimension of 10 gives pieces
+of 3, 3, 3 and 1 where `numpy.array_split` would give 3, 3, 2 and 2.
+
+```{code-cell}
+[p.m for p in im.chunk(il.quant(list(range(10)), 'm'), 4)]
+```
+
+
 ## Linear Algebra
 
 `matmul(a, b)` is exactly `a @ b`, including its tensor-safe handling for

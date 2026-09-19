@@ -1175,7 +1175,7 @@ def to_tcoll(obj, /, copy=True):
     Parameters
     ----------
     obj : collection
-        An object that is to be converted into a persistent collection.
+        An object that is to be converted into a transient collection.
     copy : boolean, optional
         If `obj` is already a transient collection, then a copy is made if and
         only if ``copy`` is ``True``; otherwise, `obj` is returned as-is when
@@ -1224,7 +1224,7 @@ def to_mcoll(obj, /, copy=True):
     Parameters
     ----------
     obj : collection
-        An object that is to be converted into a persistent collection.
+        An object that is to be converted into a mutable collection.
     copy : boolean, optional
         If `obj` is already a mutable collection, then a copy is made if and
         only if ``copy`` is ``True``; otherwise, `obj` is returned as-is when

@@ -586,9 +586,8 @@ def like_filepath(obj):
     Returns
     -------
     boolean
-        ``True`` if `obj` is an instance of ``AzureBlobPath`` or is a string
-        that could be converted into an ``AzureBlobPath`` and ``False``
-        otherwise.
+        ``True`` if `obj` is an instance of ``pathlib.Path`` or is a string
+        that could be converted into one, and ``False`` otherwise.
     """
     if isinstance(obj, Path):
         return True

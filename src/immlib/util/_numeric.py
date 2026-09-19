@@ -139,6 +139,30 @@ except Exception:
 # Numerical Types #############################################################
 
 from numpy import ndarray
+
+# Shared documentation #########################################################
+# Several of the numeric predicates and converters below take the same
+# arguments, described once here and inherited by the functions that have
+# them (docshare inherits only those). This prototype is documentation and
+# nothing else: it is never called.
+
+def _doc_numeric_params(numel, copy):
+    """The arguments shared by immlib's numeric predicates and converters.
+
+    Parameters
+    ----------
+    numel : int, tuple of ints, or None, optional
+        If the `numel` parameter is not ``None``, then the given `obj` must
+        have the same number of elements as given by `numel`. If `numel` is a
+        tuple, then the number of elements in `obj` must be in the `numel`
+        tuple. The number of elements is the product of its shape.
+    copy : bool, optional
+        Whether to copy the data in `obj` or not. If ``False``, then `obj` is
+        only copied if doing so is required by the optional parameters. If
+        ``True``, then `obj` is always copied if possible.
+    """
+    raise NotImplementedError("_doc_numeric_params is documentation")
+
 def _is_numtype(obj, numtype, dtypes):
     if isinstance(obj, numtype):
         return True
@@ -927,6 +951,7 @@ def sparse_tolayout(obj, layout):
         raise TypeError(
             "sparse_tolayout requires a sparse scipy array or"
             " a sparse pytorch tensor")
+@docwrap(format='numpy', inheritparams=_doc_numeric_params)
 def is_array(obj, /, *,
              dtype=None, shape=None, ndim=None, numel=None, frozen=None,
              sparse=None, quant=None, unit=Ellipsis, ureg=None):
@@ -972,11 +997,6 @@ def is_array(obj, /, *,
         in `shape`, which matches any number of values in the `obj`'s shape
         tuple. The default value of ``None`` indicates that no restriction
         should be applied to the `obj`'s shape.
-    numel : int, tuple of ints, or None, optional
-        If the `numel` parameter is not ``None``, then the given `obj` must
-        have the same number of elements as given by `numel`. If `numel` is a
-        tuple, then the number of elements in `obj` must be in the `numel`
-        tuple. The number of elements is the product of its shape.
     frozen : bool or None, optional
         If ``None``, then no restrictions are placed on the ``'WRITEABLE'``
         flag of `obj`. If ``True``, then the data in `obj` must be read-only in
@@ -1108,6 +1128,7 @@ def is_array(obj, /, *,
     if dtype is None and shape is None and ndim is None and numel is None:
         return True
     return _numcoll_match(obj.shape, obj.dtype, ndim, shape, numel, dtype)
+@docwrap(format='numpy', inheritparams=_doc_numeric_params)
 def to_array(obj, /, dtype=None, *,
              order=None, copy=False, sparse=None, frozen=None,
              quant=None, ureg=None, unit=Ellipsis, detach=True):
@@ -1125,16 +1146,12 @@ def to_array(obj, /, dtype=None, *,
     Parameters
     ----------
     obj : object
-        The object that is to be reinterpreted as, or if necessary covnerted
+        The object that is to be reinterpreted as, or if necessary converted
         to, a NumPy array object.
     dtype : data-type, optional
         The `dtype` that is passed to ``numpy.asarray()``.
     order : {'C', 'F'}, optional
         The array order that is passed to ``numpy.asarray()``.
-    copy : boolean, optional
-        Whether to copy the data in `obj` or not. If ``False``, then `obj` is
-        only copied if doing so is required by the optional parameters. If
-        ``True``, then `obj` is always copied if possible.
     sparse : bool, 'csr', 'coo', or None, optional
         If ``None``, then the sparsity of `obj` is the same as the sparsity of
         the array that is returned. Otherwise, the return value will always be
@@ -1160,7 +1177,7 @@ def to_array(obj, /, dtype=None, *,
     ureg : pint.UnitRegistry or None, optional
         The ``pint.UnitRegistry`` object to use for units. If `ureg` is
         ``Ellipsis``, then ``immlib.units`` is used. If `ureg` is ``None`` (the
-        default), then no specific coersion to a ``UnitRegistry`` is performed
+        default), then no specific coercion to a ``UnitRegistry`` is performed
         (i.e., the same quantity class is returned).
     unit : unit-like, bool, or Ellipsis, optional
         The unit that should be used in the return value. When the return value
@@ -1503,18 +1520,18 @@ def to_torchdtype(obj, /):
     Parameters
     ----------
     obj : object
-        The object whose quality as a NumPy ``dtype`` object is to be assessed.
+        The object that is to be converted into a PyTorch ``dtype`` object.
 
     Returns
     -------
-    numpy.dtype
-        The ``numpy.dtype`` object that is equivalent to the argument `obj`.
+    torch.dtype
+        The ``torch.dtype`` object that is equivalent to the argument `obj`.
 
     Raises
     ------
     TypeError
-        If the given argument `obj` cannot be converted into a ``numpy.dtype``
-        object.
+        If the given argument `obj` cannot be converted into a
+        ``torch.dtype`` object.
     """
     if is_torchdtype(obj):
         return obj
@@ -1526,6 +1543,7 @@ def _is_never_tensor(obj,
                      sparse=None, quant=None, unit=Ellipsis, ureg=None):
     return False
 @alttorch(_is_never_tensor)
+@docwrap(format='numpy', inheritparams=_doc_numeric_params)
 def is_tensor(obj, /, dtype=None, *,
               shape=None, ndim=None, numel=None,
               device=None, requires_grad=None,
@@ -1564,11 +1582,6 @@ def is_tensor(obj, /, dtype=None, *,
         may appear in `shape`, which matches any number of values in the
         `obj`'s shape tuple. The default value of ``None`` indicates that no
         restriction should be applied to the `obj`'s shape.
-    numel : int, tuple of ints, or None, optional
-        If the `numel` parameter is not ``None``, then the given `obj` must
-        have the same number of elements as given by `numel`. If `numel` is a
-        tuple, then the number of elements in `obj` must be in the `numel`
-        tuple. The number of elements is the product of its shape.
     device : device-name or None, optional
         If `device` is ``None``, then a tensor with any `device` field is
         considered valid; otherwise, the `device` parameter must equal
@@ -1679,6 +1692,7 @@ def is_tensor(obj, /, dtype=None, *,
     if dtype is None and shape is None and ndim is None and numel is None:
         return True
     return _numcoll_match(obj.shape, obj.dtype, ndim, shape, numel, dtype)
+@docwrap(format='numpy', inheritparams=_doc_numeric_params)
 def to_tensor(obj, /, dtype=None, *,
               device=None, requires_grad=None, copy=False,
               sparse=None, quant=None, ureg=None, unit=Ellipsis):
@@ -1698,7 +1712,7 @@ def to_tensor(obj, /, dtype=None, *,
     Parameters
     ----------
     obj : object
-        The object that is to be reinterpreted as or covnerted to, a PyTorch
+        The object that is to be reinterpreted as or converted to, a PyTorch
         tensor object.
     dtype : dtype-like, optional
         The `dtype` that is passed to ``torch.as_tensor(obj)``.
@@ -1712,10 +1726,6 @@ def to_tensor(obj, /, dtype=None, *,
         not made to track its gradient if it is converted into a tensor. If the
         `requires_grad` parameter does not match the given tensor's
         `requires_grad` field, then a copy is always returned.
-    copy : bool, optional
-        Whether to copy the data in `obj` or not. If ``False``, then `obj` is
-        only copied if doing so is required by the optional parameters. If
-        ``True``, then `obj` is always copied if possible.
     sparse : bool, {'csr','csc','bsr','bsc','coo'}, or None, optional
         If ``None``, then the sparsity of `obj` is the same as the sparsity of
         the tensor that is returned. Otherwise, the return value will always be
@@ -1733,7 +1743,7 @@ def to_tensor(obj, /, dtype=None, *,
     ureg : pint.UnitRegistry or None, optional
         The ``pint.UnitRegistry`` object to use for units. If `ureg` is
         ``Ellipsis``, then ``immlib.units`` is used. If `ureg` is ``None`` (the
-        default), then no specific coersion to a ``pint.UnitRegistry`` is
+        default), then no specific coercion to a ``pint.UnitRegistry`` is
         performed (i.e., the specific subclass of ``pint.Quantity`` used by
         `obj` is not changed).
     unit : unit-like, bool, None, or Ellipsis, optional
@@ -1931,6 +1941,7 @@ def to_tensor(obj, /, dtype=None, *,
 
 # General Numeric Collection Functions ########################################
 
+@docwrap(format='numpy', inheritparams=_doc_numeric_params)
 def is_numeric(obj, /, dtype=None, *,
                shape=None, ndim=None, numel=None,
                sparse=None, quant=None, unit=Ellipsis, ureg=None):
@@ -1982,11 +1993,6 @@ def is_numeric(obj, /, dtype=None, *,
         not be sparse, respectively, for `obj` to be considered valid. If
         `sparse` is a string, then it must be a valid sparse array type that
         matches the type of `obj` for `obj` to be considered valid.
-    numel : int, tuple of ints, or None, optional
-        If the `numel` parameter is not ``None``, then the given `obj` must
-        have the same number of elements as given by `numel`. If `numel` is a
-        tuple, then the number of elements in `obj` must be in the `numel`
-        tuple. The number of elements is the product of its shape.
     quant : bool, optional
         Whether ``pint.Quantity`` objects should be considered valid or not.
         If ``quant=True`` then `obj` is considered a valid numerical object
@@ -2027,6 +2033,7 @@ def is_numeric(obj, /, dtype=None, *,
         return is_array(obj,
                         dtype=dtype, shape=shape, ndim=ndim, numel=numel,
                         sparse=sparse, quant=quant, unit=unit, ureg=ureg)
+@docwrap(format='numpy', inheritparams=_doc_numeric_params)
 def to_numeric(obj, /, dtype=None, *,
                copy=False, sparse=None, quant=None, ureg=None, unit=Ellipsis):
     """Reinterprets `obj` as a numeric type or quantity with such a magnitude.
@@ -2050,15 +2057,11 @@ def to_numeric(obj, /, dtype=None, *,
     Parameters
     ----------
     obj : object
-        The object that is to be reinterpreted as, or if necessary covnerted
+        The object that is to be reinterpreted as, or if necessary converted
         to, a numeric object.
     dtype : dtype-like or None, optional
         The dtype that is passed to ``torch.as_tensor(obj)`` or
         ``np.asarray(obj)``.
-    copy : bool, optional
-        Whether to copy the data in `obj` or not. If ``False``, then `obj` is
-        only copied if doing so is required by the optional parameters. If
-        ``True``, then `obj` is always copied if possible.
     sparse : bool, {'csr','csc','bsr','bsc','coo'}, or None, optional
         If ``None``, then the sparsity of `obj` is the same as the sparsity of
         the object that is returned. Otherwise, the return value will always be
@@ -2075,7 +2078,7 @@ def to_numeric(obj, /, dtype=None, *,
     ureg : pint.UnitRegistry or None, optional
         The ``pint.UnitRegistry`` object to use for units. If `ureg` is
         ``Ellipsis``, then ``immlib.units`` is used. If `ureg` is ``None`` (the
-        default), then no specific coersion to a ``pint.UnitRegistry`` is
+        default), then no specific coercion to a ``pint.UnitRegistry`` is
         performed (i.e., the same quantity class is returned).
     unit : unit-like, bool, None, or Ellipsis, optional
         The unit that should be used in the return value. When the return value

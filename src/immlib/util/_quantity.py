@@ -800,29 +800,86 @@ class Quantity(pint.Quantity):
     # Units of None ------------------------------------------------------
     @property
     def units(self):
+        """This quantity's units, or ``None`` if it has none.
+
+        ``None`` is immlib's "no units at all", which is not Pint's
+        ``dimensionless``--a real, measurable unit. See ``immlib.Quantity``.
+        """
         if self._units is None:
             return None
         return self._REGISTRY.Unit(self._units)
     @property
     def u(self):
+        "An alias of ``units``."
         return self.units
     @property
     def dimensionless(self):
+        """Whether this quantity's units are dimensionless.
+
+        A quantity with no units (``units is None``) is *not*
+        dimensionless: it has no dimension to be trivial, so this is
+        ``False`` for it, where Pint's own property would be ``True``.
+        """
         if self._units is None:
             return False
         return super().dimensionless
     @property
     def dimensionality(self):
+        """This quantity's dimensionality, as a mapping of base dimension
+        to exponent.
+
+        Raises
+        ------
+        TypeError
+            If this quantity has no units (``units is None``), which has no
+            dimensionality rather than a trivial one.
+        """
         if self._units is None:
             raise TypeError(
                 "quantity has no units (units is None); dimensionality is"
                 " undefined for a unitless immlib quantity")
         return super().dimensionality
+    @docwrap(format='numpy', inheritparams=pint.Quantity.check)
     def check(self, dimension):
+        """Returns whether this quantity's dimensionality matches
+        `dimension`; a quantity with no units matches nothing, not even a
+        dimensionless one.
+
+        Parameters
+        ----------
+
+        Returns
+        -------
+        bool
+            Whether the dimensionality matches.
+        """
         if self._units is None:
             return False
         return super().check(dimension)
+    @docwrap(format='numpy', inheritparams=pint.Quantity.to)
     def to(self, other=None, *contexts, **ctx_kwargs):
+        """Returns this quantity converted into the units `other`.
+
+        Converting to or from ``None`` units is always possible and never
+        changes the magnitude: ``q.to(None)`` strips whatever units `q` has
+        and ``q.to('mm')``, for a `q` with no units, simply attaches them.
+        A context cannot be given for either of those, since no conversion
+        takes place.
+
+        Parameters
+        ----------
+
+        Returns
+        -------
+        immlib.Quantity
+            This quantity in the units `other`.
+
+        Raises
+        ------
+        ValueError
+            If a context is given while converting to or from ``None``
+            units.
+        """
         if self._units is None or other is None:
             if contexts or ctx_kwargs:
                 raise ValueError(
@@ -830,7 +887,15 @@ class Quantity(pint.Quantity):
                     " from a unitless (units=None) quantity")
             return self.__class__(self._magnitude, other)
         return super().to(other, *contexts, **ctx_kwargs)
+    @docwrap(format='numpy', inheritparams=pint.Quantity.to)
     def ito(self, other=None, *contexts, **ctx_kwargs):
+        """Converts this quantity into the units `other` in place, and
+        returns ``None``.
+
+        This is one of the mutating operations that ``immlib.Quantity``
+        keeps from Pint but discourages; see ``immlib.Quantity``. ``to``
+        returns a new quantity instead.
+        """
         if self._units is None or other is None or self._is_0d():
             new = self.to(other, *contexts, **ctx_kwargs)
             self._magnitude = new._magnitude
@@ -893,6 +958,28 @@ class Quantity(pint.Quantity):
                 return str(self._magnitude)
         return super().__format__(spec)
     def m_as(self, units):
+        """Returns this quantity's magnitude in the units `units`.
+
+        ``q.m_as(None)`` returns the bare magnitude, whatever units `q` has,
+        symmetric with ``q.to(None)``.
+
+        Parameters
+        ----------
+        units : unit-like or None
+            The units to express the magnitude in.
+
+        Returns
+        -------
+        object
+            The magnitude, as a NumPy array, a PyTorch tensor, or whatever
+            else this quantity's magnitude is.
+
+        Raises
+        ------
+        ValueError
+            If this quantity has no units and real `units` are requested;
+            use ``to`` to attach units, or ``magnitude`` for the raw value.
+        """
         if units is None:
             # Requesting "no units" always succeeds and returns the bare
             # magnitude, symmetric with .to(None); this is true whether
@@ -1448,7 +1535,33 @@ class Quantity(pint.Quantity):
         # just as in Pint).
         return (_unpickle_quantity, (self._magnitude, self._units))
     def compare(self, other, op):
-        if self._units is None or (
+        """Returns the elementwise result of the ordered comparison `op`
+        between this quantity and `other`.
+
+        This is Pint's hook for ``<``, ``<=``, ``>`` and ``>=``, and is
+        overridden here so that those operators obey immlib's rules for
+        units of ``None`` and work with a PyTorch magnitude.
+
+        Parameters
+        ----------
+        other : quantity or array or tensor or number
+            The value to compare with.
+        op : callable
+            The comparison, as one of the ``operator`` module's functions.
+
+        Returns
+        -------
+        array or tensor of bool
+            The elementwise result, as a plain array or tensor.
+
+        Raises
+        ------
+        pint.DimensionalityError
+            If the two are not dimensionally comparable, which includes
+            ordering a value with no units against one with real
+            dimensions.
+        """
+        if self._units is None or(
                 isinstance(other, pint.Quantity) and other._units is None):
             return self._binop_none_bool(other, op)
         ops = self._real_tensor_operands(other, compare=True)

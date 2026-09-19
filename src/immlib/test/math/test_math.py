@@ -602,3 +602,96 @@ class TestMath(TestCase):
             self.assertEqual(r.units, a.units)
         with self.assertRaises(TypeError):
             im.take(a, il.quant(np.array([0]), 'm'))
+
+    def test_predicates_and_bounds(self):
+        """nonzero, isnan/isinf/isfinite, and clamp/clip."""
+        import immlib as il
+        import immlib.math as im
+        import numpy as np
+        a = il.quant(np.array([[3.0, 0.0, 2.0], [np.nan, np.inf, 4.0]]), 'm')
+        # nonzero gives torch's (n, ndim) rows by default and numpy's
+        # tuple-of-indices form with as_tuple.
+        r = im.nonzero(il.quant(np.array([[1.0, 0.0], [0.0, 2.0]])))
+        self.assertTrue(np.array_equal(r, [[0, 0], [1, 1]]))
+        r = im.nonzero(il.quant(np.array([[1.0, 0.0], [0.0, 2.0]])),
+                       as_tuple=True)
+        self.assertIsInstance(r, tuple)
+        self.assertTrue(np.array_equal(r[0], [0, 1]))
+        # The predicates ignore units and return plain bool arrays.
+        self.assertTrue(np.array_equal(im.isnan(a),
+                                       [[False, False, False],
+                                        [True, False, False]]))
+        self.assertTrue(np.array_equal(im.isinf(a),
+                                       [[False, False, False],
+                                        [False, True, False]]))
+        self.assertTrue(np.array_equal(im.isfinite(a),
+                                       [[True, True, True],
+                                        [False, False, True]]))
+        self.assertNotIsInstance(im.isnan(a), il.Quantity)
+        # clamp bounds are unit-aligned, and clip is its alias.
+        b = il.quant(np.array([1.0, 5.0, 9.0]), 'm')
+        r = im.clamp(b, il.quant(200.0, 'cm'), il.quant(800.0, 'cm'))
+        self.assertEqual(r.units, b.units)
+        self.assertTrue(np.allclose(r.m, [2.0, 5.0, 8.0]))
+        self.assertTrue(np.allclose(im.clip(b, il.quant(2.0, 'm')).m,
+                                    [2.0, 5.0, 9.0]))
+        self.assertIs(im.clip, im.clamp)
+        # At least one bound is required, as torch.clamp requires.
+        with self.assertRaises(ValueError):
+            im.clamp(b)
+
+    def test_pad(self):
+        """pad follows torch.nn.functional.pad, including its argument
+        order and its rank restriction for the non-constant modes."""
+        import immlib as il
+        import immlib.math as im
+        import numpy as np
+        a = il.quant(np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]), 'm')
+        # The amounts are given for the LAST dimension first, as in torch.
+        r = im.pad(a, (1, 0))
+        self.assertEqual(r.m.shape, (2, 4))
+        self.assertTrue(np.allclose(r.m[:, 0], [0.0, 0.0]))
+        self.assertEqual(r.units, a.units)
+        r = im.pad(a, (1, 0, 2, 0))
+        self.assertEqual(r.m.shape, (4, 4))
+        # A bare fill value is in a's own units.
+        r = im.pad(a, (1, 0), value=9)
+        self.assertTrue(np.allclose(r.m[:, 0], [9.0, 9.0]))
+        r = im.pad(a, (1, 0), value=il.quant(900.0, 'cm'))
+        self.assertTrue(np.allclose(r.m[:, 0], [9.0, 9.0]))
+        # torch's mode names, including the two numpy spells differently.
+        for (mode, first) in (('reflect', 2.0), ('replicate', 1.0),
+                              ('circular', 3.0)):
+            r = im.pad(a, (1, 0), mode=mode)
+            self.assertTrue(np.isclose(r.m[0, 0], first), mode)
+        with self.assertRaises(ValueError):
+            im.pad(a, (1, 0), mode='edge')     # numpy's name for replicate
+        # The non-constant modes pad n dimensions of an (n+1)- or
+        # (n+2)-dimensional argument, as torch requires.
+        with self.assertRaises(ValueError):
+            im.pad(a, (1, 1, 1, 1), mode='reflect')
+
+    def test_split_and_chunk(self):
+        """split takes a size and chunk a count, as in torch; chunk's sizes
+        are torch's, which differ from numpy.array_split's."""
+        import immlib as il
+        import immlib.math as im
+        import numpy as np
+        a = il.quant(np.arange(10.0), 'm')
+        # split's integer is the size of each piece.
+        pieces = im.split(a, 3)
+        self.assertEqual([len(p.m) for p in pieces], [3, 3, 3, 1])
+        self.assertEqual(pieces[0].units, a.units)
+        self.assertTrue(np.allclose(pieces[0].m, [0.0, 1.0, 2.0]))
+        # A sequence gives the sizes individually, and must sum correctly.
+        self.assertEqual([len(p.m) for p in im.split(a, [2, 8])], [2, 8])
+        with self.assertRaises(ValueError):
+            im.split(a, [2, 3])
+        # chunk's integer is a maximum number of pieces, each of size
+        # ceil(n / chunks); numpy.array_split would give [3, 3, 2, 2].
+        self.assertEqual([len(p.m) for p in im.chunk(a, 4)], [3, 3, 3, 1])
+        self.assertEqual(
+            [len(p.m) for p in im.chunk(a, 3)],
+            [len(p) for p in np.split(np.arange(10.0), [4, 8])])
+        with self.assertRaises(ValueError):
+            im.chunk(a, 0)

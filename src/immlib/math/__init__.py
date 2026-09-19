@@ -135,7 +135,16 @@ from ._core import (
     roll,
     repeat_interleave,
     tile,
-    dot)
+    dot,
+    split,
+    chunk,
+    nonzero,
+    isnan,
+    isinf,
+    isfinite,
+    clamp,
+    clip,
+    pad)
 
 __all__ = (
     "quant",
@@ -240,4 +249,13 @@ __all__ = (
     "roll",
     "repeat_interleave",
     "tile",
-    "dot")
+    "dot",
+    "split",
+    "chunk",
+    "nonzero",
+    "isnan",
+    "isinf",
+    "isfinite",
+    "clamp",
+    "clip",
+    "pad")

@@ -78,6 +78,7 @@ from collections import namedtuple
 import numpy as np
 import pint
 import scipy.sparse as sps
+from docshare import docwrap
 
 from ..util._numeric import torch, torch_found
 from ..util._core import unitregistry
@@ -334,30 +335,225 @@ def _unitless_elementwise(fname, np_fn, torch_name, a):
     return quant(rmag, None)
 
 
+# Shared documentation #########################################################
+# The functions in this module take a small, repeated vocabulary of
+# arguments, so each argument is documented once, here, and the functions
+# inherit the descriptions of the arguments they actually have (docshare
+# inherits only those). The prototypes below are documentation and nothing
+# else: they are never called.
+
+def _doc_params(a, b, y, x, cond, seq, elements, test_elements, index, mask,
+                weights, q, repeats, shifts, dims, dim0, dim1, shape,
+                start_dim, end_dim, decimals, keepdim, correction,
+                descending, stable, interpolation, sorted, return_inverse,
+                return_counts, assume_unique, invert, as_tuple, min, max,
+                split_size_or_sections, chunks, pad, mode, value):
+    """The arguments of ``immlib.math``'s functions, documented once.
+
+    Parameters
+    ----------
+    a : quantity or array or tensor or number
+        The value to operate on. Anything that is not already an
+        ``immlib.Quantity`` is treated as one with no units (see
+        ``immlib.quant``), and the backend follows the magnitude: a PyTorch
+        tensor selects PyTorch and anything else selects NumPy.
+    b : quantity or array or tensor or number
+        The second value, treated as `a` is.
+    y : quantity or array or tensor or number
+        The numerator, treated as `a` is.
+    x : quantity or array or tensor or number
+        The denominator, treated as `a` is.
+    cond : array or tensor of bool
+        The condition, elementwise: a plain boolean array or tensor, or a
+        unit-less quantity of one.
+    seq : sequence of quantity or array or tensor
+        The values to combine. They need not have the same units, but they
+        must be dimensionally compatible.
+    elements : quantity or array or tensor or number
+        The values to look up, treated as `a` is.
+    test_elements : quantity or array or tensor or number
+        The values to look for `elements` among, treated as `a` is.
+    index : array or tensor of int
+        The indices to take, as a plain array or tensor of integers, or a
+        unit-less quantity of them. An index in either backend's spelling
+        is accepted and converted.
+    mask : array or tensor of bool
+        Which elements to take, elementwise.
+    weights : array or tensor or number, optional
+        The weight of each element, which must be unit-less and must
+        broadcast against `a`. The default, ``None``, weights them equally.
+    q : number or array or tensor
+        The quantile or quantiles to compute.
+    repeats : int or array or tensor of int
+        How many times to repeat each element.
+    shifts : int or tuple of int
+        How far to shift the elements.
+    dims : int or tuple of int, optional
+        The dimensions to operate on.
+    dim0 : int
+        The first of the two dimensions to exchange.
+    dim1 : int
+        The second of the two dimensions to exchange.
+    shape : int or tuple of int
+        The shape of the result, given either as a tuple or as separate
+        arguments.
+    start_dim : int, optional
+        The first dimension to flatten; the default is ``0``.
+    end_dim : int, optional
+        The last dimension to flatten, inclusive; the default is ``-1``.
+    decimals : int, optional
+        The number of decimal places to round to; the default is ``0``.
+        PyTorch names this argument, and it may also be given positionally,
+        as in NumPy.
+    keepdim : bool, optional
+        Whether the reduced dimensions are kept, with length 1, rather than
+        removed. The default is ``False``. ``keepdims`` is accepted as an
+        alias, as PyTorch accepts it for some of its own functions.
+    correction : int, optional
+        The difference between the number of elements and the denominator's
+        degrees of freedom. The default is ``1``, a Bessel-corrected sample
+        statistic, as in PyTorch; ``numpy``'s ``ddof`` defaults to ``0``
+        instead, which is ``correction=0`` here.
+    descending : bool, optional
+        Whether to sort from largest to smallest rather than smallest to
+        largest. The default is ``False``.
+    stable : bool, optional
+        Whether equal elements keep their original order. The default is
+        ``False``.
+    interpolation : str, optional
+        How to compute a quantile that falls between two elements:
+        ``'linear'`` (the default), ``'lower'``, ``'higher'``,
+        ``'nearest'``, or ``'midpoint'``.
+    sorted : bool, optional
+        Accepted for ``torch.unique``'s sake. The distinct values are
+        always returned in order, as ``numpy.unique`` returns them.
+    return_inverse : bool, optional
+        Whether to also return, for each element of the input, its index
+        among the distinct values. The default is ``False``.
+    return_counts : bool, optional
+        Whether to also return how many times each distinct value occurs.
+        The default is ``False``.
+    assume_unique : bool, optional
+        Whether the inputs may be assumed to contain no repeated values,
+        which makes the operation faster. The default is ``False``.
+    invert : bool, optional
+        Whether to return the negation of the usual result. The default is
+        ``False``.
+    as_tuple : bool, optional
+        Whether to return one index per dimension, as ``numpy.nonzero``
+        does, rather than a single array of index rows, as
+        ``torch.nonzero`` does. The default is ``False``.
+    min : quantity or array or tensor or number, optional
+        The lower bound, unit-aligned with `a` as in ``maximum``. The
+        default, ``None``, applies no lower bound.
+    max : quantity or array or tensor or number, optional
+        The upper bound, treated as `min` is.
+    split_size_or_sections : int or sequence of int
+        The size of each piece, or the size of every piece individually.
+    chunks : int
+        The greatest number of pieces to cut the argument into.
+    pad : sequence of int
+        The amounts to pad with, as ``(before, after)`` for the last
+        dimension, then for the second-to-last, and so on--PyTorch's
+        spelling rather than NumPy's.
+    mode : str, optional
+        How to fill the padding: ``'constant'`` (the default),
+        ``'reflect'``, ``'replicate'`` or ``'circular'``.
+    value : quantity or number, optional
+        The element to pad a constant padding with; the default is zero. A
+        bare number is in `a`'s own units.
+    """
+    raise NotImplementedError("_doc_params is documentation, not a function")
+
+def _doc_dim_reduce(dim):
+    """The dimension argument of ``immlib.math``'s reductions.
+
+    Parameters
+    ----------
+    dim : int or tuple of int, optional
+        The dimension or dimensions to reduce. The default, ``None``,
+        reduces every dimension, giving a single value. ``axis`` is
+        accepted as an alias, as PyTorch accepts it for most of its own
+        reductions.
+    """
+    raise NotImplementedError("_doc_dim_reduce is documentation")
+
+def _doc_dim_along(dim):
+    """The dimension argument of ``immlib.math``'s non-reducing functions.
+
+    Parameters
+    ----------
+    dim : int, optional
+        The dimension to operate along. ``axis`` is accepted as an alias,
+        as PyTorch accepts it for most of its own functions.
+    """
+    raise NotImplementedError("_doc_dim_along is documentation")
+
+def _doc_returns_quantity(a):
+    """The usual result of an ``immlib.math`` function.
+
+    Returns
+    -------
+    immlib.Quantity
+        The result, whose magnitude is a NumPy array for a NumPy argument
+        and a PyTorch tensor for a tensor argument, and whose units are
+        described above.
+    """
+    raise NotImplementedError("_doc_returns_quantity is documentation")
+
+def _doc_returns_bool(a):
+    """The result of an ``immlib.math`` function that answers a question.
+
+    Returns
+    -------
+    array or tensor of bool
+        A plain NumPy array or PyTorch tensor of booleans--not an
+        ``immlib.Quantity``--so that it can be used directly as a mask.
+    """
+    raise NotImplementedError("_doc_returns_bool is documentation")
+
+def _doc_returns_indices(a):
+    """The result of an ``immlib.math`` function that answers with indices.
+
+    Returns
+    -------
+    array or tensor of int
+        A plain NumPy array or PyTorch tensor of integer indices--not an
+        ``immlib.Quantity``--so that it can be used directly for indexing.
+    """
+    raise NotImplementedError("_doc_returns_indices is documentation")
+
+
 # Elementwise arithmetic #######################################################
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def abs(a):
     """Returns the elementwise absolute value of `a`, preserving units."""
     return builtins.abs(quant(a))
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def add(a, b):
     """Returns ``a + b``; see ``immlib.Quantity``'s unit-aware addition."""
     return quant(a) + quant(b)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def subtract(a, b):
     """Returns ``a - b``; see ``immlib.Quantity``'s unit-aware subtraction."""
     return quant(a) - quant(b)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def multiply(a, b):
     """Returns ``a * b``; see ``immlib.Quantity``'s unit-aware multiplication."""
     return quant(a) * quant(b)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def divide(a, b):
     """Returns ``a / b``; see ``immlib.Quantity``'s unit-aware division."""
     return quant(a) / quant(b)
 
 true_divide = divide
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def pow(a, b):
     """Returns ``a ** b``; see ``immlib.Quantity.__pow__``. `b` must be a
     plain number or a unit-less quantity unless `a` is itself unit-less.
@@ -367,10 +563,12 @@ def pow(a, b):
     """
     return quant(a) ** b
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def negative(a):
     """Returns ``-a``, preserving units."""
     return -quant(a)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def positive(a):
     """Returns ``+a``, preserving units."""
     return +quant(a)
@@ -380,6 +578,7 @@ def positive(a):
 # Each of these returns a plain NumPy array or PyTorch tensor of bool, not an
 # immlib.Quantity--see the module docstring.
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_bool)
 def eq(a, b):
     """Returns the elementwise result of ``a == b`` as a plain bool array or
     tensor.
@@ -396,6 +595,7 @@ def eq(a, b):
     """
     return quant(a) == quant(b)
 
+@docwrap(format='numpy', inheritparams=_doc_params)
 def equal(a, b):
     """Returns whether `a` and `b` have the same shape and equal elements,
     as a single ``bool``.
@@ -408,29 +608,43 @@ def equal(a, b):
 
     Units are handled as in ``eq``, so quantities with compatible units are
     converted before comparing and incompatible ones are simply unequal.
+
+    Parameters
+    ----------
+
+    Returns
+    -------
+    bool
+        A single Python ``bool``, not an array of them: ``eq`` is the
+        elementwise comparison.
     """
     r = eq(a, b)
     if np.shape(quant(a).m) != np.shape(quant(b).m):
         return False
     return builtins.bool(r.all())
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_bool)
 def not_equal(a, b):
     """Returns the elementwise result of ``a != b``; see ``eq``."""
     return quant(a) != quant(b)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_bool)
 def less(a, b):
     """Returns the elementwise result of ``a < b`` (unit-aware; raises for
     dimensionally incompatible real units, per ``immlib.Quantity``)."""
     return quant(a) < quant(b)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_bool)
 def less_equal(a, b):
     """Returns the elementwise result of ``a <= b``; see ``less``."""
     return quant(a) <= quant(b)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_bool)
 def greater(a, b):
     """Returns the elementwise result of ``a > b``; see ``less``."""
     return quant(a) > quant(b)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_bool)
 def greater_equal(a, b):
     """Returns the elementwise result of ``a >= b``; see ``less``."""
     return quant(a) >= quant(b)
@@ -446,6 +660,7 @@ gt = greater
 #: An alias of ``immlib.math.greater_equal``, as in PyTorch.
 ge = greater_equal
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def maximum(a, b):
     """Returns the elementwise maximum of `a` and `b`.
 
@@ -467,6 +682,7 @@ def maximum(a, b):
         rmag = np.maximum(ma, mb)
     return quant(rmag, u)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def minimum(a, b):
     """Returns the elementwise minimum of `a` and `b`; see ``maximum``."""
     (ma, mb, u) = _align_units(a, b, 'minimum')
@@ -481,6 +697,7 @@ def minimum(a, b):
         rmag = np.minimum(ma, mb)
     return quant(rmag, u)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def where(cond, a, b):
     """Returns `a` where `cond` is true and `b` otherwise, elementwise;
     `cond` must be a plain (or unit-less-quantity) boolean array/tensor, and
@@ -501,6 +718,7 @@ def where(cond, a, b):
 
 # Elementary functions ##########################################################
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def sqrt(a):
     """Returns the elementwise square root of `a`; the result's units are
     `a`'s units raised to the 1/2 power (e.g. ``sqrt(4 m**2) == 2 m``)."""
@@ -515,38 +733,47 @@ def sqrt(a):
     u = None if a.units is None else (a.units ** 0.5)
     return quant(rmag, u)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def exp(a):
     """Returns the elementwise exponential of `a`; `a` must be unit-less."""
     return _unitless_elementwise('exp', np.exp, 'exp', a)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def log(a):
     """Returns the elementwise natural log of `a`; `a` must be unit-less."""
     return _unitless_elementwise('log', np.log, 'log', a)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def log10(a):
     """Returns the elementwise base-10 log of `a`; `a` must be unit-less."""
     return _unitless_elementwise('log10', np.log10, 'log10', a)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def sin(a):
     """Returns the elementwise sine of `a`; `a` must be unit-less."""
     return _unitless_elementwise('sin', np.sin, 'sin', a)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def cos(a):
     """Returns the elementwise cosine of `a`; `a` must be unit-less."""
     return _unitless_elementwise('cos', np.cos, 'cos', a)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def tan(a):
     """Returns the elementwise tangent of `a`; `a` must be unit-less."""
     return _unitless_elementwise('tan', np.tan, 'tan', a)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def arcsin(a):
     """Returns the elementwise arcsine of `a`; `a` must be unit-less."""
     return _unitless_elementwise('arcsin', np.arcsin, 'asin', a)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def arccos(a):
     """Returns the elementwise arccosine of `a`; `a` must be unit-less."""
     return _unitless_elementwise('arccos', np.arccos, 'acos', a)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def arctan(a):
     """Returns the elementwise arctangent of `a`; `a` must be unit-less."""
     return _unitless_elementwise('arctan', np.arctan, 'atan', a)
@@ -558,6 +785,7 @@ acos = arccos
 #: An alias of ``immlib.math.arctan``, as in PyTorch.
 atan = arctan
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def arctan2(y, x):
     """Returns the elementwise ``arctan2(y, x)``; the units of `y` and `x`
     are aligned as in ``maximum``, and the angle result is always unit-less.
@@ -573,6 +801,7 @@ def arctan2(y, x):
 #: An alias of ``immlib.math.arctan2``, as in PyTorch.
 atan2 = arctan2
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def floor(a):
     """Returns the elementwise floor of `a`, preserving units."""
     a = quant(a)
@@ -585,6 +814,7 @@ def floor(a):
         rmag = np.floor(m)
     return quant(rmag, a.units)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def ceil(a):
     """Returns the elementwise ceiling of `a`, preserving units."""
     a = quant(a)
@@ -597,6 +827,7 @@ def ceil(a):
         rmag = np.ceil(m)
     return quant(rmag, a.units)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def round(a, decimals=0):
     """Returns `a` elementwise-rounded to `decimals` decimal places (default
     0), preserving units. The argument is named as ``torch.round`` names it,
@@ -616,6 +847,7 @@ def round(a, decimals=0):
 
 # Reductions #####################################################################
 
+@docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_reduce), inheritreturns=_doc_returns_quantity)
 def sum(a, dim=None, keepdim=False, **kwargs):
     """Returns the sum of `a`'s elements (optionally along `dim`),
     preserving units."""
@@ -624,6 +856,7 @@ def sum(a, dim=None, keepdim=False, **kwargs):
     rmag = _reduce_mag(np.sum, 'sum', a.m, dim, keepdim)
     return quant(rmag, a.units)
 
+@docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_reduce), inheritreturns=_doc_returns_quantity)
 def prod(a, dim=None, keepdim=False, **kwargs):
     """Returns the product of `a`'s elements (optionally along `dim`); the
     result's units are `a`'s units raised to the power of the number of
@@ -669,6 +902,7 @@ def prod(a, dim=None, keepdim=False, **kwargs):
         u = a.units ** int(count)
     return quant(rmag, u)
 
+@docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_reduce), inheritreturns=_doc_returns_quantity)
 def mean(a, dim=None, keepdim=False, **kwargs):
     """Returns the mean of `a`'s elements (optionally along `dim`),
     preserving units."""
@@ -711,6 +945,7 @@ def _minmax(fname, a, dim, keepdim, kwargs):
     cls = min_result if fname == 'min' else max_result
     return cls(quant(vals, a.units), idcs)
 
+@docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_reduce))
 def min(a, dim=None, keepdim=False, **kwargs):
     """Returns the minimum of `a`'s elements, preserving units.
 
@@ -724,15 +959,37 @@ def min(a, dim=None, keepdim=False, **kwargs):
     Use ``amin`` for the values alone, and ``minimum`` for the elementwise
     minimum of two arguments (as in PyTorch, whose own two-argument ``min``
     is deprecated in favor of ``torch.minimum``).
+
+    Parameters
+    ----------
+
+    Returns
+    -------
+    immlib.Quantity or min_result
+        The smallest element, as a quantity, when `dim` is not given; a
+        ``(values, indices)`` named tuple when it is, whose `values` is a
+        quantity and whose `indices` is a plain array or tensor of
+        integers.
     """
     return _minmax('min', a, dim, keepdim, kwargs)
 
+@docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_reduce))
 def max(a, dim=None, keepdim=False, **kwargs):
     """Returns the maximum of `a`'s elements, preserving units; see
-    ``min``, whose behavior this mirrors (including the ``(values,
-    indices)`` result when `dim` is given)."""
+    ``min``, whose behavior this mirrors.
+
+    Parameters
+    ----------
+
+    Returns
+    -------
+    immlib.Quantity or max_result
+        The largest element, as a quantity, when `dim` is not given; a
+        ``(values, indices)`` named tuple when it is.
+    """
     return _minmax('max', a, dim, keepdim, kwargs)
 
+@docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_reduce), inheritreturns=_doc_returns_quantity)
 def amin(a, dim=None, keepdim=False, **kwargs):
     """Returns the minimum of `a`'s elements (optionally along `dim`),
     preserving units, as an ``immlib.Quantity``--never the ``(values,
@@ -742,6 +999,7 @@ def amin(a, dim=None, keepdim=False, **kwargs):
     a = quant(a)
     return quant(_reduce_mag(np.amin, 'amin', a.m, dim, keepdim), a.units)
 
+@docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_reduce), inheritreturns=_doc_returns_quantity)
 def amax(a, dim=None, keepdim=False, **kwargs):
     """Returns the maximum of `a`'s elements (optionally along `dim`),
     preserving units; see ``amin``."""
@@ -749,6 +1007,7 @@ def amax(a, dim=None, keepdim=False, **kwargs):
     a = quant(a)
     return quant(_reduce_mag(np.amax, 'amax', a.m, dim, keepdim), a.units)
 
+@docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_reduce), inheritreturns=_doc_returns_bool)
 def any(a, dim=None, keepdim=False, **kwargs):
     """Returns whether any of `a`'s elements are truthy (optionally along
     `dim`), as a plain bool array or tensor (not an ``immlib.Quantity``)."""
@@ -756,6 +1015,7 @@ def any(a, dim=None, keepdim=False, **kwargs):
     a = quant(a)
     return _reduce_mag(np.any, 'any', a.m, dim, keepdim)
 
+@docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_reduce), inheritreturns=_doc_returns_bool)
 def all(a, dim=None, keepdim=False, **kwargs):
     """Returns whether all of `a`'s elements are truthy (optionally along
     `dim`), as a plain bool array or tensor (not an ``immlib.Quantity``)."""
@@ -763,6 +1023,7 @@ def all(a, dim=None, keepdim=False, **kwargs):
     a = quant(a)
     return _reduce_mag(np.all, 'all', a.m, dim, keepdim)
 
+@docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_reduce), inheritreturns=_doc_returns_quantity)
 def std(a, dim=None, keepdim=False, correction=1, **kwargs):
     """Returns the standard deviation of `a`'s elements (optionally along
     `dim`), preserving units.
@@ -781,6 +1042,7 @@ def std(a, dim=None, keepdim=False, correction=1, **kwargs):
                         torch_kwargs={'correction': correction})
     return quant(rmag, a.units)
 
+@docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_reduce), inheritreturns=_doc_returns_quantity)
 def var(a, dim=None, keepdim=False, correction=1, **kwargs):
     """Returns the variance of `a`'s elements (optionally along `dim`); the
     result's units are `a`'s units squared. See ``std`` regarding
@@ -794,6 +1056,7 @@ def var(a, dim=None, keepdim=False, correction=1, **kwargs):
     u = None if a.units is None else (a.units ** 2)
     return quant(rmag, u)
 
+@docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_along), inheritreturns=_doc_returns_quantity)
 def cumsum(a, dim, **kwargs):
     """Returns the cumulative sum of `a`'s elements along `dim`, preserving
     units. `dim` is required, as it is in ``torch.cumsum``."""
@@ -814,6 +1077,7 @@ def cumsum(a, dim, **kwargs):
 
 # Shape / combination ############################################################
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def reshape(a, *shape):
     """Returns `a` reshaped to `shape`, preserving units. The shape may be
     given as a single tuple or as separate arguments."""
@@ -827,6 +1091,7 @@ def reshape(a, *shape):
         rmag = np.reshape(m, shape)
     return quant(rmag, a.units)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def transpose(a, dim0, dim1):
     """Returns `a` with the dimensions `dim0` and `dim1` exchanged,
     preserving units.
@@ -852,6 +1117,7 @@ swapaxes = transpose
 #: An alias of ``immlib.math.transpose``, as in PyTorch.
 swapdims = transpose
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def permute(a, *dims):
     """Returns `a` with its dimensions permuted into the order `dims`,
     preserving units. The dimensions may be given as a single tuple or as
@@ -872,6 +1138,7 @@ def permute(a, *dims):
         rmag = np.transpose(m, dims)
     return quant(rmag, a.units)
 
+@docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_along), inheritreturns=_doc_returns_quantity)
 def squeeze(a, dim=None, **kwargs):
     """Returns `a` with size-1 dimensions removed, preserving units.
 
@@ -903,6 +1170,7 @@ def squeeze(a, dim=None, **kwargs):
         rmag = np.squeeze(m, axis=dims) if dims else m
     return quant(rmag, a.units)
 
+@docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_along), inheritreturns=_doc_returns_quantity)
 def unsqueeze(a, dim, **kwargs):
     """Returns `a` with a new size-1 dimension inserted at `dim`, preserving
     units. This is ``torch.unsqueeze``; ``numpy.expand_dims`` is the same
@@ -918,6 +1186,7 @@ def unsqueeze(a, dim, **kwargs):
         rmag = np.expand_dims(m, dim)
     return quant(rmag, a.units)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def ravel(a):
     """Returns `a` flattened into one dimension, preserving units."""
     a = quant(a)
@@ -930,6 +1199,7 @@ def ravel(a):
         rmag = np.ravel(m)
     return quant(rmag, a.units)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def flatten(a, start_dim=0, end_dim=-1):
     """Returns `a` with the dimensions from `start_dim` through `end_dim`
     (inclusive) flattened into one, preserving units. This is
@@ -955,6 +1225,7 @@ def flatten(a, start_dim=0, end_dim=-1):
         rmag = np.reshape(m, shape[:s] + (n,) + shape[e+1:])
     return quant(rmag, a.units)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def conj(a):
     """Returns the elementwise complex conjugate of `a`, preserving units."""
     a = quant(a)
@@ -967,6 +1238,7 @@ def conj(a):
         rmag = np.conj(m)
     return quant(rmag, a.units)
 
+@docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_along), inheritreturns=_doc_returns_quantity)
 def stack(seq, dim=_UNSET, **kwargs):
     """Returns the quantities/arrays/tensors in `seq` stacked along a new
     dimension `dim`. If any element has real units, the result has the units
@@ -987,6 +1259,7 @@ def stack(seq, dim=_UNSET, **kwargs):
         rmag = np.stack(mags, axis=axis)
     return quant(rmag, u)
 
+@docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_along), inheritreturns=_doc_returns_quantity)
 def cat(seq, dim=_UNSET, **kwargs):
     """Returns the quantities/arrays/tensors in `seq` concatenated along an
     existing dimension `dim`; see ``stack`` regarding units.
@@ -1042,6 +1315,7 @@ def _sort_indices(m, dim, descending, stable):
         return np.argsort(-_signed(m), axis=dim, kind=kind)
     return np.argsort(m, axis=dim, kind=kind)
 
+@docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_along))
 def sort(a, dim=-1, descending=False, stable=False, **kwargs):
     """Returns `a`'s elements sorted along `dim`, preserving units.
 
@@ -1050,6 +1324,16 @@ def sort(a, dim=-1, descending=False, stable=False, **kwargs):
     array or tensor giving the index each value came from. Sorting is along
     the last dimension by default, and ascending unless `descending`;
     `stable` keeps equal elements in their original order.
+
+    Parameters
+    ----------
+
+    Returns
+    -------
+    sort_result
+        A ``(values, indices)`` named tuple, whose `values` is a quantity
+        in `a`'s units and whose `indices` is a plain array or tensor of
+        integers.
     """
     (dim, _) = _dimargs('sort', kwargs, dim=dim)
     dim = -1 if dim is None else dim
@@ -1065,6 +1349,7 @@ def sort(a, dim=-1, descending=False, stable=False, **kwargs):
         vals = np.take_along_axis(m, idcs, axis=dim)
     return sort_result(quant(vals, a.units), idcs)
 
+@docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_along), inheritreturns=_doc_returns_indices)
 def argsort(a, dim=-1, descending=False, stable=False, **kwargs):
     """Returns the indices that sort `a` along `dim`, as a plain array or
     tensor of integers; see ``sort``."""
@@ -1091,16 +1376,19 @@ def _argminmax(fname, a, dim, keepdim, kwargs):
     # NumPy's keepdims is ignored for a full reduction; PyTorch's is too.
     return r
 
+@docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_reduce), inheritreturns=_doc_returns_indices)
 def argmin(a, dim=None, keepdim=False, **kwargs):
     """Returns the index of `a`'s smallest element, as a plain integer array
     or tensor: the index along `dim`, or, when `dim` is not given, the index
     into the flattened input, as in both NumPy and PyTorch."""
     return _argminmax('argmin', a, dim, keepdim, kwargs)
 
+@docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_reduce), inheritreturns=_doc_returns_indices)
 def argmax(a, dim=None, keepdim=False, **kwargs):
     """Returns the index of `a`'s largest element; see ``argmin``."""
     return _argminmax('argmax', a, dim, keepdim, kwargs)
 
+@docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_reduce))
 def median(a, dim=None, keepdim=False, **kwargs):
     """Returns the median of `a`'s elements, preserving units.
 
@@ -1112,6 +1400,15 @@ def median(a, dim=None, keepdim=False, **kwargs):
     their mean, which is what ``numpy.median`` returns. The lower value is
     used for both backends, since one behavior must be chosen for both;
     ``mean(sort(a).values[..., k:k+2])`` gives the interpolated median.
+
+    Parameters
+    ----------
+
+    Returns
+    -------
+    immlib.Quantity or median_result
+        The median element, as a quantity, when `dim` is not given; a
+        ``(values, indices)`` named tuple when it is.
     """
     (dim, keepdim) = _dimargs('median', kwargs, dim=dim, keepdim=keepdim)
     a = quant(a)
@@ -1137,6 +1434,7 @@ def median(a, dim=None, keepdim=False, **kwargs):
         vals = np.squeeze(vals, axis=dim)
     return median_result(quant(vals, a.units), idcs)
 
+@docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_reduce), inheritreturns=_doc_returns_quantity)
 def quantile(a, q, dim=None, keepdim=False, interpolation='linear',
              **kwargs):
     """Returns the `q`-th quantile of `a`'s elements, preserving units.
@@ -1166,6 +1464,7 @@ def quantile(a, q, dim=None, keepdim=False, interpolation='linear',
                            method=interpolation)
     return quant(rmag, a.units)
 
+@docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_reduce), inheritreturns=_doc_returns_quantity)
 def percentile(a, q, dim=None, keepdim=False, interpolation='linear',
                **kwargs):
     """Returns the `q`-th percentile of `a`'s elements, preserving units;
@@ -1174,6 +1473,7 @@ def percentile(a, q, dim=None, keepdim=False, interpolation='linear',
     q = np.asarray(q) / 100 if not torch.is_tensor(q) else q / 100
     return quantile(a, q, dim, keepdim, interpolation, **kwargs)
 
+@docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_reduce), inheritreturns=_doc_returns_quantity)
 def ptp(a, dim=None, keepdim=False, **kwargs):
     """Returns the range of `a`'s elements--the largest minus the smallest,
     "peak to peak"--preserving units.
@@ -1185,6 +1485,7 @@ def ptp(a, dim=None, keepdim=False, **kwargs):
     (dim, keepdim) = _dimargs('ptp', kwargs, dim=dim, keepdim=keepdim)
     return amax(a, dim, keepdim) - amin(a, dim, keepdim)
 
+@docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_reduce), inheritreturns=_doc_returns_quantity)
 def average(a, dim=None, weights=None, keepdim=False, **kwargs):
     """Returns the weighted mean of `a`'s elements, preserving units.
 
@@ -1249,6 +1550,7 @@ def _setop_result(r, u, like):
         r = torch.as_tensor(r, device=like.device)
     return r if u is Ellipsis else quant(r, u)
 
+@docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_reduce))
 def unique(a, sorted=True, return_inverse=False, return_counts=False,
            dim=None, **kwargs):
     """Returns `a`'s distinct elements in order, preserving units.
@@ -1261,6 +1563,16 @@ def unique(a, sorted=True, return_inverse=False, return_counts=False,
 
     This is not differentiable in either backend: a tensor is detached, and
     the result carries no gradient.
+
+    Parameters
+    ----------
+
+    Returns
+    -------
+    immlib.Quantity or tuple
+        The distinct values, as a quantity in `a`'s units; or, when
+        `return_inverse` or `return_counts` is given, a tuple of that
+        quantity followed by the requested plain integer arrays or tensors.
     """
     (dim, _) = _dimargs('unique', kwargs, dim=dim)
     ((m,), u, like) = _setop_mags('unique', a)
@@ -1271,6 +1583,7 @@ def unique(a, sorted=True, return_inverse=False, return_counts=False,
     return (_setop_result(r[0], u, like),
             *(_setop_result(x, Ellipsis, like) for x in r[1:]))
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def union1d(a, b):
     """Returns the sorted, distinct elements of `a` and `b` together, in the
     units of the first argument that has them; see ``unique`` regarding
@@ -1278,6 +1591,7 @@ def union1d(a, b):
     (mags, u, like) = _setop_mags('union1d', a, b)
     return _setop_result(np.union1d(*mags), u, like)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def intersect1d(a, b, assume_unique=False):
     """Returns the sorted, distinct elements common to `a` and `b`, in the
     units of the first argument that has them; see ``unique`` regarding
@@ -1286,6 +1600,7 @@ def intersect1d(a, b, assume_unique=False):
     return _setop_result(
         np.intersect1d(*mags, assume_unique=assume_unique), u, like)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def setdiff1d(a, b, assume_unique=False):
     """Returns the sorted, distinct elements of `a` that are not in `b`, in
     the units of the first argument that has them; see ``unique`` regarding
@@ -1294,6 +1609,7 @@ def setdiff1d(a, b, assume_unique=False):
     return _setop_result(
         np.setdiff1d(*mags, assume_unique=assume_unique), u, like)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def setxor1d(a, b, assume_unique=False):
     """Returns the sorted, distinct elements of exactly one of `a` and `b`,
     in the units of the first argument that has them; see ``unique``
@@ -1302,6 +1618,7 @@ def setxor1d(a, b, assume_unique=False):
     return _setop_result(
         np.setxor1d(*mags, assume_unique=assume_unique), u, like)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_bool)
 def isin(elements, test_elements, assume_unique=False, invert=False):
     """Returns, for each element of `elements`, whether it occurs in
     `test_elements`, as a plain bool array or tensor of `elements`' shape.
@@ -1330,6 +1647,7 @@ def _index_mag(m, index, fname):
         index = index.detach().cpu().numpy()
     return np.asarray(index)
 
+@docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_along), inheritreturns=_doc_returns_quantity)
 def gather(a, dim, index, **kwargs):
     """Returns the elements of `a` at `index` along `dim`, preserving units:
     the result has `index`'s shape, and its element at position ``(i, j)``
@@ -1347,6 +1665,7 @@ def gather(a, dim, index, **kwargs):
         rmag = np.take_along_axis(m, idx, axis=dim)
     return quant(rmag, a.units)
 
+@docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_along), inheritreturns=_doc_returns_quantity)
 def index_select(a, dim, index, **kwargs):
     """Returns the slices of `a` along `dim` at the entries of the 1-D
     `index`, preserving units. This is ``torch.index_select``;
@@ -1363,6 +1682,7 @@ def index_select(a, dim, index, **kwargs):
         rmag = np.take(m, idx, axis=dim)
     return quant(rmag, a.units)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def take(a, index):
     """Returns the elements of `a` at the entries of `index`, which are
     indices into `a` flattened, preserving units. The result has `index`'s
@@ -1375,6 +1695,7 @@ def take(a, index):
     rmag = torch.take(m, idx) if torch.is_tensor(m) else np.take(m, idx)
     return quant(rmag, a.units)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def masked_select(a, mask):
     """Returns the elements of `a` where `mask` is true, as a 1-D quantity
     in `a`'s units. This is ``torch.masked_select``; indexing an array with
@@ -1394,6 +1715,7 @@ def masked_select(a, mask):
         rmag = m[np.asarray(msk).astype(bool)]
     return quant(rmag, a.units)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def flip(a, dims=None, **kwargs):
     """Returns `a` with the order of its elements reversed along `dims` (or
     along every dimension, if `dims` is not given), preserving units."""
@@ -1412,6 +1734,7 @@ def flip(a, dims=None, **kwargs):
         rmag = np.flip(m, axis=tuple(dims))
     return quant(rmag, a.units)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def roll(a, shifts, dims=None, **kwargs):
     """Returns `a` with its elements shifted by `shifts` along `dims`,
     wrapping around, and preserving units. With no `dims`, `a` is flattened,
@@ -1432,6 +1755,7 @@ def roll(a, shifts, dims=None, **kwargs):
         rmag = np.roll(m, shifts, axis=dims)
     return quant(rmag, a.units)
 
+@docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_along), inheritreturns=_doc_returns_quantity)
 def repeat_interleave(a, repeats, dim=None, **kwargs):
     """Returns `a` with each of its elements repeated `repeats` times along
     `dim`, preserving units; with no `dim`, `a` is flattened first. This is
@@ -1454,6 +1778,7 @@ def repeat_interleave(a, repeats, dim=None, **kwargs):
         rmag = np.repeat(m, repeats, axis=dim)
     return quant(rmag, a.units)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def tile(a, dims):
     """Returns `a` tiled `dims` times along each dimension, preserving
     units. This is ``torch.tile`` and ``numpy.tile``."""
@@ -1466,8 +1791,248 @@ def tile(a, dims):
     return quant(rmag, a.units)
 
 
+def _splits(fname, n, sizes, dim, a):
+    """Returns the pieces of `a` cut at the cumulative `sizes` along `dim`."""
+    m = a.m
+    out = []
+    start = 0
+    for size in sizes:
+        stop = start + size
+        idx = [slice(None)] * np.ndim(m)
+        idx[dim] = slice(start, stop)
+        out.append(quant(m[tuple(idx)], a.units))
+        start = stop
+    return tuple(out)
+
+@docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_along))
+def split(a, split_size_or_sections, dim=0, **kwargs):
+    """Returns `a` cut into pieces along `dim`, as a tuple of quantities in
+    `a`'s units.
+
+    An integer gives the size of each piece, the last being smaller if the
+    dimension does not divide evenly; a sequence of integers gives the size
+    of each piece individually. This is ``torch.split``'s meaning of the
+    argument; ``numpy.split``'s integer is a *number of pieces*, which is
+    ``chunk`` here.
+
+    Parameters
+    ----------
+
+    Returns
+    -------
+    tuple of immlib.Quantity
+        The pieces, each in `a`'s units.
+    """
+    (dim, _) = _dimargs('split', kwargs, dim=dim)
+    dim = 0 if dim is None else dim
+    a = quant(a)
+    if sps.issparse(a.m):
+        raise _sparse_dense_error('split')
+    n = np.shape(a.m)[dim]
+    if isinstance(split_size_or_sections, (tuple, list)):
+        sizes = [int(s) for s in split_size_or_sections]
+        if builtins.sum(sizes) != n:
+            raise ValueError(
+                f"immlib.math.split: the sections {tuple(sizes)} do not sum"
+                f" to the size of dimension {dim} ({n})")
+    else:
+        size = int(split_size_or_sections)
+        if size <= 0:
+            raise ValueError(
+                "immlib.math.split: the split size must be positive")
+        sizes = [size] * (n // size) + ([n % size] if n % size else [])
+    return _splits('split', n, sizes, dim, a)
+
+@docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_along))
+def chunk(a, chunks, dim=0, **kwargs):
+    """Returns `a` cut into at most `chunks` pieces along `dim`, as a tuple
+    of quantities in `a`'s units.
+
+    Every piece but the last has the same size, ``ceil(n / chunks)``, which
+    is ``torch.chunk``'s rule and can yield fewer than `chunks` pieces--
+    ``chunk(a, 4)`` of a dimension of 5 gives three pieces, of 2, 2 and 1.
+    ``numpy.array_split`` balances the pieces instead, giving four of 2, 1,
+    1 and 1; PyTorch's rule is used for both backends.
+
+    Parameters
+    ----------
+
+    Returns
+    -------
+    tuple of immlib.Quantity
+        The pieces, each in `a`'s units.
+    """
+    (dim, _) = _dimargs('chunk', kwargs, dim=dim)
+    dim = 0 if dim is None else dim
+    a = quant(a)
+    if sps.issparse(a.m):
+        raise _sparse_dense_error('chunk')
+    chunks = int(chunks)
+    if chunks <= 0:
+        raise ValueError(
+            "immlib.math.chunk: the number of chunks must be positive")
+    n = np.shape(a.m)[dim]
+    size = -(-n // chunks)          # ceiling division, as PyTorch does it
+    if size == 0:
+        return _splits('chunk', n, [1] * n, dim, a)
+    sizes = [size] * (n // size) + ([n % size] if n % size else [])
+    return _splits('chunk', n, sizes, dim, a)
+
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_indices)
+def nonzero(a, as_tuple=False):
+    """Returns the indices of `a`'s non-zero elements, as plain integer
+    arrays or tensors.
+
+    The result is a single ``(n, ndim)`` array or tensor, one row per
+    non-zero element, which is ``torch.nonzero``'s form; ``as_tuple=True``
+    gives one 1-dimensional index per dimension instead, which is
+    ``numpy.nonzero``'s form.
+    """
+    a = quant(a)
+    m = a.m
+    if sps.issparse(m):
+        raise _sparse_dense_error('nonzero')
+    if torch.is_tensor(m):
+        return torch.nonzero(m, as_tuple=as_tuple)
+    idcs = np.nonzero(m)
+    return idcs if as_tuple else np.stack(idcs, axis=-1)
+
+def _predicate(fname, np_fn, torch_name, a):
+    a = quant(a)
+    m = a.m
+    if sps.issparse(m):
+        raise _sparse_dense_error(fname)
+    if torch.is_tensor(m):
+        return getattr(torch, torch_name)(m)
+    return np_fn(m)
+
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_bool)
+def isnan(a):
+    """Returns, elementwise, whether `a` is not a number, as a plain bool
+    array or tensor. The units are irrelevant and are not required."""
+    return _predicate('isnan', np.isnan, 'isnan', a)
+
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_bool)
+def isinf(a):
+    """Returns, elementwise, whether `a` is positive or negative infinity,
+    as a plain bool array or tensor."""
+    return _predicate('isinf', np.isinf, 'isinf', a)
+
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_bool)
+def isfinite(a):
+    """Returns, elementwise, whether `a` is neither infinite nor a NaN, as a
+    plain bool array or tensor."""
+    return _predicate('isfinite', np.isfinite, 'isfinite', a)
+
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
+def clamp(a, min=None, max=None):
+    """Returns `a` with its elements limited to the range `min` to `max`,
+    preserving units.
+
+    At least one bound must be given, as ``torch.clamp`` requires. A bound
+    is unit-aligned with `a` as in ``maximum``, so a bound with compatible
+    units is converted and one with no units is dimensionless. ``clip`` is
+    an alias, as it is in PyTorch.
+    """
+    a = quant(a)
+    if min is None and max is None:
+        raise ValueError(
+            "immlib.math.clamp: at least one of 'min' or 'max' must be"
+            " given")
+    m = a.m
+    if sps.issparse(m):
+        raise _sparse_dense_error('clamp')
+    u = a.units
+    lo = None if min is None else _align_units(a, min, 'clamp')[1]
+    hi = None if max is None else _align_units(a, max, 'clamp')[1]
+    if torch.is_tensor(m):
+        (lo, hi) = (
+            None if lo is None else promote(m, lo)[1],
+            None if hi is None else promote(m, hi)[1])
+        rmag = torch.clamp(m, lo, hi)
+    else:
+        rmag = np.clip(m, lo, hi)
+    return quant(rmag, u)
+
+#: An alias of ``immlib.math.clamp``, as in PyTorch.
+clip = clamp
+
+#: The padding modes that ``immlib.math.pad`` accepts, and the NumPy mode
+#: that computes each of them. PyTorch's names are the ones taken.
+_PAD_MODES = {'constant': 'constant', 'reflect': 'reflect',
+              'replicate': 'edge', 'circular': 'wrap'}
+
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
+def pad(a, pad, mode='constant', value=None):
+    """Returns `a` with elements added around its edges, preserving units.
+
+    `pad` is a flat sequence of amounts, ``(before, after)`` for the last
+    dimension, then for the second-to-last, and so on--which is
+    ``torch.nn.functional.pad``'s spelling, not ``numpy.pad``'s per-
+    dimension list in the opposite order. `mode` is ``'constant'`` (the
+    default), ``'reflect'``, ``'replicate'`` or ``'circular'``, again
+    PyTorch's names; NumPy calls the last two ``'edge'`` and ``'wrap'``.
+
+    `value` is the element to pad a constant padding with. It defaults to
+    zero, and a bare number is taken to be in `a`'s own units, since a fill
+    value replaces an element of `a` rather than combining with one; a
+    quantity is converted into `a`'s units.
+
+    Every mode but ``'constant'`` requires that the number of padded
+    dimensions be one or two fewer than `a`'s number of dimensions, as
+    PyTorch requires; the restriction is enforced for both backends, so
+    that the same call behaves the same way.
+    """
+    a = quant(a)
+    m = a.m
+    if sps.issparse(m):
+        raise _sparse_dense_error('pad')
+    if mode not in _PAD_MODES:
+        raise ValueError(
+            f"immlib.math.pad: unrecognized mode '{mode}'; the modes are"
+            f" {tuple(_PAD_MODES)}")
+    pads = tuple(int(p) for p in pad)
+    if len(pads) % 2:
+        raise ValueError(
+            "immlib.math.pad: pad must give a pair of amounts per padded"
+            " dimension, so its length must be even")
+    npad = len(pads) // 2
+    ndim = np.ndim(m)
+    if npad > ndim:
+        raise ValueError(
+            f"immlib.math.pad: pad gives amounts for {npad} dimensions, but"
+            f" the argument has {ndim}")
+    if mode != 'constant' and ndim not in (npad + 1, npad + 2):
+        raise ValueError(
+            f"immlib.math.pad: mode '{mode}' pads {npad} dimension(s) of an"
+            f" argument with {npad + 1} or {npad + 2} dimensions, but this"
+            f" one has {ndim} (PyTorch's restriction, applied to both"
+            f" backends)")
+    # A bare fill value is in a's own units.
+    if value is None:
+        fill = 0
+    elif isinstance(value, pint.Quantity) and value.units is not None:
+        fill = _as_real_units(value, a.units) if a.units is not None else \
+            _align_units(a, value, 'pad')[1]
+    else:
+        fill = value.m if isinstance(value, pint.Quantity) else value
+    if torch.is_tensor(m):
+        import torch.nn.functional as _F
+        kw = {} if mode != 'constant' else {'value': builtins.float(fill)}
+        rmag = _F.pad(m, pads, mode=mode, **kw)
+    else:
+        pairs = [(pads[2*i], pads[2*i + 1]) for i in range(npad)]
+        width = [(0, 0)] * (ndim - npad) + list(reversed(pairs))
+        if mode == 'constant':
+            rmag = np.pad(m, width, mode='constant', constant_values=fill)
+        else:
+            rmag = np.pad(m, width, mode=_PAD_MODES[mode])
+    return quant(rmag, a.units)
+
+
 # Linear algebra ##################################################################
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def matmul(a, b):
     """Returns ``a @ b``; see ``immlib.Quantity.__matmul__``.
 
@@ -1475,6 +2040,7 @@ def matmul(a, b):
     """
     return quant(a) @ quant(b)
 
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def dot(a, b):
     """Returns the inner product of the 1-dimensional `a` and `b`; the
     result's units are the product of theirs.

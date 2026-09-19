@@ -121,6 +121,26 @@ UNARY_CALLS = [
     ('repeat_interleave', (2,), {}, 'mm'),
     ('repeat_interleave', (2, 1), {}, 'mm'),
     ('tile', ((1, 2),), {}, 'mm'),
+    # Predicates, bounds, padding and splitting.
+    ('nonzero', (), {}, 'mm'),
+    ('nonzero', (), {'as_tuple': True}, 'mm'),
+    ('isnan', (), {}, 'mm'),
+    ('isinf', (), {}, 'mm'),
+    ('isfinite', (), {}, 'mm'),
+    ('clamp', (1.0, 3.0), {}, None),
+    ('clamp', (), {'min': 2.0}, None),
+    ('clamp', (), {}, None),            # neither bound: an error, in both
+    ('clip', (1.0, 3.0), {}, None),
+    ('pad', ((1, 0),), {}, 'mm'),
+    ('pad', ((1, 0),), {'value': 9}, 'mm'),
+    ('pad', ((1, 1),), {'mode': 'reflect'}, 'mm'),
+    ('pad', ((1, 1),), {'mode': 'replicate'}, 'mm'),
+    ('pad', ((1, 1),), {'mode': 'circular'}, 'mm'),
+    ('pad', ((1, 1, 1, 1),), {'mode': 'reflect'}, 'mm'),   # a rank error
+    ('split', (2, 1), {}, 'mm'),
+    ('split', ([1, 2], 1), {}, 'mm'),
+    ('chunk', (2, 1), {}, 'mm'),
+    ('chunk', (3, 1), {}, 'mm'),
 ]
 
 # Calls whose second argument is a quantity of the same kind as the first,
@@ -375,13 +395,18 @@ class TestRules(TestCase):
                 'not_equal', 'less', 'less_equal', 'greater',
                 'greater_equal', 'unique', 'union1d', 'intersect1d',
                 'setdiff1d', 'setxor1d', 'isin', 'argmin', 'argmax',
-                'argsort')
+                'argsort', 'nonzero', 'isnan', 'isinf', 'isfinite')
         for (name, args, kwargs, units) in UNARY_CALLS:
             if name in skip:
                 continue
             with self.subTest(fn=name, args=args, kwargs=kwargs):
                 (_, b) = self._quants(units, grad=True)
-                r = getattr(im, name)(b, *args, **kwargs)
+                (kind, r) = self._call(getattr(im, name), b, *args, **kwargs)
+                if kind == 'err':
+                    # A call that is meant to raise (a bad mode, a missing
+                    # bound) has nothing to track a gradient through; that
+                    # both backends raise alike is Rule 1's test.
+                    continue
                 for part in (r if isinstance(r, tuple) else (r,)):
                     m = part.m if isinstance(part, pint.Quantity) else part
                     if torch.is_tensor(m) and not m.dtype.is_floating_point:
@@ -458,7 +483,7 @@ class TestRules(TestCase):
                    'arcsin': 'asin', 'ne': 'not_equal',
                    'lt': 'less', 'le': 'less_equal', 'gt': 'greater',
                    'ge': 'greater_equal', 'absolute': 'abs',
-                   'acos': 'arccos'}
+                   'acos': 'arccos', 'clip': 'clamp'}
         missing = []
         for name in im.__all__:
             if name in covered or aliases.get(name) in covered:
