@@ -393,7 +393,9 @@ class TestThreads(TestCase):
         import numpy as np
         from immlib import quant
         ref = np.arange(1.0, 51.0)
-        q = quant(ref.copy(), 'mm')
+        # Explicitly mutable: quant makes persistent quantities by default,
+        # and a persistent one cannot get into the state this test is about.
+        q = quant(ref.copy(), 'mm', persist=False)
         torn = []
         stop = threading.Event()
         def read(i):
@@ -410,10 +412,15 @@ class TestThreads(TestCase):
                     torn.append(units)
             return True
         def flip(i):
-            for _ in range(500):
-                q.ito('cm')
-                q.ito('mm')
-            stop.set()
+            try:
+                for _ in range(500):
+                    q.ito('cm')
+                    q.ito('mm')
+            finally:
+                # The readers spin until this is set, so it must be set even
+                # if the loop above raises; a failing test is fine, a test
+                # that hangs the suite is not.
+                stop.set()
             return True
         def task(i):
             return flip(i) if i == 0 else read(i)

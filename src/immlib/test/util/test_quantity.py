@@ -303,8 +303,9 @@ class TestUtilQuantity(TestCase):
         self.assertEqual(float(quant(10.5)), 10.5)
         self.assertEqual(complex(quant(10)), complex(10))
         # .ito() is the in-place version of .to(): it mutates the quantity
-        # itself rather than returning a new one.
-        m = quant(10)
+        # itself rather than returning a new one. quant makes persistent
+        # quantities by default, so a mutable one is asked for here.
+        m = quant(10, persist=False)
         ret = m.ito('mm')
         self.assertIsNone(ret)
         self.assertEqual(m.u, units.mm)
@@ -337,7 +338,7 @@ class TestUtilQuantity(TestCase):
         self.assertTrue(np.array_equal(e.m, a.m * d.m))
         # The in-place operators (+=, *=) mutate the quantity itself
         # (identity is preserved) rather than returning a new object.
-        f = quant(np.array([1.0, 2.0, 3.0]))
+        f = quant(np.array([1.0, 2.0, 3.0]), persist=False)
         f_id = id(f)
         f += quant(np.array([1.0, 1.0, 1.0]))
         self.assertEqual(id(f), f_id)
@@ -363,7 +364,7 @@ class TestUtilQuantity(TestCase):
         self.assertIsNone(r0.units)
         self.assertTrue(np.array_equal(r0.m, [1.0, 1.0]))
         # In-place **= mutates the quantity itself.
-        b = quant(np.array([2.0, 3.0]))
+        b = quant(np.array([2.0, 3.0]), persist=False)
         b_id = id(b)
         b **= 2
         self.assertEqual(id(b), b_id)
@@ -934,7 +935,7 @@ class TestUtilQuantity(TestCase):
         # ito() (in-place to()) on a None-units quantity mutates the
         # quantity itself and returns None, exactly like pint's own
         # ito() for real-unit quantities.
-        q = quant(np.array([1.0, 2.0, 3.0]))
+        q = quant(np.array([1.0, 2.0, 3.0]), persist=False)
         q_id = id(q)
         result = q.ito('mm')
         self.assertIsNone(result)
@@ -942,7 +943,7 @@ class TestUtilQuantity(TestCase):
         self.assertEqual(str(q.units), 'millimeter')
         self.assertTrue(np.array_equal(q.m, [1.0, 2.0, 3.0]))
         # ito(None) strips a real-unit quantity's units in place.
-        q2 = quant(np.array([1.0, 2.0, 3.0]), 'm')
+        q2 = quant(np.array([1.0, 2.0, 3.0]), 'm', persist=False)
         q2.ito(None)
         self.assertIsNone(q2.units)
         self.assertTrue(np.array_equal(q2.m, [1.0, 2.0, 3.0]))
@@ -950,7 +951,7 @@ class TestUtilQuantity(TestCase):
         # points, alongside += and *= already covered in
         # test_quantity_none_arithmetic) also mutate a None-units
         # quantity in place rather than returning a new object.
-        f = quant(np.array([5.0, 6.0, 7.0]))
+        f = quant(np.array([5.0, 6.0, 7.0]), persist=False)
         f_id = id(f)
         f -= quant(np.array([1.0, 1.0, 1.0]))
         self.assertEqual(id(f), f_id)
@@ -1338,7 +1339,7 @@ class TestUtilQuantity(TestCase):
         q *= 2.5
         self.assertEqual(float(q.m_as('m')), 12.5)
         self.assertEqual(int(m), 5)
-        q = quant(5, 'm')
+        q = quant(5, 'm', persist=False)
         q.ito('mm')
         self.assertEqual(float(q.m), 5000.0)
         self.assertEqual(str(q.units), 'millimeter')
@@ -1355,7 +1356,7 @@ class TestUtilQuantity(TestCase):
         self.assertTrue(torch.is_tensor(r.m))
         # In-place operators on arrays with dimensions still work in place.
         a = np.array([1.0, 2.0])
-        qa = quant(a, 'm')
+        qa = quant(a, 'm', persist=False)
         qa *= 2
         self.assertTrue(np.array_equal(a, [2.0, 4.0]))
         # round() works.
@@ -1394,7 +1395,7 @@ class TestUtilQuantity(TestCase):
         (frac, whole) = np.modf(n)
         check(frac, np.modf(a)[0])
         check(whole, np.modf(a)[1])
-        out = quant(np.zeros(3))
+        out = quant(np.zeros(3), persist=False)
         self.assertIs(np.add(n, n, out=out), out)
         check(out, 2 * a)
         # Boolean and index results are plain.
@@ -1417,11 +1418,13 @@ class TestUtilQuantity(TestCase):
         import copy, pickle
         import numpy as np, torch, pint
         from immlib import quant, Quantity
-        for make in (lambda: quant(np.array([1.0, 2.0, 3.0]), 'mm'),
-                     lambda: quant(torch.tensor([1.0, 2.0, 3.0]), 'mm')):
+        for make in (
+                lambda: quant(np.array([1.0, 2.0, 3.0]), 'mm', persist=False),
+                lambda: quant(torch.tensor([1.0, 2.0, 3.0]), 'mm',
+                              persist=False)):
             q = make()
-            # A new quantity is not persistent, and persist returns the
-            # same object rather than a copy.
+            # A quantity asked for as mutable is not persistent, and persist
+            # returns the same object rather than a copy.
             self.assertFalse(q.is_persistent)
             self.assertIs(q.persist(), q)
             self.assertTrue(q.is_persistent)
@@ -1488,7 +1491,8 @@ class TestUtilQuantity(TestCase):
             self.assertTrue(copy.copy(q).is_persistent)
             self.assertTrue(copy.deepcopy(q).is_persistent)
             self.assertTrue(pickle.loads(pickle.dumps(q)).is_persistent)
-            self.assertFalse(quant(q.m, q.u).is_persistent)
+            self.assertFalse(quant(q, persist=False).is_persistent)
+            self.assertTrue(quant(q.m, q.u).is_persistent)
             # A mutable quantity is unaffected by any of this.
             m = make()
             m += quant(1.0, 'mm')
@@ -1519,7 +1523,7 @@ class TestUtilQuantity(TestCase):
             np.cumsum(rq, out=rout)
         self.assertTrue(np.allclose(rout.m, np.zeros(2)))
         # A mutable out= still works.
-        mout = quant(np.zeros(2))
+        mout = quant(np.zeros(2), persist=False)
         self.assertIs(np.add(qn, qn, out=mout), mout)
         # The contents of the magnitude are not frozen by persist; that is
         # what immlib.freezearray is for.
@@ -1549,8 +1553,8 @@ class TestUtilQuantity(TestCase):
         from immlib import quant
         # A unit-less quantity divides and takes remainders like its own
         # magnitude, and does it in place.
-        for mk in (lambda: quant(np.array([5.0, 7.0])),
-                   lambda: quant(torch.tensor([5.0, 7.0]))):
+        for mk in (lambda: quant(np.array([5.0, 7.0]), persist=False),
+                   lambda: quant(torch.tensor([5.0, 7.0]), persist=False)):
             q = mk()
             r = q
             r //= 2
@@ -1565,19 +1569,19 @@ class TestUtilQuantity(TestCase):
             self.assertTrue(np.allclose(np.asarray(r.m), [1.0, 1.0]))
         # The same for a 0-dimensional magnitude, which is what quant makes
         # of a scalar.
-        q = quant(5.0)
+        q = quant(5.0, persist=False)
         r = q
         r //= 2
         self.assertIs(r, q)
         self.assertEqual(float(r.m), 2.0)
-        q = quant(5.0)
+        q = quant(5.0, persist=False)
         r = q
         r %= 2
         self.assertIs(r, q)
         self.assertEqual(float(r.m), 1.0)
         # /= on a 0-d magnitude goes through the same machinery and keeps
         # real units.
-        q = quant(5.0, 'mm')
+        q = quant(5.0, 'mm', persist=False)
         r = q
         r /= 2
         self.assertIs(r, q)
@@ -1592,7 +1596,7 @@ class TestUtilQuantity(TestCase):
                 q %= 2
         # A real dimensionless quantity, however, is fine, and that is the
         # path that Pint itself handles.
-        q = quant(np.array([5.0, 7.0]), 'dimensionless')
+        q = quant(np.array([5.0, 7.0]), 'dimensionless', persist=False)
         r = q
         r //= 2
         self.assertIs(r, q)
@@ -1860,12 +1864,12 @@ class TestUtilQuantity(TestCase):
             return a
         self.assertNotIsInstance(never_q(quant(1.0, 'mm')), Quantity)
     def test_quantwrap_units_and_requirements(self):
-        """Tests the units and require_units options."""
+        """Tests the unit and require_unit options."""
         import numpy as np
         from immlib import quantwrap, quant, Quantity
-        # units converts an argument into the named unit, and accepts both a
+        # unit converts an argument into the named unit, and accepts both a
         # bare value and a quantity.
-        @quantwrap(units={'x': 'mm'}, return_quant=True)
+        @quantwrap(unit={'x': 'mm'}, return_quant=True)
         def f(x):
             return x
         self.assertEqual(str(f(10).units), 'millimeter')
@@ -1873,9 +1877,9 @@ class TestUtilQuantity(TestCase):
         self.assertEqual(str(f(quant(1.0, 'm')).units), 'millimeter')
         with self.assertRaises(Exception):
             f(quant(1.0, 's'))
-        # require_units insists on a quantity in a compatible unit, and
+        # require_unit insists on a quantity in a compatible unit, and
         # converts it.
-        @quantwrap(require_units={'x': 'mm'}, return_quant=True)
+        @quantwrap(require_unit={'x': 'mm'}, return_quant=True)
         def g(x):
             return x
         self.assertAlmostEqual(float(g(quant(1.0, 'm')).m), 1000.0)
@@ -1885,7 +1889,7 @@ class TestUtilQuantity(TestCase):
             g(quant(1.0, 's'))
         # A required unit of None means the argument must be a quantity with
         # no units, which is not the same as dimensionless.
-        @quantwrap(require_units={'x': None}, return_quant=True)
+        @quantwrap(require_unit={'x': None}, return_quant=True)
         def h(x):
             return x
         self.assertIsNone(h(quant(1.0)).units)
@@ -1893,10 +1897,10 @@ class TestUtilQuantity(TestCase):
             h(quant(1.0, 'dimensionless'))
         with self.assertRaises(ValueError):
             h(quant(1.0, 'mm'))
-        # Naming an argument in units also asks for it to be touched, even
+        # Naming an argument in unit also asks for it to be touched, even
         # when other arguments are named positionally.
         seen = {}
-        @quantwrap('a', units={'b': 'mm'})
+        @quantwrap('a', unit={'b': 'mm'})
         def k(a, b, c):
             seen.update(a=a, b=b, c=c)
         k(1.0, 2.0, 3.0)
@@ -1908,12 +1912,12 @@ class TestUtilQuantity(TestCase):
         with self.assertRaises(ValueError):
             quantwrap('nosucharg')(lambda a: a)
         with self.assertRaises(ValueError):
-            quantwrap(units={'nosucharg': 'mm'})(lambda a: a)
+            quantwrap(unit={'nosucharg': 'mm'})(lambda a: a)
         with self.assertRaises(ValueError):
-            quantwrap(units={'a': 'mm'}, require_units={'a': 'mm'})(
+            quantwrap(unit={'a': 'mm'}, require_unit={'a': 'mm'})(
                 lambda a: a)
         with self.assertRaises(TypeError):
-            quantwrap(units=10)(lambda a: a)
+            quantwrap(unit=10)(lambda a: a)
     def test_quantwrap_require_runit(self):
         """Tests the require_runit option."""
         from immlib import quantwrap, quant, Quantity
@@ -2034,7 +2038,7 @@ class TestUtilQuantity(TestCase):
         # traversed.
         seen = {}
         # The unit named for a *args parameter applies to all of them.
-        @quantwrap(units={'rest': 'mm'})
+        @quantwrap(unit={'rest': 'mm'})
         def f(a, *rest):
             seen.update(a=a, rest=rest)
         f(1.0, 2.0, quant(3.0, 'm'))
@@ -2043,7 +2047,7 @@ class TestUtilQuantity(TestCase):
                          ['millimeter', 'millimeter'])
         self.assertAlmostEqual(float(seen['rest'][1].m), 3000.0)
         # And the one named for a **kwargs parameter to all of its values.
-        @quantwrap(units={'kw': 's'})
+        @quantwrap(unit={'kw': 's'})
         def g(a, **kw):
             seen.update(a=a, kw=kw)
         g(1.0, b=2.0, c=quant(3.0, 'ms'))
@@ -2105,7 +2109,7 @@ class TestUtilQuantity(TestCase):
         """
         import numpy as np, torch
         from immlib import quantwrap, quant, Quantity
-        @quantwrap(units={'a': 'mm'}, runit='m')
+        @quantwrap(unit={'a': 'mm'}, runit='m')
         def f(a):
             return a * 2
         rn = f(np.array([1000.0, 2000.0]))
@@ -2199,3 +2203,189 @@ class TestUtilQuantity(TestCase):
             return m
         with self.assertRaises(TypeError):
             h(1.0)
+    def test_quant_persist_option(self):
+        """Tests quant's persist option."""
+        import numpy as np, pint
+        from immlib import quant, ilquant, Quantity, units
+        # The default makes a quantity out of a bare magnitude persistent:
+        # nothing else holds it, so there is no reason to hand out a
+        # mutable one.
+        self.assertTrue(quant(5.0, 'mm').is_persistent)
+        self.assertTrue(quant(np.array([1.0, 2.0])).is_persistent)
+        self.assertTrue(ilquant(5.0, 'mm').is_persistent)
+        # A quantity made from another quantity keeps its persistence,
+        # whether or not the units change.
+        m = quant(5.0, 'mm', persist=False)
+        self.assertFalse(quant(m).is_persistent)
+        self.assertFalse(quant(m, 'm').is_persistent)
+        self.assertFalse(quant(m, None).is_persistent)
+        self.assertFalse(quant(m, ureg=units).is_persistent)
+        p = quant(5.0, 'mm')
+        self.assertTrue(quant(p, 'm').is_persistent)
+        self.assertTrue(quant(p, None).is_persistent)
+        self.assertIs(quant(p), p)
+        # persist=True and persist=False override that, and neither changes
+        # the quantity it was given: a quantity passed in is never
+        # persisted behind the caller's back.
+        r = quant(m, persist=True)
+        self.assertTrue(r.is_persistent)
+        self.assertFalse(m.is_persistent)
+        self.assertIsNot(r, m)
+        self.assertEqual(float(r.m), float(m.m))
+        self.assertEqual(str(r.units), str(m.units))
+        r = quant(p, persist=False)
+        self.assertFalse(r.is_persistent)
+        self.assertTrue(p.is_persistent)
+        self.assertIsNot(r, p)
+        self.assertEqual(float(r.m), float(p.m))
+        self.assertEqual(str(r.units), str(p.units))
+        # A quantity that is already what was asked for is returned as it
+        # is rather than copied.
+        self.assertIs(quant(p, persist=True), p)
+        self.assertIs(quant(m, persist=False), m)
+        # The magnitude is not copied when the persistence changes, so this
+        # stays cheap and keeps a tensor's identity.
+        import torch
+        t = torch.tensor([1.0, 2.0])
+        self.assertIs(quant(quant(t, 'mm'), persist=False).m, t)
+        # A unit-less quantity follows the same rules.
+        self.assertTrue(quant(5.0).is_persistent)
+        self.assertFalse(quant(quant(5.0, persist=False)).is_persistent)
+        # A plain pint registry has no persistence; asking for it is an
+        # error rather than a silent no-op.
+        other = pint.UnitRegistry()
+        q = quant(5.0, 'mm', ureg=other)
+        self.assertNotIsInstance(q, Quantity)
+        with self.assertRaises(ValueError):
+            quant(5.0, 'mm', ureg=other, persist=True)
+        # A plain pint.Quantity counts as not persistent, so a quantity
+        # made from one is mutable.
+        self.assertFalse(
+            quant(other.Quantity(5.0, 'mm'), ureg=units).is_persistent)
+    def test_quantity_persistent_inplace_0d(self):
+        """Tests the in-place operators on a persistent 0-d quantity.
+
+        A 0-dimensional magnitude takes immlib's own in-place path, which
+        runs before Pint's; it has to honor persistence too, which it did
+        not until quant began making persistent quantities by default.
+        """
+        import numpy as np
+        from immlib import quant, Quantity
+        for (op, other, want) in ((
+                '__iadd__', quant(1.0, 'mm'), 6.0),
+                ('__isub__', quant(1.0, 'mm'), 4.0),
+                ('__imul__', 2, 10.0),
+                ('__itruediv__', 2, 2.5)):
+            q = quant(5.0, 'mm')
+            self.assertTrue(q.is_persistent)
+            r = getattr(q, op)(other)
+            # A new quantity comes back and the original is untouched.
+            self.assertIsNot(r, q)
+            self.assertEqual(float(q.m), 5.0)
+            self.assertAlmostEqual(float(r.m), want)
+            self.assertEqual(str(r.units), 'millimeter')
+        # The same for a unit-less 0-d quantity, whose in-place result is
+        # not a quantity until it is wrapped back up.
+        q = quant(5.0)
+        r = q.__imul__(2)
+        self.assertIsNot(r, q)
+        self.assertIsInstance(r, Quantity)
+        self.assertIsNone(r.units)
+        self.assertEqual(float(r.m), 10.0)
+        self.assertEqual(float(q.m), 5.0)
+        # A mutable 0-d quantity still mutates in place.
+        q = quant(5.0, 'mm', persist=False)
+        r = q.__imul__(2)
+        self.assertIs(r, q)
+        self.assertEqual(float(q.m), 10.0)
+    def test_quantwrap_runit_order(self):
+        """Tests that require_runit runs before runit, and what each does.
+
+        require_runit is a check on the decorated function; runit says what
+        the composed function returns.
+        """
+        import numpy as np
+        from immlib import quantwrap, quant, Quantity
+        # require_runit checks and converts; runit then converts again, so
+        # the composed function's unit is runit's.
+        @quantwrap(require_runit='m', runit='mm', return_quant=True)
+        def f(a):
+            return quant(1.0, 'm')
+        r = f(1.0)
+        self.assertEqual(str(r.units), 'millimeter')
+        self.assertAlmostEqual(float(r.m), 1000.0)
+        # runit promotes a bare return value and a unit-less quantity, and
+        # converts a compatible one; only an incompatible unit is an error.
+        @quantwrap(runit='mm', return_quant=True)
+        def g(a):
+            return a
+        self.assertEqual(str(g(5.0).units), 'millimeter')
+        self.assertAlmostEqual(float(g(5.0).m), 5.0)
+        self.assertAlmostEqual(float(g(quant(1.0, 'm')).m), 1000.0)
+        self.assertAlmostEqual(float(g(quant(5.0)).m), 5.0)
+        with self.assertRaises(Exception):
+            g(quant(1.0, 's'))
+        # require_runit does not accept a unit-less quantity, which is the
+        # difference between requiring a unit and naming one.
+        @quantwrap(require_runit='mm')
+        def h(a):
+            return a
+        with self.assertRaises(ValueError):
+            h(quant(5.0))
+        # Nor a bare magnitude, which is what a function that unwraps its
+        # argument returns.
+        @quantwrap(require_runit='mm')
+        def bare(a):
+            return float(a.m)
+        with self.assertRaises(TypeError):
+            bare(quant(5.0, 'mm'))
+        # require_runit converts as well as checks, so a function that
+        # sometimes answers in m and sometimes in mm cannot leave the
+        # caller guessing.
+        @quantwrap(require_runit='mm', return_quant=False)
+        def k(a, in_meters):
+            return quant(1.0, 'm') if in_meters else quant(1000.0, 'mm')
+        self.assertAlmostEqual(float(k(1.0, True)), 1000.0)
+        self.assertAlmostEqual(float(k(1.0, False)), 1000.0)
+    def test_quantwrap_persist(self):
+        """Tests quantwrap's persist option."""
+        import numpy as np
+        from immlib import quantwrap, quant, Quantity
+        from pcollections import pdict
+        @quantwrap(persist=False)
+        def f(a):
+            return a
+        self.assertFalse(f(quant(1.0, 'mm')).is_persistent)
+        @quantwrap(persist=True, return_quant=True)
+        def g(a):
+            return a
+        self.assertTrue(g(1.0).is_persistent)
+        self.assertTrue(g(quant(1.0, 'mm', persist=False)).is_persistent)
+        # The default leaves the persistence alone.
+        @quantwrap
+        def h(a):
+            return a
+        self.assertTrue(h(quant(1.0, 'mm')).is_persistent)
+        self.assertFalse(
+            h(quant(1.0, 'mm', persist=False)).is_persistent)
+        # It applies to each item of a tuple and each value of a mapping,
+        # and ignores anything that is not a quantity.
+        @quantwrap(persist=False)
+        def tup(a):
+            return (a, 'text')
+        r = tup(quant(1.0, 'mm'))
+        self.assertFalse(r[0].is_persistent)
+        self.assertEqual(r[1], 'text')
+        @quantwrap(persist=True)
+        def dct(a):
+            return pdict(x=a, y=5)
+        r = dct(quant(1.0, 'mm', persist=False))
+        self.assertIsInstance(r, pdict)
+        self.assertTrue(r['x'].is_persistent)
+        self.assertEqual(r['y'], 5)
+        # It is applied after return_quant, so stripping wins: there is
+        # nothing left to make persistent.
+        @quantwrap(return_quant=False, persist=True)
+        def strip(a):
+            return a
+        self.assertNotIsInstance(strip(quant(1.0, 'mm')), Quantity)

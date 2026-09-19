@@ -355,8 +355,8 @@ except ValueError as e:
 ```
 
 Copying a persistent quantity, with `copy.copy`, `copy.deepcopy`, or
-`pickle`, gives a persistent quantity; `il.quant(q.m, q.u)` gives an equal
-quantity that is mutable. A quantity can never be made mutable again in
+`pickle`, gives a persistent quantity; `il.quant(q, persist=False)` gives an
+equal quantity that is mutable. A quantity can never be made mutable again in
 place.
 
 (quantity-thread-safety)=
@@ -449,25 +449,25 @@ argument is a quantity, not the arithmetic of units.
 
 ### Naming Units for Arguments
 
-`units` converts named arguments into the units given for them. This makes no
+`unit` converts named arguments into the units given for them. This makes no
 requirement of the caller: a bare number is taken to be in that unit already,
 and a quantity in a compatible unit is converted.
 
 ```{code-cell}
-@il.quantwrap(units={'dist': 'mm'})
+@il.quantwrap(unit={'dist': 'mm'})
 def describe(dist):
     return f"{float(dist.m):.1f} {dist.units}"
 
 (describe(10), describe(il.quant(1.0, 'm')))
 ```
 
-`require_units` has the same form but *requires* the caller to pass a
+`require_unit` has the same form but *requires* the caller to pass a
 quantity in a compatible unit. A compatible but different unit satisfies the
 requirement and is converted, so a function that requires millimeters always
 sees millimeters.
 
 ```{code-cell}
-@il.quantwrap(require_units={'dist': 'mm'})
+@il.quantwrap(require_unit={'dist': 'mm'})
 def strict(dist):
     return float(dist.m)
 
@@ -492,6 +492,14 @@ def perimeter(w, h):
 
 perimeter(il.quant(30.0, 'cm'), il.quant(20.0, 'cm'))
 ```
+
+`require_runit` is the other half of the pair, and runs first: it is a check
+on the *decorated* function, which must return a quantity whose units are
+compatible with what is required (a unit-less quantity is not enough). It
+converts as well as checking, so that a function which sometimes answers in
+metres and sometimes in millimetres cannot leave the caller guessing. `runit`
+then says what the *composed* function returns, so `quantwrap(require_runit=
+'m', runit='mm')` requires metres and returns millimetres.
 
 ```{warning}
 `runit` does not check the decorated function. If the function returns a bare
@@ -526,6 +534,18 @@ def sides(w, h):
     return pdict(w=w, h=h)
 
 sides(il.quant(30.0, 'cm'), il.quant(20.0, 'cm'))
+```
+
+`persist` settles whether the quantities that come back are persistent, and
+is applied last of all. Its default, `None`, leaves each one as it is; it
+says nothing about the arguments, which follow `il.quant`'s own rule.
+
+```{code-cell}
+@il.quantwrap(persist=False)
+def mutable_result(a):
+    return a * 2
+
+mutable_result(il.quant(1.0, 'mm')).is_persistent
 ```
 
 ### Unit Registries

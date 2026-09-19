@@ -868,7 +868,11 @@ class Quantity(pint.Quantity):
 
         Copying a persistent quantity, with ``copy.copy``,
         ``copy.deepcopy`` or ``pickle``, gives a persistent quantity.
-        ``immlib.quant(q.m, q.u)`` gives an equal quantity that is not.
+        ``immlib.quant(q, persist=False)`` gives an equal quantity that is
+        not; ``immlib.quant``'s `persist` option is how this is asked for
+        either way, since by default it makes persistent quantities out of
+        bare magnitudes and keeps the persistence of quantities it is
+        given.
 
         **Thread safety.** A persistent quantity can be read from any
         number of threads at once, including in a free-threaded
@@ -914,8 +918,8 @@ class Quantity(pint.Quantity):
         persistent quantity."""
         return TypeError(
             f"{what} is not possible for a persistent quantity; see"
-            f" immlib.Quantity.persist. Use immlib.quant(q.m, q.u) for a"
-            f" quantity with the same value that can be changed")
+            f" immlib.Quantity.persist. Use immlib.quant(q, persist=False)"
+            f" for a quantity with the same value that can be changed")
     #: The private attributes that a persistent quantity refuses to have
     #: assigned. Other private attributes are allowed through because Pint
     #: uses them for values it computes lazily and caches: the
@@ -1301,6 +1305,16 @@ class Quantity(pint.Quantity):
         result = op(self, other)
         if result is NotImplemented:
             return result
+        if self._persistent:
+            # A persistent quantity is not changed in place; the in-place
+            # operators return the new quantity instead, as they do for an
+            # int. The check belongs here rather than in each operator
+            # below, because this 0-dimensional path runs *before* Pint's
+            # own in-place methods, where the other half of this rule
+            # lives.
+            if isinstance(result, pint.Quantity):
+                return result
+            return self.__class__(result, None)
         if isinstance(result, pint.Quantity):
             self._magnitude = result._magnitude
             self._units = result._units
@@ -2137,7 +2151,52 @@ def _quant_magnitude(mag):
             f"quant: magnitude must be numerical, but it has dtype {dt}"
             f" (type {type(mag).__name__})")
     return arr
-def quant(mag, /, unit=Ellipsis, *, ureg=None):
+def _quant_unpersist(q):
+    """Returns a new, non-persistent quantity with `q`'s magnitude and
+    units, in `q`'s own registry.
+
+    Persistence cannot be undone in place--that is the point of it--so the
+    only way to answer ``persist=False`` about a persistent quantity is to
+    build another one beside it.
+    """
+    return type(q)(q._magnitude, q._units)
+def _quant_persist(q, mag, persist):
+    """Applies ``quant``'s `persist` option to the quantity `q` that it
+    built from `mag`, and returns the quantity to return.
+
+    See ``quant`` for what the three values of `persist` mean.
+    """
+    is_immlib = isinstance(q, Quantity)
+    if persist is None:
+        # A quantity made from another quantity inherits its persistence; a
+        # quantity made from anything else is persistent, since nothing
+        # else holds it.
+        want = mag.is_persistent if isinstance(mag, Quantity) else (
+            not isinstance(mag, pint.Quantity))
+    else:
+        want = bool(persist)
+    if not is_immlib:
+        # A plain pint.Quantity has no persistence to speak of. Asking for
+        # one explicitly is an error rather than a silent no-op; the
+        # default asks for nothing.
+        if persist:
+            raise ValueError(
+                "quant: persist=True requires an immlib.UnitRegistry; a"
+                " plain pint.Quantity cannot be made persistent")
+        return q
+    have = q.is_persistent
+    if want == have:
+        return q
+    elif want:
+        # Never persist the caller's own object: that would change a
+        # quantity they still hold. A quantity built here is ours to
+        # persist.
+        if q is mag:
+            q = _quant_unpersist(q)
+        return q.persist()
+    else:
+        return _quant_unpersist(q)
+def quant(mag, /, unit=Ellipsis, *, ureg=None, persist=None):
     """Returns a ``pint.Quantity`` object with the given magnitude and unit.
 
     ``quant(mag, unit)`` returns a ``pint.Quantity`` object with the given
@@ -2196,6 +2255,24 @@ def quant(mag, /, unit=Ellipsis, *, ureg=None):
         ``Ellipsis``, then ``immlib.units`` is used. If `ureg` is ``None``
         (the default), then `mag`'s own unit registry is used when `mag` is
         already a quantity, and ``immlib.units`` is used otherwise.
+    persist : boolean or None, optional
+        Whether the returned quantity is persistent (see
+        ``immlib.Quantity.persist``). ``True`` always returns a persistent
+        quantity and ``False`` always returns one that is not; either makes
+        a copy when the quantity it would otherwise return has the wrong
+        persistence, so that a quantity passed in is never persisted behind
+        the caller's back and a persistent one is never handed back
+        mutable.
+
+        The default, ``None``, is the useful rule rather than the
+        do-nothing one: a quantity made here out of something that was not
+        a quantity is persistent, since nothing else holds a reference to
+        it and immlib has no reason to hand out a mutable one; a quantity
+        made from another quantity keeps that quantity's persistence, so
+        that converting a mutable quantity's units gives a mutable result
+        and converting a persistent one gives a persistent result. A plain
+        ``pint.Quantity``, which has no notion of persistence, counts as
+        not persistent.
 
     Returns
     -------
@@ -2210,7 +2287,9 @@ def quant(mag, /, unit=Ellipsis, *, ureg=None):
         are rejected.
     ValueError
         If a unit-less (``unit=None``) quantity is requested using a unit
-        registry that is not an ``immlib.UnitRegistry``.
+        registry that is not an ``immlib.UnitRegistry``, or if
+        ``persist=True`` is requested of a registry whose quantities are
+        not ``immlib.Quantity`` objects.
 
     """
     if ureg is Ellipsis:
@@ -2230,7 +2309,8 @@ def quant(mag, /, unit=Ellipsis, *, ureg=None):
             # regardless of what units mag previously had--there is no
             # meaningful "conversion" from a real unit (or from no unit) to
             # having no units at all, so we never invoke mag's own to().
-            return qcls(_quant_magnitude(mag.magnitude), None)
+            q = qcls(_quant_magnitude(mag.magnitude), None)
+            return _quant_persist(q, mag, persist)
         elif unit is Ellipsis:
             # mag keeps its own units. If the caller named a registry, the
             # re-homing at the end of this function moves mag into it (and
@@ -2270,12 +2350,14 @@ def quant(mag, /, unit=Ellipsis, *, ureg=None):
                 raise ValueError(
                     "quant: a unit-less quantity cannot be moved into a"
                     " plain pint.UnitRegistry, which cannot represent one")
-            return ureg.Quantity(q._magnitude, None)
-        return ureg.Quantity(q._magnitude, q._units)
+            return _quant_persist(
+                ureg.Quantity(q._magnitude, None), mag, persist)
+        return _quant_persist(
+            ureg.Quantity(q._magnitude, q._units), mag, persist)
     else:
-        return q
+        return _quant_persist(q, mag, persist)
 @docwrap(format='numpy', inheritparams=quant, inheritraises=quant)
-def ilquant(mag, /, unit=Ellipsis, *, ureg=Ellipsis):
+def ilquant(mag, /, unit=Ellipsis, *, ureg=Ellipsis, persist=None):
     """Returns an ``immlib.Quantity`` with the given magnitude and unit.
 
     ``ilquant`` is ``immlib.quant`` with one difference: `ureg` defaults to
@@ -2308,7 +2390,7 @@ def ilquant(mag, /, unit=Ellipsis, *, ureg=Ellipsis):
     --------
     quant
     """
-    return quant(mag, unit, ureg=ureg)
+    return quant(mag, unit, ureg=ureg, persist=persist)
 def mag(obj, /, unit=Ellipsis, *, strict=False):
     """Returns the magnitude of the given object.
 
@@ -2463,7 +2545,7 @@ def promote(*args, ureg=None):
 
 # The decorator below is the quantity analogue of immlib.tensor_args and its
 # relatives: it converts a function's arguments into quantities before the
-# call and decides what the return value's units are afterwards. The pieces
+# call and decides what the return value's unit are afterwards. The pieces
 # are separated out here so that the decorator itself reads as a list of
 # steps rather than as one long function.
 
@@ -2472,7 +2554,7 @@ def _qw_ureg(ureg):
 
     Returns the ``pint.UnitRegistry`` that the decorated function's
     quantities will live in. The registry must be an ``immlib.UnitRegistry``,
-    because ``quantwrap`` gives unit-less arguments units of ``None``, which
+    because ``quantwrap`` gives unit-less arguments unit of ``None``, which
     only immlib's registries support.
     """
     if ureg is Ellipsis:
@@ -2486,20 +2568,20 @@ def _qw_ureg(ureg):
         raise TypeError(f"quantwrap: ureg must be a UnitRegistry, not {ureg}")
     if not issubclass(ureg.Quantity, Quantity):
         raise TypeError(
-            "quantwrap requires an immlib.UnitRegistry, because it uses units"
+            "quantwrap requires an immlib.UnitRegistry, because it uses unit"
             " of None, which a plain pint.UnitRegistry cannot represent")
     return ureg
 def _qw_unitmap(arg, params, what):
     """Checks one of `quantwrap`'s unit mappings and returns it as a dict.
 
-    `arg` is the `units` or `require_units` option, `params` is the decorated
+    `arg` is the `unit` or `require_unit` option, `params` is the decorated
     function's parameters, and `what` names the option in error messages.
     """
     if arg is None:
         return {}
     if not is_amap(arg):
         raise TypeError(f"quantwrap: {what} must be a mapping of argument"
-                        f" names to units, not {type(arg)}")
+                        f" names to unit, not {type(arg)}")
     for name in arg.keys():
         if name not in params:
             raise ValueError(
@@ -2512,7 +2594,7 @@ def _qw_require(val, u, what, ureg):
 
     The value must already be a quantity: a required unit is a statement
     about what the caller passes in (or about what the decorated function
-    returns), which is what makes it different from `units`. `what` names
+    returns), which is what makes it different from `unit`. `what` names
     the value in error messages.
     """
     if not isinstance(val, pint.Quantity):
@@ -2540,10 +2622,10 @@ def _qw_convert(val, u, name, ureg, required):
     """Converts one argument of a `quantwrap`-decorated function."""
     if required:
         return _qw_require(val, u, f"argument '{name}'", ureg)
-    # An argument with no unit named for it keeps whatever units it arrived
-    # with (Ellipsis), and is given units of None only if it is not already
-    # a quantity. An argument with a unit named for it is converted into
-    # that unit, which raises if its own units are incompatible.
+    # An argument with no unit named for it keeps whatever units it
+    # arrived with (Ellipsis), and is given units of None only if it is not
+    # already a quantity. An argument with a unit named for it is converted
+    # into that unit, which raises if its own units are incompatible.
     return quant(val, u, ureg=ureg)
 def _qw_remap(rval, updates):
     """Returns a copy of the mapping `rval` with `updates` applied to it."""
@@ -2629,9 +2711,27 @@ def _qw_quantify(rval, ureg):
         return _qw_remap(rval, {k: quant(v, ureg=ureg) for (k, v) in
                                 rval.items()})
     return quant(rval, ureg=ureg)
+def _qw_persist_one(v, persist):
+    """Applies `quantwrap`'s `persist` option to one return value."""
+    if not isinstance(v, pint.Quantity):
+        # Persistence is a property of a quantity; there is nothing to say
+        # about a bare magnitude, so the option is ignored for one.
+        return v
+    return quant(v, persist=persist)
+def _qw_persist(rval, persist):
+    """Applies `quantwrap`'s `persist` option to a return value, to each
+    item of a returned tuple, or to each value of a returned mapping."""
+    if persist is None:
+        return rval
+    if is_tuple(rval):
+        return tuple(_qw_persist_one(v, persist) for v in rval)
+    elif is_amap(rval):
+        return _qw_remap(
+            rval, {k: _qw_persist_one(v, persist) for (k, v) in rval.items()})
+    return _qw_persist_one(rval, persist)
 def _qw_dispatch(fn, sig, sig_args, sig_vargs, sig_kwargs,
-                 units, require_units, runit, require_runit,
-                 return_quant, ureg_opt,
+                 unit, require_unit, runit, require_runit,
+                 return_quant, persist, ureg_opt,
                  *args, **kwargs):
     "[Private] Dispatcher for the quantwrap decorator."
     ureg = _qw_ureg(ureg_opt)
@@ -2667,8 +2767,8 @@ def _qw_dispatch(fn, sig, sig_args, sig_vargs, sig_kwargs,
             " ureg= to say which one the decorated function should use")
     # Now convert each of them.
     def convert(name, val, label):
-        required = name in require_units
-        u = require_units[name] if required else units.get(name, Ellipsis)
+        required = name in require_unit
+        u = require_unit[name] if required else unit.get(name, Ellipsis)
         return _qw_convert(val, u, label, ureg, required)
     for name in sig_args:
         binding.arguments[name] = convert(
@@ -2694,7 +2794,7 @@ def _qw_dispatch(fn, sig, sig_args, sig_vargs, sig_kwargs,
         rval = _qw_map_rval(
             rval, lambda v, u: quant(v, u, ureg=ureg), runit, 'runit')
     # Third, if the caller spoke in plain numbers, answer in plain numbers.
-    # An explicit runit says the caller cares about units, so it turns this
+    # An explicit runit says the caller cares about unit, so it turns this
     # off; return_quant says so outright, and is handled last.
     elif not any_quant and return_quant is None:
         rval = _qw_strip(rval)
@@ -2703,30 +2803,31 @@ def _qw_dispatch(fn, sig, sig_args, sig_vargs, sig_kwargs,
         rval = _qw_quantify(rval, ureg)
     elif return_quant is False:
         rval = _qw_strip(rval)
-    return rval
-def _qw_decorate(arglist, units, require_units, runit, require_runit,
-                 return_quant, ureg, fn):
+    # Last of all, the persistence of whatever quantities are left.
+    return _qw_persist(rval, persist)
+def _qw_decorate(arglist, unit, require_unit, runit, require_runit,
+                 return_quant, persist, ureg, fn):
     "[Private] Decorator-builder for the quantwrap decorator."
     sig = inspect.signature(fn)
     params = sig.parameters
-    units = _qw_unitmap(units, params, 'units')
-    require_units = _qw_unitmap(require_units, params, 'require_units')
-    both = sorted(set(units.keys()) & set(require_units.keys()))
+    unit = _qw_unitmap(unit, params, 'unit')
+    require_unit = _qw_unitmap(require_unit, params, 'require_unit')
+    both = sorted(set(unit.keys()) & set(require_unit.keys()))
     if both:
         raise ValueError(
-            f"quantwrap: {both} appear in both units and require_units; an"
+            f"quantwrap: {both} appear in both unit and require_unit; an"
             f" argument's unit is either converted or required, not both")
     # Validate the registry option now, so that a bad one is an error where
     # the decorator is written rather than where it is called.
     _qw_ureg(ureg)
     # The arguments quantwrap touches: those named positionally, or all of
-    # them when none are named. Naming an argument in units or in
-    # require_units also asks for it to be touched.
+    # them when none are named. Naming an argument in unit or in
+    # require_unit also asks for it to be touched.
     if arglist:
         names = list(arglist)
     else:
         names = list(params.keys())
-    for k in (*units.keys(), *require_units.keys()):
+    for k in (*unit.keys(), *require_unit.keys()):
         if k not in names:
             names.append(k)
     sig_args = []
@@ -2746,15 +2847,17 @@ def _qw_decorate(arglist, units, require_units, runit, require_runit,
             sig_args.append(p.name)
     dispatch = partial(
         _qw_dispatch, fn, sig, sig_args, sig_vargs, sig_kwargs,
-        units, require_units, runit, require_runit, return_quant, ureg)
+        unit, require_unit, runit, require_runit, return_quant, persist,
+        ureg)
     return wraps(fn)(dispatch)
 @docwrap(format='numpy')
 def quantwrap(fn=None, /, *args,
-              units=None,
-              require_units=None,
+              unit=None,
+              require_unit=None,
               runit=Ellipsis,
               require_runit=Ellipsis,
               return_quant=None,
+              persist=None,
               ureg=Ellipsis):
     """Converts the arguments of the decorated function into quantities.
 
@@ -2764,8 +2867,8 @@ def quantwrap(fn=None, /, *args,
     It is the quantity analogue of ``immlib.tensor_args`` and its relatives.
 
     ``@quantwrap('arg1', 'arg2' ...)`` touches only the named arguments;
-    with no names, every argument is touched. An argument named in `units`
-    or in `require_units` is touched whether or not it is also named here.
+    with no names, every argument is touched. An argument named in `unit`
+    or in `require_unit` is touched whether or not it is also named here.
 
     An argument that is already a quantity keeps its own units; an argument
     that is not becomes a quantity with units of ``None``, which behaves like
@@ -2783,7 +2886,7 @@ def quantwrap(fn=None, /, *args,
         dimensional one: adding a plain ``2.0`` to a length still raises,
         exactly as it did before the decorator was applied. What the
         decorator removes is the need for the function to ask whether each
-        argument is a quantity, not the arithmetic of units themselves.
+        argument is a quantity, not the arithmetic of unit themselves.
 
     ``quantwrap`` requires an ``immlib.UnitRegistry``, because units of
     ``None`` are an immlib extension that a plain ``pint.UnitRegistry``
@@ -2797,7 +2900,10 @@ def quantwrap(fn=None, /, *args,
     plain numbers; and finally `return_quant`, if it is not ``None``,
     overrides that decision.
 
-    The last three steps apply to a return value, to each element of a
+    A fifth step, `persist`, then settles whether the quantities that come
+    back are persistent.
+
+    These steps apply to a return value, to each element of a
     returned tuple, or to each value of a returned mapping. They do not
     recurse: a tuple inside a tuple is one element. A mapping is rebuilt as
     ``type(rval)(rval, **changes)``, so a ``dict``, a ``pcollections.pdict``
@@ -2811,29 +2917,29 @@ def quantwrap(fn=None, /, *args,
     args : str, optional
         The names of the arguments to convert into quantities. If no names
         are given, then all of the function's arguments are converted.
-    units : mapping or None, optional
+    unit : mapping or None, optional
         A mapping from argument name to the unit that argument is converted
         into. An argument that is not named keeps its own units if it is
         already a quantity and is given units of ``None`` if it is not.
         Naming a unit here makes no requirement of the caller: with
-        ``units={'x': 'mm'}``, both ``10`` and ``quant(10, 'mm')`` are
+        ``unit={'x': 'mm'}``, both ``10`` and ``quant(10, 'mm')`` are
         accepted and behave identically, and ``quant(1, 'm')`` is converted
         to ``1000 mm``. Only an incompatible unit is an error. Use
-        `require_units` to require a quantity. The name of a ``*args``
+        `require_unit` to require a quantity. The name of a ``*args``
         parameter applies its unit to every one of those arguments, and the
         name of a ``**kwargs`` parameter to every one of those values.
-    require_units : mapping or None, optional
-        A mapping in the same form as `units`, naming arguments that *must*
-        be given as quantities in compatible units. An argument named here
+    require_unit : mapping or None, optional
+        A mapping in the same form as `unit`, naming arguments that *must*
+        be given as quantities in compatible unitss. An argument named here
         raises a ``TypeError`` if it is not a quantity and a ``ValueError``
         if its units are not compatible with the requirement. A compatible
         but different unit satisfies the requirement, and the function is
         given the converted value: requiring ``'mm'`` and being given
         ``quant(1, 'm')`` passes ``1000 mm`` along. An argument may appear
-        in `units` or in `require_units`, but not in both.
+        in `unit` or in `require_unit`, but not in both.
     runit : unit-like or None or Ellipsis or tuple or mapping, optional
         The unit that the return value is converted into. The default,
-        ``Ellipsis``, leaves the return value's units alone. Any other
+        ``Ellipsis``, leaves the return value's unit alone. Any other
         value, including ``None``, is applied to the return value, to each
         element of a returned tuple, or to each value of a returned mapping;
         a tuple or a mapping gives one unit per element or key instead, and
@@ -2847,7 +2953,7 @@ def quantwrap(fn=None, /, *args,
             that the function return a quantity.
     require_runit : unit-like or None or Ellipsis or tuple or mapping, optional
         A requirement on what the decorated function returns, in the same
-        form and with the same meaning as `require_units`. A tuple or a
+        form and with the same meaning as `require_unit`. A tuple or a
         mapping requires a returned tuple of the same length or a returned
         mapping with the same keys, and applies one requirement to each.
         Unlike `runit`, this is a statement about the function rather than
@@ -2862,6 +2968,17 @@ def quantwrap(fn=None, /, *args,
         after `runit`, so ``quantwrap(runit='mm', return_quant=False)``
         converts the return value into millimeters and then returns its
         magnitude.
+    persist : boolean or None, optional
+        Whether the quantities that come back are persistent (see
+        ``immlib.Quantity.persist``). ``True`` returns persistent
+        quantities and ``False`` returns mutable ones; the default,
+        ``None``, leaves each one as it is. This is applied last of all,
+        after `return_quant`, and it is about the return value only: it
+        says nothing about the arguments, which get ``immlib.quant``'s own
+        default (a quantity made from a bare magnitude is persistent, and
+        one made from a quantity keeps that quantity's persistence). A
+        return value that is not a quantity has no persistence to set, so
+        the option is ignored for it rather than turning it into one.
     ureg : pint.UnitRegistry or Ellipsis, optional
         The unit registry in which the decorated function's quantities
         live. The default, ``Ellipsis``, is immlib's default registry, and
@@ -2880,13 +2997,13 @@ def quantwrap(fn=None, /, *args,
     Raises
     ------
     TypeError
-        If `fn` is neither a string nor a callable, if `units` or
-        `require_units` is not a mapping, if `ureg` is not a unit registry
+        If `fn` is neither a string nor a callable, if `unit` or
+        `require_unit` is not a mapping, if `ureg` is not a unit registry
         or is not an ``immlib.UnitRegistry``, or if an argument or return
         value required to be a quantity is not one.
     ValueError
         If a name given here is not an argument of the decorated function,
-        if an argument appears in both `units` and `require_units`, if
+        if an argument appears in both `unit` and `require_unit`, if
         `ureg` is ``None``, if the arguments disagree about their unit
         registry, or if a required unit is not satisfied.
 
@@ -2898,7 +3015,8 @@ def quantwrap(fn=None, /, *args,
     """
     # (These are the parameters of _qw_decorate, in its own order, up to the
     # function that it decorates.)
-    opts = (units, require_units, runit, require_runit, return_quant, ureg)
+    opts = (unit, require_unit, runit, require_runit, return_quant, persist,
+            ureg)
     if fn is None:
         # Decorating with `@quantwrap()` or with options but no names.
         return partial(_qw_decorate, args, *opts)
