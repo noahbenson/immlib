@@ -1193,7 +1193,7 @@ class TestUtilQuantity(TestCase):
         r = 2.0 ** quant(torch.tensor([1.0, 2.0]))
         self.assertIsNone(r.units)
         self.assertTrue(torch.allclose(r.m, torch.tensor([2.0, 4.0])))
-    def test_quantity_pickle_hash(self):
+    def test_quantity_pickle(self):
         import pickle
         import immlib
         from immlib import quant, Quantity
@@ -1213,15 +1213,7 @@ class TestUtilQuantity(TestCase):
                     self.assertTrue(torch.equal(r.m, q.m))
                 else:
                     self.assertTrue(np.array_equal(r.m, q.m))
-        # Units of None hash like their magnitude.
-        self.assertEqual(hash(quant(5)), hash(5))
-        self.assertEqual(hash(quant(np.array(2.5))), hash(2.5))
-        self.assertEqual(hash(quant(1.0, 'dimensionless')), hash(1.0))
-        self.assertEqual(hash(quant(1.0, 'm')), hash(quant(100.0, 'cm')))
-        self.assertEqual(hash(quant(np.array(1.0), 'm')),
-                         hash(quant(1.0, 'm')))
-        with self.assertRaises(TypeError):
-            hash(quant(np.array([1.0, 2.0])))
+        # (Quantities are not hashable at all; see test_quantity_hash.)
     def test_alike_units_none(self):
         from immlib import quant, alike_units
         self.assertFalse(alike_units(quant(1.0), quant(1.0, 'm')))
@@ -1363,12 +1355,12 @@ class TestUtilQuantity(TestCase):
         self.assertEqual(round(quant(2.5, 'm')), quant(2, 'm'))
         self.assertEqual(float(round(quant(2.567, 'm'), 2).m), 2.57)
         self.assertTrue(np.allclose(round(quant([2.567], 'm'), 2).m, [2.57]))
-        # bool(), float(), int(), and hash() work.
+        # bool(), float(), and int() work. (hash() does not, for any
+        # quantity; see test_quantity_hash.)
         self.assertFalse(bool(quant(0)))
         self.assertTrue(bool(quant(3, 'm')))
         self.assertEqual(float(quant(2.5)), 2.5)
         self.assertEqual(int(quant(3)), 3)
-        self.assertEqual(hash(quant(3)), hash(3))
     def test_numpy_dispatch_none_units(self):
         """NumPy functions and ufunc methods work for quantities whose units
         are None."""
@@ -2389,3 +2381,269 @@ class TestUtilQuantity(TestCase):
         def strip(a):
             return a
         self.assertNotIsInstance(strip(quant(1.0, 'mm')), Quantity)
+    def test_quantity_hash(self):
+        """Tests that no quantity is hashable, and why.
+
+        Pint's quantities are hashable and immlib's were; neither of the two
+        things a hash needs holds for a quantity, so `hash` now raises for
+        all of them.
+        """
+        import collections.abc as abc
+        import numpy as np, torch
+        from immlib import quant, Quantity, units
+        mags = (5, 5.0, np.array(5.0), torch.tensor(5.0),
+                np.array([1.0, 2.0]), torch.tensor([1.0, 2.0]),
+                np.zeros((2, 3)))
+        for mag in mags:
+            for unit in (None, 'mm', 'dimensionless'):
+                for persist in (True, False):
+                    q = quant(mag, unit, persist=persist)
+                    with self.subTest(mag=type(mag).__name__, unit=unit,
+                                      persist=persist):
+                        with self.assertRaises(TypeError):
+                            hash(q)
+                        # Python's own way of asking.
+                        self.assertNotIsInstance(q, abc.Hashable)
+                        with self.assertRaises(TypeError):
+                            {q}
+                        with self.assertRaises(TypeError):
+                            {q: 'value'}
+        # __hash__ is None on the class, which is what makes all of the
+        # above true, and it is inherited by the registry's own subclass.
+        self.assertIsNone(Quantity.__hash__)
+        self.assertIsNone(units.Quantity.__hash__)
+        # The reason is not only that equality is elementwise for a
+        # magnitude with dimensions, but that no quantity's value is fixed:
+        # persist freezes which array is the magnitude, not the array's
+        # contents, so even a persistent scalar can change under a hash.
+        q = quant(5.0, 'mm')
+        self.assertTrue(q.is_persistent)
+        q.m[()] = 7.0
+        self.assertEqual(float(q.m), 7.0)
+        # Units, unlike quantities, are hashable, so a key can be built out
+        # of a magnitude and a unit when one is needed.
+        self.assertIsInstance(hash(units.mm), int)
+        key = (float(quant(5.0, 'mm').m), str(quant(5.0, 'mm').u))
+        self.assertEqual({key: 'x'}[key], 'x')
+    def test_quant_spec_form(self):
+        """Tests quant's (magnitude, unit[, ureg]) spec form."""
+        import numpy as np, torch, pint
+        from immlib import (quant, ilquant, quant_spec, is_quantspec,
+                            Quantity, units, UnitRegistry)
+        # The pair means what quant(magnitude, unit) means.
+        q = quant((10, 'mm'))
+        self.assertIsInstance(q, Quantity)
+        self.assertEqual(str(q.units), 'millimeter')
+        self.assertEqual(float(q.m), 10.0)
+        # A Unit object works as well as a name.
+        self.assertEqual(str(quant((10, units.mm)).units), 'millimeter')
+        # The pair is resolved before quant's own unit argument, so the
+        # unit argument converts it.
+        q = quant((10, 'cm'), 'm')
+        self.assertEqual(str(q.units), 'meter')
+        self.assertAlmostEqual(float(q.m), 0.1)
+        # A nested pair resolves too, since the inner call is quant's own.
+        self.assertAlmostEqual(float(quant(((5, 'mm'), 'cm')).m), 0.5)
+        # The magnitude may be nested, which is what makes a whole matrix
+        # writable in a hashable form.
+        q = quant((((0.0, 0.1, 0.2), (0.3, 0.4, 0.5)), 'mm'))
+        self.assertEqual(q.m.shape, (2, 3))
+        self.assertEqual(str(q.units), 'millimeter')
+        # ilquant and the persist option work as they do for any magnitude.
+        self.assertIsInstance(ilquant((10, 'mm')), Quantity)
+        self.assertTrue(quant((10, 'mm')).is_persistent)
+        self.assertFalse(quant((10, 'mm'), persist=False).is_persistent)
+        # quant's own ureg applies to the result, as its unit does: a spec
+        # that names no registry is built in the default one and then
+        # re-homed, so the quantity ends up where the caller asked.
+        outer = UnitRegistry()
+        self.assertIs(quant((10, 'mm'), ureg=outer)._REGISTRY, outer)
+        # None is a unit in immlib's sense, and so is a valid spec unit; it
+        # means the quantity has no units, exactly as quant(mag, None) does.
+        q = quant((5, None))
+        self.assertIsNone(q.units)
+        self.assertEqual(float(q.m), 5.0)
+        # Ellipsis is quant's own default, and means the same here.
+        self.assertIsNone(quant((5, Ellipsis)).units)
+        # The three-element form names a registry, either as an object or
+        # by its fully qualified name, so that a spec stays hashable.
+        import immlib
+        self.assertIs(quant((10, 'mm', 'immlib.units'))._REGISTRY,
+                      immlib.units)
+        self.assertIs(quant((10, 'mm', units))._REGISTRY, units)
+        self.assertIs(quant((10, 'mm', None))._REGISTRY, immlib.units)
+        self.assertIs(quant((10, 'mm', Ellipsis))._REGISTRY, immlib.units)
+        other = UnitRegistry()
+        self.assertIs(quant((10, 'mm', other))._REGISTRY, other)
+        # A name that imports nothing, or names something that is not a
+        # registry, is an error rather than a silent default.
+        with self.assertRaises(ValueError):
+            quant((10, 'mm', 'immlib.no_such_registry'))
+        with self.assertRaises(ValueError):
+            quant((10, 'mm', 'immlib.quant'))
+        # What a spec is *not*. It must be a tuple, which is what keeps a
+        # list of numbers a magnitude: this is the whole reason the form is
+        # a tuple rather than any sequence.
+        with self.assertRaises(TypeError):
+            quant([1, None])
+        self.assertIsNone(quant_spec([10, 'mm']))
+        # Its unit element has to be a unit, a name, None or Ellipsis, so
+        # an ordinary 2- or 3-vector is unchanged, and so is anything else
+        # quant already understood.
+        self.assertTrue(np.array_equal(quant((1.0, 2.0)).m, [1.0, 2.0]))
+        self.assertIsNone(quant((1.0, 2.0)).units)
+        self.assertTrue(np.array_equal(quant((1.0, 2.0), 'mm').m, [1.0, 2.0]))
+        self.assertTrue(np.array_equal(quant((1.0, 2.0, 3.0)).m,
+                                       [1.0, 2.0, 3.0]))
+        a = np.array([1.0, 2.0])
+        self.assertIs(quant(a, 'mm').m, a)
+        t = torch.tensor([1.0, 2.0])
+        self.assertIs(quant(t, 'mm').m, t)
+        # A misspelled unit raises Pint's own error rather than a complaint
+        # about the magnitude.
+        with self.assertRaises(pint.UndefinedUnitError):
+            quant((10, 'nosuchunit'))
+        # quant_spec is the parser the other functions use; it normalizes
+        # to three elements, filling in the registry quant defaults to.
+        self.assertEqual(quant_spec((10, 'mm')), (10, 'mm', None))
+        self.assertEqual(quant_spec((10, 'mm', None)), (10, 'mm', None))
+        self.assertEqual(quant_spec((10, 'mm', Ellipsis)),
+                         (10, 'mm', Ellipsis))
+        self.assertIsNone(quant_spec((1.0, 2.0)))
+        self.assertIsNone(quant_spec(np.array([1.0, 2.0])))
+        self.assertIsNone(quant_spec(torch.tensor([1.0, 2.0])))
+        self.assertIsNone(quant_spec(quant(1.0, 'mm')))
+        self.assertIsNone(quant_spec('mm'))
+        self.assertIsNone(quant_spec(None))
+        self.assertIsNone(quant_spec((1, 2, 3)))
+        self.assertIsNone(quant_spec((1, 'mm', 'immlib.units', 'extra')))
+        self.assertIsNone(quant_spec((1,)))
+        # is_quantspec is the same question as a boolean, and looks nothing
+        # up: a unit name it cannot resolve is still a spec.
+        for good in ((10, 'mm'), (10, None), (10, Ellipsis), (10, units.mm),
+                     (10, 'mm', None), (10, 'mm', 'immlib.units'),
+                     (10, 'mm', units), (10, 'nosuchunit'),
+                     (10, 'mm', 'no.such.registry')):
+            self.assertTrue(is_quantspec(good), repr(good))
+        for bad in ([10, 'mm'], (1.0, 2.0), (1, 2, 3), (1,), 'mm', None,
+                    np.array([1.0, 2.0]), quant(1.0, 'mm'),
+                    (1, 'mm', 'immlib.units', 'extra')):
+            self.assertFalse(is_quantspec(bad), repr(bad))
+    def test_quant_spec_in_other_functions(self):
+        """Tests that mag, unit, the to_* functions and quantwrap's
+        require_unit all understand the pair form."""
+        import numpy as np, torch
+        from immlib import (quant, mag, unit, to_array, to_tensor, to_numeric,
+                            quantwrap, Quantity, is_quant)
+        # mag is quant's inverse for the pair form too, which is what keeps
+        # it from silently returning the tuple.
+        self.assertEqual(float(mag((10, 'mm'))), 10.0)
+        self.assertAlmostEqual(float(mag((10, 'mm'), 'cm')), 1.0)
+        self.assertTrue(np.array_equal(mag((1.0, 2.0)), (1.0, 2.0)))
+        # unit reads the unit out of it.
+        self.assertEqual(str(unit((10, 'mm'))), 'millimeter')
+        # The converters accept it and keep the units.
+        for fn in (to_array, to_tensor, to_numeric):
+            r = fn((10, 'mm'))
+            self.assertIsInstance(r, Quantity)
+            self.assertEqual(str(r.units), 'millimeter')
+            r = fn((((1, 2), (3, 4)), 'mm'))
+            self.assertEqual(tuple(r.m.shape), (2, 2))
+        self.assertTrue(torch.is_tensor(to_tensor((10, 'mm')).m))
+        self.assertIsInstance(to_array((10, 'mm')).m, np.ndarray)
+        # The is_* predicates are unchanged: a pair is not a quantity, it
+        # is a way of writing one.
+        self.assertFalse(is_quant((10, 'mm')))
+        # quantwrap converts it like any other argument...
+        @quantwrap(return_quant=True)
+        def f(x):
+            return x
+        self.assertEqual(str(f((10, 'mm')).units), 'millimeter')
+        # ...and require_unit accepts it, since it states a unit.
+        @quantwrap(require_unit={'x': 'mm'}, return_quant=True)
+        def g(x):
+            return x
+        r = g((10, 'm'))
+        self.assertEqual(str(r.units), 'millimeter')
+        self.assertAlmostEqual(float(r.m), 10000.0)
+        with self.assertRaises(TypeError):
+            g(10)
+        # A default argument can be written in the form, which is the point.
+        @quantwrap(return_quant=True)
+        def h(x=(10, 'mm')):
+            return x
+        self.assertEqual(float(h().m), 10.0)
+        self.assertEqual(str(h().units), 'millimeter')
+    def test_like_quant(self):
+        """Tests the like_quant predicate."""
+        import numpy as np, torch
+        from immlib import like_quant, quant, UnitRegistry
+        for good in (5, 5.0, [1.0, 2.0], (1.0, 2.0), np.array([1.0]),
+                     torch.tensor([1.0]), quant(5, 'mm'), (10, 'mm'),
+                     (((1, 2), (3, 4)), 'mm')):
+            self.assertTrue(like_quant(good), repr(good))
+        for bad in ('mm', '5 mm', None, {'a': 1}, object(),
+                    (10, 'nosuchunit'), [1, None],
+                    (10, 'mm', 'no.such.registry')):
+            self.assertFalse(like_quant(bad), repr(bad))
+        # like_quant resolves what is_quantspec only recognizes: both are
+        # True of a well-formed spec, but only like_quant looks the unit up.
+        from immlib import is_quantspec
+        self.assertTrue(is_quantspec((10, 'nosuchunit')))
+        self.assertFalse(like_quant((10, 'nosuchunit')))
+        # The unit name is looked up in the registry that is asked for.
+        other = UnitRegistry()
+        self.assertTrue(like_quant((10, 'mm'), ureg=other))
+    def test_quantity_tospec(self):
+        """Tests Quantity.tospec and its round trip through quant."""
+        import numpy as np, torch
+        from immlib import quant, Quantity
+        from pcollections import pdict
+        cases = (quant(5.0, 'mm'),
+                 quant(np.array([1.0, 2.0]), 'mm'),
+                 quant(np.arange(6.0).reshape(2, 3), 's'),
+                 quant(torch.tensor([1.0, 2.0]), 'mm'),
+                 quant(5.0, 'dimensionless'),
+                 quant(5.0),
+                 quant(np.array([1.0, 2.0])))
+        for q in cases:
+            with self.subTest(q=str(q)):
+                spec = q.tospec()
+                # It is hashable, which is the whole point.
+                self.assertIsInstance(hash(spec), int)
+                # And it reconstructs the quantity.
+                back = quant(spec)
+                self.assertEqual(back.units, q.units)
+                self.assertTrue(
+                    np.allclose(np.asarray(back.m),
+                                np.asarray(q.m.detach()
+                                           if torch.is_tensor(q.m) else q.m)))
+        # The shape of the pair.
+        self.assertEqual(quant(5.0, 'mm').tospec(), (5.0, 'millimeter'))
+        self.assertEqual(quant(np.array([1.0, 2.0]), 'mm').tospec(),
+                         ((1.0, 2.0), 'millimeter'))
+        self.assertEqual(quant(np.arange(4.0).reshape(2, 2), 'mm').tospec(),
+                         (((0.0, 1.0), (2.0, 3.0)), 'millimeter'))
+        # A quantity with no units gets None where the unit name goes, so
+        # tospec is always a pair and quant always reads it as a spec.
+        self.assertEqual(quant(5.0).tospec(), (5.0, None))
+        self.assertEqual(quant(np.array([1.0, 2.0])).tospec(),
+                         ((1.0, 2.0), None))
+        self.assertIsNone(quant(quant(np.array([1.0, 2.0])).tospec()).units)
+        # The unit is a name, so the pair holds no registry and pickles as
+        # what it is.
+        import pickle
+        spec = quant(5.0, 'mm').tospec()
+        self.assertIsInstance(spec[1], str)
+        self.assertEqual(pickle.loads(pickle.dumps(spec)), spec)
+        # This is what lets a quantity travel in a plandict, which hashes
+        # its inputs.
+        d = pdict(length=quant(5.0, 'mm').tospec())
+        self.assertIsInstance(hash(d), int)
+        self.assertEqual(float(quant(d['length']).m), 5.0)
+        # A tensor magnitude comes back as numbers, so the pair is
+        # hashable whichever backend it came from; reconstructing it gives
+        # an array, since the pair says nothing about backends.
+        spec = quant(torch.tensor([1.0, 2.0]), 'mm').tospec()
+        self.assertEqual(spec, ((1.0, 2.0), 'millimeter'))
+        self.assertIsInstance(quant(spec).m, np.ndarray)

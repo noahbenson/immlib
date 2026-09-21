@@ -1128,6 +1128,21 @@ def is_array(obj, /, *,
     if dtype is None and shape is None and ndim is None and numel is None:
         return True
     return _numcoll_match(obj.shape, obj.dtype, ndim, shape, numel, dtype)
+def _spec_to_quant(obj, ureg):
+    """Resolves the quantity spec form into a quantity.
+
+    Returns `obj` unchanged when it is not written as a spec. See
+    ``immlib.quant_spec`` for the form and why it exists. The spec's own
+    registry builds the quantity; `ureg`, this function's caller's option,
+    then applies to the result as it does to any other quantity. (The
+    import is made here rather than at the top of the module because
+    _quantity imports this module.)
+    """
+    from ._quantity import quant_spec, _quant_of_spec
+    spec = quant_spec(obj)
+    if spec is None:
+        return obj
+    return _quant_of_spec(spec)
 @docwrap(format='numpy', inheritparams=_doc_numeric_params)
 def to_array(obj, /, dtype=None, *,
              order=None, copy=False, sparse=None, frozen=None,
@@ -1213,6 +1228,7 @@ def to_array(obj, /, dtype=None, *,
     --------
     to_tensor, to_numeric
     """
+    obj = _spec_to_quant(obj, ureg)
     if ureg is Ellipsis:
         from ._core import _default_ureg
         ureg = _default_ureg()
@@ -1774,6 +1790,7 @@ def to_tensor(obj, /, dtype=None, *,
     --------
     to_array, to_numeric
     """
+    obj = _spec_to_quant(obj, ureg)
     if ureg is Ellipsis:
         from ._core import _default_ureg
         ureg = _default_ureg()
@@ -2108,6 +2125,7 @@ def to_numeric(obj, /, dtype=None, *,
     --------
     to_array, to_tensor
     """
+    obj = _spec_to_quant(obj, ureg)
     if isinstance(obj, pint.Quantity):
         istns = torch.is_tensor(obj.m)
     else:

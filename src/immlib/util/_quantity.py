@@ -5,6 +5,7 @@
 
 # Dependencies ################################################################
 
+import importlib
 import inspect
 import operator
 import warnings
@@ -651,11 +652,6 @@ def _promote_mags(xm, ym):
     elif torch.is_tensor(ym):
         xm = to_tensor(xm, device=ym.device)
     return (xm, ym)
-
-def _hashable_mag(mag):
-    if isinstance(mag, np.ndarray) and mag.ndim == 0:
-        return mag.item()
-    return mag
 
 def _compare_units_error(units):
     """Returns the error for ordering a value that has no units against a
@@ -1718,19 +1714,73 @@ class Quantity(pint.Quantity):
         if self._is_tensor_op(other):
             return self._tensor_eq(other, True)
         return super().__ne__(other)
-    def __hash__(self):
-        # Mirrors pint.Quantity.__hash__, except that a quantity with units of
-        # None hashes like its magnitude (just as it compares equal to its
-        # magnitude), and a 0-dimensional NumPy magnitude hashes like the
-        # scalar it contains (so quant(5) hashes like 5). Magnitudes that are
-        # themselves unhashable (arrays with dimensions) remain unhashable.
+    def tospec(self):
+        """Returns this quantity as a hashable ``(magnitude, unit)`` pair.
+
+        ``q.tospec()`` returns the spec that ``immlib.quant`` accepts in
+        place of a magnitude (see ``immlib.quant_spec``), built out of
+        nothing but numbers, tuples and a string, so that it is hashable
+        and a quantity can be stored where a ``Quantity`` itself cannot
+        go--a default argument, a ``plandict`` input, a cache key.
+        ``quant(q.tospec())`` reconstructs it.
+
+        The magnitude becomes a Python number for a scalar and nested
+        tuples otherwise; the unit becomes its name, or ``None`` for a
+        quantity with no units. A name rather than a ``pint.Unit`` keeps
+        the pair portable: it does not hold a registry, and it pickles and
+        reads back as what it is. No registry is named either--the spec's
+        optional third element is left off--so that the pair reconstructs
+        in whichever registry ``quant`` is asked for.
+
+        Returns
+        -------
+        tuple
+            A 2-tuple of this quantity's magnitude and the name of its
+            unit, or ``None`` in place of the name if it has no units.
+
+        See Also
+        --------
+        quant : Makes a quantity, and accepts what this returns.
+        quant_spec : The spec form itself.
+        """
+        mag = self._magnitude
+        if torch.is_tensor(mag):
+            mag = mag.detach().cpu()
+        if scipy__is_sparse(mag):
+            mag = mag.todense()
+        mag = np.asarray(mag).tolist()
+        mag = _tuplify(mag)
         if self._units is None:
-            return hash(_hashable_mag(self._magnitude))
-        base = self.to_base_units()
-        mag = _hashable_mag(base._magnitude)
-        if base.dimensionless:
-            return hash(mag)
-        return hash((pint.Quantity, mag, base._units))
+            return (mag, None)
+        return (mag, str(self.units))
+    # Quantities are not hashable. Pint's own quantities are, and immlib's
+    # were until this was written; the reason for taking it away is that
+    # neither of the two things a hash needs is true of a quantity.
+    #
+    # A hash needs equality to be a single true or false. For a magnitude
+    # with dimensions it is not: `q1 == q2` is elementwise, because that is
+    # what NumPy and PyTorch do and what Rule 1 (see immlib.math) requires
+    # of immlib. A hashable object whose __eq__ answers elementwise is
+    # worse than an unhashable one--it enters a set quietly and raises from
+    # inside CPython's own lookup the first time two entries collide.
+    #
+    # A hash also needs the value not to change while the object is in a
+    # hash container, and no quantity can promise that, not even a
+    # persistent one with a scalar magnitude. `persist` freezes which array
+    # or tensor is the magnitude; it does not freeze that array's contents,
+    # which a quantity does not own (see Quantity.persist). Writing
+    # `q.m[()] = 7` into a 0-dimensional magnitude changes the quantity's
+    # value and its hash with it, and the quantity then goes missing from a
+    # set that holds it.
+    #
+    # Hashing only scalar magnitudes would make the type hashable or not
+    # depending on the shape of a value rather than on the type, which is
+    # not something a caller can reason about, and it would still have the
+    # second problem. So `hash(q)` raises TypeError for every quantity, and
+    # `isinstance(q, collections.abc.Hashable)` is False, which is how
+    # Python says this. Use the magnitude and the units--`(q.m.item(),
+    # str(q.u))`, say--to build a key when one is needed.
+    __hash__ = None
     def __reduce__(self):
         # Pint pickles a quantity as a plain pint.Quantity attached to Pint's
         # application registry, which would lose both the immlib.Quantity type
@@ -2059,6 +2109,10 @@ def unit(obj, /, ureg=None):
     """
     if obj is None:
         raise ValueError("cannot create a unit for None; use 'dimensionless'")
+    spec = quant_spec(obj)
+    if spec is not None:
+        # A quantity written as a spec; see quant_spec.
+        obj = _quant_of_spec(spec)
     if ureg is Ellipsis:
         ureg = _default_ureg()
     if is_quant(obj):
@@ -2151,6 +2205,206 @@ def _quant_magnitude(mag):
             f"quant: magnitude must be numerical, but it has dtype {dt}"
             f" (type {type(mag).__name__})")
     return arr
+@docwrap(format='numpy')
+def quant_spec(obj, /, *, ureg=None):
+    """Returns the ``(magnitude, unit, ureg)`` spec `obj` is written as.
+
+    ``immlib.quant`` and its relatives accept a quantity written as a tuple
+    of the arguments that make it: ``(10, 'mm')`` means the same thing as
+    ``quant(10, 'mm')``, and ``(10, 'mm', 'immlib.units')`` means the same
+    thing as ``quant(10, 'mm', ureg=immlib.units)``. The point of the form
+    is that it can be written out of numbers, tuples and strings, all of
+    which are hashable, so a quantity can appear as a default argument, as
+    an input to a ``plandict``, or in a cache key, none of which a
+    ``Quantity`` itself can do (see ``Quantity.__hash__``).
+
+    A *quantity spec* is a ``tuple`` of two or three elements whose entries
+    are valid arguments to ``quant``:
+
+    * the magnitude, which may be anything, and is not examined here;
+    * the unit, which must be a ``pint.Unit``, a string naming one,
+      ``None`` (immlib's "no units") or ``Ellipsis`` (``quant``'s default);
+    * optionally the unit registry, which must be a ``pint.UnitRegistry``,
+      ``None``, ``Ellipsis``, or a string giving the fully qualified name of
+      a registry, such as ``'immlib.units'``. A spec that omits it means
+      ``None``, which is ``quant``'s own default.
+
+    It must be a ``tuple`` specifically, which is what keeps a list of
+    numbers a magnitude: ``[1, None]`` is the error it looks like, while
+    ``(1, None)`` is a quantity with no units.
+
+    This returns the spec, always as a 3-tuple, when `obj` is written as one
+    and ``None`` when it is not, which is how the other functions here
+    recognize the form. Only the shape of `obj` is examined: a unit name is
+    not looked up, and a registry name is not imported. Use
+    ``immlib.like_quant`` to ask whether ``quant`` can actually make a
+    quantity of `obj`.
+
+    Parameters
+    ----------
+    obj : object
+        The object to examine.
+    ureg : pint.UnitRegistry or None or Ellipsis, optional
+        Accepted for consistency with the rest of this family and ignored: a
+        spec carries its own registry, and whether `obj` is written as one
+        is decided by the shape of `obj` alone.
+
+    Returns
+    -------
+    tuple or None
+        The ``(magnitude, unit, ureg)`` spec that `obj` is written as, or
+        ``None`` if it is not written as one.
+
+    See Also
+    --------
+    is_quantspec : The same question, answered as a boolean.
+    quant : Makes a quantity, and accepts the spec this recognizes.
+    like_quant : Tests whether something can be made into a quantity.
+    Quantity.tospec : Writes a quantity as a spec.
+    """
+    # Only a tuple is a spec. An array, a tensor, a sparse array, a string
+    # and a quantity are magnitudes in their own right, and a list is a
+    # magnitude too--which is the whole reason the form is a tuple, since a
+    # spec is meant for the places that require a hashable value.
+    if not isinstance(obj, tuple):
+        return None
+    if len(obj) == 2:
+        (mag, u) = obj
+        # A spec that names no registry means quant's own default.
+        r = None
+    elif len(obj) == 3:
+        (mag, u, r) = obj
+    else:
+        return None
+    # The unit and the registry decide, and each must be something quant
+    # would accept in that position; anything else--the second number of a
+    # 2-vector, say--means this is not a spec. A string that does not name a
+    # unit is still a spec, so that a misspelled unit raises Pint's own
+    # error rather than "magnitude must be numerical".
+    if not (u is None or u is Ellipsis or is_unit(u) or is_str(u)):
+        return None
+    if not (r is None or r is Ellipsis or is_ureg(r) or is_str(r)):
+        return None
+    return (mag, u, r)
+@docwrap(format='numpy')
+def is_quantspec(obj, /, *, ureg=None):
+    """Returns ``True`` if `obj` is written as a quantity spec.
+
+    ``is_quantspec(obj)`` is ``quant_spec(obj) is not None``: it asks
+    whether `obj` is a tuple of two or three elements that ``quant`` will
+    read as ``(magnitude, unit)`` or ``(magnitude, unit, ureg)``. See
+    ``immlib.quant_spec`` for what each element may be.
+
+    Like ``quant_spec``, this looks at the shape of `obj` only: it does not
+    look a unit name up in a registry, import a registry named by a string,
+    or examine the magnitude at all. ``immlib.like_quant`` is the question
+    of whether ``quant`` can actually make a quantity of `obj`.
+
+    Parameters
+    ----------
+    obj : object
+        The object to test.
+    ureg : pint.UnitRegistry or None or Ellipsis, optional
+        Accepted for consistency with the rest of this family and ignored;
+        see ``immlib.quant_spec``.
+
+    Returns
+    -------
+    boolean
+        ``True`` if `obj` is written as a quantity spec, otherwise
+        ``False``.
+
+    See Also
+    --------
+    quant_spec : The same question, answered with the spec itself.
+    like_quant : Tests whether something can be made into a quantity.
+    """
+    return quant_spec(obj) is not None
+def _spec_ureg(r):
+    """Interprets a quantity spec's unit-registry element.
+
+    A registry may be named by a string, so that a spec stays hashable and
+    picklable without holding a registry object; everything else is handed
+    back as it is, for ``quant`` to interpret.
+    """
+    if not is_str(r):
+        return r
+    # 'immlib.units' names the attribute `units` of the module `immlib`. The
+    # split between module path and attribute path is not knowable from the
+    # string, so the longest importable prefix is tried first.
+    parts = r.split('.')
+    for k in range(len(parts) - 1, 0, -1):
+        try:
+            obj = importlib.import_module('.'.join(parts[:k]))
+        except ImportError:
+            continue
+        try:
+            for p in parts[k:]:
+                obj = getattr(obj, p)
+        except AttributeError:
+            continue
+        if not is_ureg(obj):
+            raise ValueError(
+                f"quantity spec: '{r}' names {type(obj)}, not a"
+                f" pint.UnitRegistry")
+        return obj
+    raise ValueError(
+        f"quantity spec: no unit registry named '{r}' could be imported")
+def _quant_of_spec(spec):
+    """Turns a spec, as ``quant_spec`` returns it, into a quantity.
+
+    The spec's own registry is what builds the quantity; the options of
+    whichever function received the spec then apply to the result, which is
+    why ``quant((10, 'cm'), 'm')`` is 0.1 m rather than 10 m. The call is
+    ``quant``'s own, so a nested spec resolves too.
+    """
+    (mag, u, r) = spec
+    return quant(mag, u, ureg=_spec_ureg(r))
+def _tuplify(obj):
+    """Turns nested lists into nested tuples, so that they are hashable."""
+    if isinstance(obj, list):
+        return tuple(map(_tuplify, obj))
+    return obj
+@docwrap(format='numpy')
+def like_quant(obj, /, *, ureg=None):
+    """Returns ``True`` if ``immlib.quant`` can make a quantity of `obj`.
+
+    ``like_quant(obj)`` is ``True`` for anything ``quant`` accepts: a
+    number, a sequence of numbers, a NumPy array, a PyTorch tensor, a SciPy
+    sparse array, a quantity, or the spec form described in
+    ``immlib.quant_spec``. It is ``False`` for everything else, including a
+    unit name on its own, ``None``, and a spec whose unit is not a unit this
+    registry knows.
+
+    This differs from ``immlib.is_quantspec``, which asks only whether
+    `obj` is *written* as a spec, in that it resolves what it is given: a
+    unit name is looked up and a registry named by a string is imported.
+
+    Parameters
+    ----------
+    obj : object
+        The object to test.
+    ureg : pint.UnitRegistry or None or Ellipsis, optional
+        The unit registry in which to look up a unit name; see
+        ``immlib.quant``.
+
+    Returns
+    -------
+    boolean
+        ``True`` if `obj` can be made into a quantity, otherwise ``False``.
+
+    See Also
+    --------
+    quant : Make a quantity of a magnitude and a unit.
+    is_quant : Test whether an object already *is* a quantity.
+    quant_spec : The spec form this accepts.
+    is_quantspec : Test whether an object is written as a spec.
+    """
+    try:
+        quant(obj, ureg=ureg)
+    except Exception:
+        return False
+    return True
 def _quant_unpersist(q):
     """Returns a new, non-persistent quantity with `q`'s magnitude and
     units, in `q`'s own registry.
@@ -2242,7 +2496,13 @@ def quant(mag, /, unit=Ellipsis, *, ureg=None, persist=None):
     Parameters
     ----------
     mag : object
-        The magnitude to be given a unit.
+        The magnitude to be given a unit, or a quantity, or a quantity
+        written as a spec: a tuple ``(magnitude, unit)`` or
+        ``(magnitude, unit, ureg)`` of arguments to this function, which is
+        how a quantity is written where a hashable value is required (see
+        ``immlib.quant_spec``). A spec is resolved first, in the registry it
+        names, and this function's own arguments then apply to the result,
+        so ``quant((10, 'cm'), 'm')`` is 0.1 m.
     unit : unit-like, None, Ellipsis, optional
         The units to use in the returned quantity. If ``Ellipsis`` is given
         (the default), then `mag`'s own units are used if `mag` is already a
@@ -2292,6 +2552,14 @@ def quant(mag, /, unit=Ellipsis, *, ureg=None, persist=None):
         not ``immlib.Quantity`` objects.
 
     """
+    spec = quant_spec(mag)
+    if spec is not None:
+        # `mag` is written as a quantity spec; resolve it into a quantity
+        # first, in the registry the spec names, so that its unit name means
+        # what it means there. This function's own `unit`, `ureg` and
+        # `persist` options then apply to the result, which is why
+        # quant((10, 'cm'), 'm') is 0.1 m rather than 10 m.
+        mag = _quant_of_spec(spec)
     if ureg is Ellipsis:
         ureg = _default_ureg()
     if is_quant(mag):
@@ -2450,6 +2718,11 @@ def mag(obj, /, unit=Ellipsis, *, strict=False):
         If `unit` is None but `obj` is a quantity or if a unit is requested of
         a non-quantity with the `strict` option enabled.
     """
+    spec = quant_spec(obj)
+    if spec is not None:
+        # A quantity written as a spec; see quant_spec. Resolving it here is
+        # what keeps mag the inverse of quant for every form quant accepts.
+        obj = _quant_of_spec(spec)
     if is_quant(obj):
         if unit is None:
             if obj.units is None:
@@ -2598,9 +2871,16 @@ def _qw_require(val, u, what, ureg):
     the value in error messages.
     """
     if not isinstance(val, pint.Quantity):
-        raise TypeError(
-            f"quantwrap: {what} requires units of {u}, so it must be a"
-            f" quantity, not {type(val)}")
+        # A quantity written as a spec counts: it states a unit, which is
+        # what the requirement is about, and it is the only form of a
+        # quantity that a plandict can hold (see immlib.quant_spec). What
+        # unit it states is checked below, with every other quantity's.
+        spec = quant_spec(val)
+        if spec is None:
+            raise TypeError(
+                f"quantwrap: {what} requires units of {u}, so it must be a"
+                f" quantity, not {type(val)}")
+        val = _quant_of_spec(spec)
     have = val.units
     if u is None:
         if have is not None:

@@ -119,6 +119,97 @@ unit is returned).
 (il.unit('mm'), il.unit(q))
 ```
 
+(quantity-spec)=
+### Quantity Specs
+
+Anywhere `il.quant` takes a magnitude, it also accepts a *quantity spec*: a
+tuple of the arguments that would make the quantity. `(10, 'mm')` means the
+same thing as `il.quant(10, 'mm')`.
+
+```{code-cell}
+il.quant((10, 'cm'))
+```
+
+A unit given alongside the spec still applies, so the spec is converted just
+as a quantity would be:
+
+```{code-cell}
+il.quant((10, 'cm'), 'm')
+```
+
+A spec has two or three elements, and each must be something `quant` would
+accept in that position:
+
+* the **magnitude**, which may be anything `quant` accepts as one;
+* the **unit**, which may be a `pint.Unit`, a string naming one, `None`
+  (`immlib`'s "no units") or `Ellipsis` (`quant`'s own default);
+* optionally the **unit registry**, which may be a `pint.UnitRegistry`,
+  `None`, `Ellipsis`, or a string giving the fully qualified name of a
+  registry, such as `'immlib.units'`. A spec that leaves it off means `None`,
+  which is `quant`'s default.
+
+```{code-cell}
+(il.quant((5, None)).units, il.quant((10, 'mm', 'immlib.units')))
+```
+
+It must be a **tuple** specifically. That is what keeps a list of numbers a
+magnitude: `[1, None]` is the error it looks like, while `(1, None)` is a
+quantity with no units. A NumPy array, a PyTorch tensor, a SciPy sparse
+array, a string and a quantity are magnitudes in their own right too,
+whatever their length.
+
+The point of the form is that it can be written out of numbers, tuples and
+strings, all of which are hashable, while a quantity cannot be (see
+[Hashing](#quantity-hashing)). So this is how a quantity is written where a
+`Quantity` itself cannot go -- a default argument, an input to a
+[`plandict`](/user-guide/workflows.md), a dictionary key:
+
+```{code-cell}
+def sphere_volume(radius=(1.0, 'cm')):
+    r = il.quant(radius, 'cm')
+    return 4/3 * np.pi * r**3
+
+(sphere_volume(), sphere_volume((10, 'mm')))
+```
+
+The magnitude may be anything `quant` accepts, so nested tuples give a
+hashable matrix:
+
+```{code-cell}
+il.quant((((0.0, 0.1, 0.2), (0.3, 0.4, 0.5)), 'mm'))
+```
+
+`il.mag` and `il.unit` understand the form as well, as do `il.to_array`,
+`il.to_tensor` and `il.to_numeric`:
+
+```{code-cell}
+(il.mag((10, 'cm'), 'm'), il.unit((10, 'cm')))
+```
+
+`q.tospec()` is the inverse: it returns a two-element spec built out of
+nothing but numbers, tuples and a string, so that `il.quant(q.tospec())`
+reconstructs `q`. The magnitude becomes a Python number for a scalar and
+nested tuples otherwise, and the unit becomes its name -- a name rather than a
+`pint.Unit` because a name holds no registry and pickles as what it is. No
+registry is named, so the spec reconstructs in whichever registry `quant` is
+asked for.
+
+```{code-cell}
+q = il.quant(np.array([[1.0, 2.0], [3.0, 4.0]]), 'mm')
+q.tospec()
+```
+
+```{code-cell}
+il.quant(q.tospec())
+```
+
+A quantity with no units gets `None` where the unit name goes, so `tospec` is
+always a pair:
+
+```{code-cell}
+(il.quant(5.0).tospec(), il.quant(np.array([1.0, 2.0])).tospec())
+```
+
 
 ## Querying Quantities and Units
 
@@ -133,6 +224,20 @@ with one another.
 * `il.like_unit(obj)` returns `True` if `obj` is a `pint.Unit` *or* a string
   that names one (useful for validating a "unit-like" argument before
   passing it to something that requires an actual `pint.Unit`).
+* `il.like_quant(obj)` returns `True` if `il.quant` can *make* a quantity of
+  `obj`: a number, a sequence of numbers, an array, a tensor, a sparse array,
+  a quantity, or a [quantity spec](#quantity-spec). Unlike `is_quant`, it is
+  `True` for things that are not quantities yet, and it is `False` for a unit
+  name on its own, for `None`, and for a spec whose unit or registry cannot
+  be resolved.
+* `il.is_quantspec(obj)` returns `True` if `obj` is *written* as a quantity
+  spec. It looks at the shape of `obj` only: it does not look a unit name up,
+  import a registry named by a string, or examine the magnitude -- so
+  `il.is_quantspec((10, 'nosuchunit'))` is `True` while
+  `il.like_quant((10, 'nosuchunit'))` is `False`.
+* `il.quant_spec(obj)` answers the same question with the spec itself,
+  normalized to `(magnitude, unit, ureg)`, or `None` if `obj` is not written
+  as one.
 * `il.is_ureg(obj)` returns `True` if `obj` is a `pint.UnitRegistry`.
 * `il.alike_units(a, b)` returns `True` if the units `a` and `b` (each of
   which may be a unit, a unit name, or a quantity) are dimensionally
@@ -244,16 +349,73 @@ print(none_q)
 print(f'{il.quant(3.5)}')
 ```
 
-Unit-less quantities can be pickled (they are restored, like every
-`immlib.Quantity`, in the `immlib.units` registry, since unit registries
-themselves are not pickled), and a unit-less quantity with a 0-dimensional
-magnitude hashes like the number it contains.
+Unit-less quantities can be pickled, like every `immlib.Quantity` (they are
+restored in the `immlib.units` registry, since unit registries themselves are
+not pickled). They cannot be hashed, and neither can any other quantity --
+see [Hashing](#quantity-hashing).
 
 ```{note}
 Only an explicit `units=None` means "no units". Quantities that `pint` itself
 creates without being given units--for example, by parsing the string
 `"dimensionless"`--have `pint`'s real `dimensionless` unit, even in an
 `immlib.UnitRegistry`.
+```
+
+
+(quantity-hashing)=
+## Hashing
+
+Quantities are **not hashable**. `hash(q)` raises a `TypeError` for every
+quantity, whatever its magnitude, its units, or its persistence, so a
+quantity cannot be a dictionary key or a set member.
+
+```{code-cell}
+try:
+    hash(il.quant(5.0, 'mm'))
+except TypeError as e:
+    print(e)
+```
+
+`pint`'s own quantities are hashable, and `immlib`'s were, so this is worth
+explaining. A hash needs two things, and a quantity has neither.
+
+The first is that equality gives a single true or false. For a magnitude with
+dimensions it does not: `q1 == q2` is *elementwise*, because that is what
+NumPy and PyTorch do and what [Rule 1](/user-guide/math.md) requires of
+`immlib`. An object that has a hash but answers `==` elementwise is worse
+than an unhashable one -- it enters a `set` quietly and then raises from
+inside Python's own lookup the first time two entries collide.
+
+The second is that the value does not change while the object sits in a hash
+container, and no quantity can promise that. `persist` freezes *which* array
+or tensor is the magnitude; it does not freeze that array's contents, which a
+quantity does not own. So even a persistent quantity with a scalar magnitude
+can change value underneath a hash:
+
+```{code-cell}
+q = il.quant(5.0, 'mm')     # persistent, and its magnitude is a scalar
+q.m[()] = 7.0               # the contents were never frozen
+
+(q.is_persistent, float(q.m))
+```
+
+Hashing only the scalar cases would have made the type hashable or not
+depending on the shape of a value rather than on the type, which is not
+something a caller can reason about, and it would still have had the second
+problem. `numpy.ndarray` and `list` are unhashable for much the same
+reasons.
+
+Where a hashable quantity is needed anyway -- a default argument, a
+`plandict` input, a cache key -- a [quantity spec](#quantity-spec) is what to
+write instead. `q.tospec()` builds one out of numbers, tuples and a unit
+name, all of which are hashable, and `il.quant` turns it back into a
+quantity:
+
+```{code-cell}
+q = il.quant(5.0, 'mm')
+key = q.tospec()
+
+(hash(key) is not None, {key: 'five millimetres'}[key], il.quant(key))
 ```
 
 

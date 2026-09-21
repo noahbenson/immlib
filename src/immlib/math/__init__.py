@@ -38,8 +38,8 @@ Examples
 <Quantity([ 2.71828183  7.3890561  20.08553692], None)>
 """
 
-from ..util import (quant, ilquant, quantwrap, mag, promote,
-                    to_array, to_tensor)
+from ..util import (quant, ilquant, quantwrap, quant_spec, is_quantspec,
+                    like_quant, mag, promote, to_array, to_tensor)
 from ._core import (
     abs,
     add,
@@ -152,6 +152,9 @@ __all__ = (
     "quant",
     "ilquant",
     "quantwrap",
+    "quant_spec",
+    "is_quantspec",
+    "like_quant",
     "mag",
     "promote",
     "to_array",

@@ -474,7 +474,8 @@ class TestRules(TestCase):
         covered |= {name for (name, _) in PAIR_CALLS}
         covered |= {'stack', 'cat', 'concatenate', 'concat'}
         # Functions tested elsewhere, or not of the shape tested here.
-        covered |= {'quant', 'ilquant', 'quantwrap', 'mag', 'promote',
+        covered |= {'quant', 'ilquant', 'quantwrap', 'quant_spec',
+                    'is_quantspec', 'like_quant', 'mag', 'promote',
                     'to_array', 'to_tensor', 'matmul', 'where', 'min_result',
                     'max_result', 'sort_result', 'median_result'}
         # Aliases of a covered function are covered by it.
