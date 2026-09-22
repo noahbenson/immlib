@@ -1109,7 +1109,7 @@ class Quantity(pint.Quantity):
                 # didn't anticipate); this should be rare in practice.
                 return str(self._magnitude)
         return super().__format__(spec)
-    def m_as(self, units: object) -> Any:
+    def m_as(self, units: Any) -> Any:
         """Returns this quantity's magnitude in the units `units`.
 
         ``q.m_as(None)`` returns the bare magnitude, whatever units `q` has,
@@ -1142,11 +1142,11 @@ class Quantity(pint.Quantity):
                 "m_as: quantity has no units (units is None); use .to() to"
                 " attach units or .magnitude/.m to obtain the raw value")
         return super().m_as(units)
-    def __bool__(self) -> bool:
+    def __bool__(self) -> bool:  # type: ignore[override]
         if self._units is None:
             return bool(self._magnitude)
         return super().__bool__()
-    __nonzero__ = __bool__
+    __nonzero__ = __bool__  # type: ignore[assignment]
 
     def ito_root_units(self) -> None:
         """Converts this quantity into its root units in place, and returns
@@ -1155,7 +1155,7 @@ class Quantity(pint.Quantity):
             raise self._refuse(
                 "converting the units in place (ito_root_units)")
         return super().ito_root_units()
-    def ito_base_units(self) -> None:
+    def ito_base_units(self) -> None:  # type: ignore[override]
         """Converts this quantity into its base units in place, and returns
         ``None``; ``to_base_units`` returns a new quantity instead."""
         if self._persistent:
@@ -1320,19 +1320,19 @@ class Quantity(pint.Quantity):
             self._magnitude = result
             self._units = None
         return self
-    def __iadd__(self, other):
+    def __iadd__(self, other):  # type: ignore[misc]
         if self._is_0d():
             return self._inplace_0d(operator.add, other)
         return super().__iadd__(other)
-    def __isub__(self, other):
+    def __isub__(self, other):  # type: ignore[misc]
         if self._is_0d():
             return self._inplace_0d(operator.sub, other)
         return super().__isub__(other)
-    def __imul__(self, other):
+    def __imul__(self, other):  # type: ignore[misc]
         if self._is_0d():
             return self._inplace_0d(operator.mul, other)
         return super().__imul__(other)
-    def __itruediv__(self, other):
+    def __itruediv__(self, other):  # type: ignore[misc]
         if self._is_0d():
             return self._inplace_0d(operator.truediv, other)
         return super().__itruediv__(other)

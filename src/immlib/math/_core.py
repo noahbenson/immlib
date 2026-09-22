@@ -548,22 +548,22 @@ def abs(a: QuantityLike) -> Quantity:
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def add(a: QuantityLike, b: QuantityLike) -> Quantity:
     """Returns ``a + b``; see ``immlib.Quantity``'s unit-aware addition."""
-    return quant(a) + quant(b)
+    return quant(a) + quant(b)  # type: ignore[return-value]
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def subtract(a: QuantityLike, b: QuantityLike) -> Quantity:
     """Returns ``a - b``; see ``immlib.Quantity``'s unit-aware subtraction."""
-    return quant(a) - quant(b)
+    return quant(a) - quant(b)  # type: ignore[return-value]
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def multiply(a: QuantityLike, b: QuantityLike) -> Quantity:
     """Returns ``a * b``; see ``immlib.Quantity``'s unit-aware multiplication."""
-    return quant(a) * quant(b)
+    return quant(a) * quant(b)  # type: ignore[return-value]
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def divide(a: QuantityLike, b: QuantityLike) -> Quantity:
     """Returns ``a / b``; see ``immlib.Quantity``'s unit-aware division."""
-    return quant(a) / quant(b)
+    return quant(a) / quant(b)  # type: ignore[return-value]
 
 true_divide = divide
 
@@ -1499,7 +1499,7 @@ def ptp(a: QuantityLike, dim: Any=None, keepdim: bool=False, **kwargs: Any) -> Q
     which keeps a tensor's gradient tracking.
     """
     (dim, keepdim) = _dimargs('ptp', kwargs, dim=dim, keepdim=keepdim)
-    return amax(a, dim, keepdim) - amin(a, dim, keepdim)
+    return amax(a, dim, keepdim) - amin(a, dim, keepdim)  # type: ignore[return-value]
 
 @docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_reduce), inheritreturns=_doc_returns_quantity)
 def average(a: QuantityLike, dim: Any=None, weights: Any=None, keepdim: bool=False, **kwargs: Any) -> Quantity:
