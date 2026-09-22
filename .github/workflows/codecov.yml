@@ -114,4 +114,8 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
           file: 'coverage-report.xml'
-          fail_ci_if_error: true
+          # Do not fail the build if Codecov is unavailable or the upload
+          # fails: an outage on a third-party service must not turn a green
+          # test run red. The tests above are the gate; the coverage report is
+          # reported, not enforced, here.
+          fail_ci_if_error: false
