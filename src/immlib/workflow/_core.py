@@ -383,7 +383,12 @@ class calc:
         # Figure out the inputs from the argspec; we set them below, after we
         # have checked the pathcache.
         inputs = pset(sig.parameters.keys())
-        # Check that the outputs are okay.
+        # Check that the outputs are okay. A calc created with outputs=None
+        # (i.e., @calc(None)) produces no outputs and always runs: its `lazy`
+        # option is ignored and forced to False (see the calc docstring).
+        if outputs is None:
+            outputs = ()
+            lazy = False
         outputs = tuple(outputs)
         for out in outputs:
             if not strisvar(out):
@@ -447,7 +452,7 @@ class calc:
                 # Call to @calc(None), which forces a no-outputs version.
                 def calc_none(f):
                     return cls._new(f, None, **kw)
-                return cls_none
+                return calc_none
             else:
                 # @calc :: calc(fn) or calc(fn, k1=v1...)
                 # Call to @calc without arguments: use the function name.

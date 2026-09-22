@@ -116,6 +116,54 @@ class TestWorkflowCore(TestCase):
         self.assertEqual(res['x'], 2)
         self.assertEqual(res['y'], 4)
         self.assertEqual(res['out3'], 6)
+    def test_calc_none(self):
+        """Tests the @calc(None) no-outputs mechanic."""
+        from immlib.workflow import (calc, plan)
+        calls = []
+        # @calc(None) declares a calculation that produces no outputs and always
+        # runs (its `lazy` option is ignored and forced to False), so that it can
+        # be used for its side effects.
+        @calc(None)
+        def record(x):
+            """Records its input.
+
+            Parameters
+            ----------
+            x : object
+                The value to record.
+            """
+            calls.append(x)
+        c = record.calc
+        self.assertEqual(c.outputs, ())
+        self.assertFalse(c.lazy)
+        # The lazy option is ignored when there are no outputs.
+        @calc(None, lazy=True)
+        def record2(x):
+            calls.append(('two', x))
+        self.assertFalse(record2.calc.lazy)
+        # Calling the calc runs the function and returns an empty lazy dict.
+        self.assertEqual(record.calc(1), {})
+        self.assertEqual(calls, [1])
+        record2.calc(2)
+        self.assertEqual(calls[-1], ('two', 2))
+        # In a plan, a @calc(None) calculation is a requirement: it runs when
+        # the plandict is created and again when an input is updated, even
+        # though none of its values is ever requested.
+        calls.clear()
+        @calc(None)
+        def note(x):
+            calls.append(x)
+        @calc('y')
+        def double(x):
+            return x * 2
+        p = plan(note=note, double=double)
+        pd = p(x=3)
+        self.assertEqual(calls, [3])
+        self.assertEqual(pd['y'], 6)
+        pd = pd.set('x', 4)
+        self.assertEqual(calls, [3, 4])
+        self.assertEqual(pd['y'], 8)
+
     def test_calc_doc_sections(self):
         """A calc documents its inputs under 'Parameters' or 'Inputs' and its
         outputs under 'Returns' or 'Outputs'."""
