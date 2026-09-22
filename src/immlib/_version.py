@@ -5,9 +5,13 @@
 
 # Dependencies ################################################################
 
+from __future__ import annotations
+
 from ast import literal_eval
+from typing import Iterator
 from collections import namedtuple
 from pathlib import Path
+from os import PathLike
 from warnings import warn
 
 
@@ -79,7 +83,9 @@ class Version(VersionTuple):
     """
 
     # Static Methods ----------------------------------------------------------
-    def getstring(package_name=None, pyproject_path=None):
+    @staticmethod
+    def getstring(package_name: str | None = None,
+                  pyproject_path: str | PathLike[str] | None = None) -> str:
         """Returns the current version string for the given package name.
         
         ``Version.getstring(package_name)`` returns the version string of the
@@ -100,7 +106,8 @@ class Version(VersionTuple):
                 from importlib.metadata import PackageNotFoundError
             except ModuleNotFoundError:
                 from importlib_metadata import version
-                from importlib_metadata import PackageNotFoundError
+                from importlib_metadata import (  # type: ignore[assignment]
+                    PackageNotFoundError)
             if pyproject_path is None:
                 return version(package_name)
             # Try to deduce the version string but don't raise if this fails.
@@ -110,7 +117,7 @@ class Version(VersionTuple):
                 pass
         # Either a package name wasn't given or the package wasn't found; check
         # the pyproject.toml if possible.
-        path = Path(pyproject_path)
+        path = Path(pyproject_path)  # type: ignore[arg-type]
         with path.open('rt') as fl:
             toml_lines = fl.read().split('\n')
         in_project_section = False
@@ -213,20 +220,20 @@ class Version(VersionTuple):
             minor=minor,
             micro=micro,
             stage=stage)
-    def __str__(self):
+    def __str__(self) -> str:
         return self.string
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"Version({repr(self.string)})"
-    def __iter__(self):
+    def __iter__(self) -> Iterator[object]:
         return iter(self.tuple)
-    def __reversed__(self):
+    def __reversed__(self) -> Iterator[object]:
         return reversed(self.tuple)
-    def __contains__(self, k):
+    def __contains__(self, k: object) -> bool:
         if isinstance(k, str):
             return k in self.string
         else:
             return k in self.tuple
-Version.null = VersionTuple.__new__(
+Version.null = VersionTuple.__new__(  # type: ignore[assignment]
     Version,
     string='',
     tuple=(),

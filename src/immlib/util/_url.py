@@ -1,14 +1,22 @@
 # -*- coding: utf-8 -*-
 ###############################################################################
-# pimms/util/_url.py
+# immlib/util/_url.py
 
 
 # Dependencies ################################################################
+
+from __future__ import annotations
 
 import os, shutil, tempfile
 import urllib.parse, urllib.request
 from pathlib import Path
 from contextlib import contextmanager
+from os import PathLike
+from typing import (Any, IO, Iterator, Union, overload)
+
+
+#: A filesystem path given as a string or ``os.PathLike``.
+StrPath = Union[str, 'PathLike[str]']
 
 
 # Utilities ###################################################################
@@ -17,7 +25,7 @@ from contextlib import contextmanager
 # but a downloaded file should have the permissions an ordinary new file
 # would have, so that (for example) a cache directory can be shared. The
 # umask is read once, here, because reading it is not thread-safe.
-def _default_file_mode():
+def _default_file_mode() -> int | None:
     try:
         umask = os.umask(0)
         os.umask(umask)
@@ -28,7 +36,8 @@ _FILE_MODE = _default_file_mode()
 
 
 @contextmanager
-def _atomic_open(path, mode='wb', *, overwrite=True):
+def _atomic_open(path: StrPath, mode: str = 'wb', *,
+                 overwrite: bool = True) -> Iterator[IO[Any]]:
     """Context manager that opens a temporary file for writing, then moves it
     into place at `path` when the block exits without an error.
 
@@ -117,7 +126,7 @@ def _atomic_open(path, mode='wb', *, overwrite=True):
 
 # URL Functions ###############################################################
 
-def is_url(url, /):
+def is_url(url: object, /) -> bool:
     '''Returns ``True`` if given a valid URL string and ``False`` otherwise.
     
     ``is_url(url)`` returns ``True`` if and only if the given URL is a valid
@@ -131,11 +140,11 @@ def is_url(url, /):
     can_download_url
     '''
     try:
-        p = urllib.parse.urlparse(url)
+        p = urllib.parse.urlparse(url)  # type: ignore[call-overload]
         return bool(p.scheme and (p.netloc or p.scheme == 'file'))
     except Exception:
         return False
-def can_download_url(url):
+def can_download_url(url: str) -> bool:
     '''Returns ``True`` if given a requestable URL and ``False`` otherwise.
     
     ``can_download_url(url)`` returns ``True`` if and only if the given URL is
@@ -151,9 +160,17 @@ def can_download_url(url):
             return bool(response)
     except Exception:
         return False
+@overload
+def url_download(url: str, /, destpath: None = ...,
+                 *, mkdirs: bool = ..., mkdir_mode: int = ...,
+                 expanduser: bool = ..., overwrite: bool = ...) -> bytes: ...
+@overload
+def url_download(url: str, /, destpath: StrPath,
+                 *, mkdirs: bool = ..., mkdir_mode: int = ...,
+                 expanduser: bool = ..., overwrite: bool = ...) -> Path: ...
 def url_download(url, /, destpath=None, *,
                  mkdirs=True, mkdir_mode=0o775, expanduser=True,
-                 overwrite=True):
+                 overwrite=True) -> Union[bytes, Path]:
     '''Returns the contents of the given URL as a byte-string.
     
     ``url_download(url)`` returns the contents of the given url as a

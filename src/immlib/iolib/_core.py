@@ -7,7 +7,10 @@
 
 # Dependencies #################################################################
 
+from __future__ import annotations
+
 import os, io, gzip, numbers
+from typing import Any
 from pathlib import Path
 from threading import RLock
 
@@ -33,7 +36,7 @@ class Format:
     the destination to which the format should be written, an object to save
     in the format, and any optional arguments understood by the type.
     """
-    def __init__(self, name, function, *suffixes, mode='b', gzip_suffix=None):
+    def __init__(self, name: Any, function: Any, *suffixes: Any, mode: Any='b', gzip_suffix: Any=None) -> None:
         self.name = name
         self.function = function
         self.suffixes = []
@@ -105,9 +108,9 @@ class Formatter:
     # writers. Everything else about a Formatter is read-only.
     __slots__ = ("_state", "_lock")
     # Constructor.
-    def __init__(self, template=None):
+    def __init__(self, template: Any=None) -> None:
         self._lock = RLock()
-        self._state = (pdict(), pdict())
+        self._state: Any = (pdict(), pdict())
         if template is not None:
             cls = type(self)
             if isinstance(template, cls):
@@ -124,7 +127,7 @@ class Formatter:
                     raise TypeError(f"template contains non-format named {k}")
                 self.register(format)
     @property
-    def formats(self):
+    def formats(self) -> Any:
         """The formats registered here, as a persistent map of name to
         `Format`.
 
@@ -139,7 +142,7 @@ class Formatter:
         """The same formats, as a persistent map of suffix tuple to
         `Format`. A snapshot, as `formats` is."""
         return self._state[1]
-    def deduce_format(self, arg, ignore_gz=True):
+    def deduce_format(self, arg: Any, ignore_gz: Any=True) -> Any:
         """Deduces the file format for a given path or suffix.
 
         `save.deduce_format(arg)` deduces the format implied by `arg`. The
@@ -242,7 +245,7 @@ class Formatter:
             encoding=encoding,
             errors=errors,
             newline=newline)
-    def register(self, name, /, *suffixes, mode='b', gzip_suffix=None):
+    def register(self, name: Any, /, *suffixes: Any, mode: Any='b', gzip_suffix: Any=None) -> Any:
         """Registers a format type with the `save`/`load` interface.
 
         The `immlib.save.register` method is intended to be used as a decorator:
@@ -329,7 +332,7 @@ class Formatter:
                 return self.register(format)
             return _formatter_register_dec
         # That's it for the register function.
-    def unregister(self, name, *, error_on_missing=False):
+    def unregister(self, name: Any, *, error_on_missing: Any=False) -> Any:
         """Unregisters the format with the given name from the save/load system.
 
         The format with the given name is unregistered from the `immlib.save`
@@ -377,7 +380,7 @@ class Formatter:
             suffs = tuple(format.suffixes) + format.gzip_suffix
             self._state = (formats.delete(name), by_suffix.dropall(suffs))
         return format
-    def copy(self):
+    def copy(self) -> Any:
         """Returns a copy of the given save manager.
 
         `immlib.save.copy()` can be used to return a copy of the save manager,
@@ -449,23 +452,23 @@ save = Save()
 
 # Register a few basic file formats.
 @save.register('str', mode='t')
-def save_str(stream, obj, append_nl=False):
+def save_str(stream: Any, obj: Any, append_nl: Any=False) -> None:
     """Saves `str(obj)` to the given stream."""
     stream.write(str(obj))
     if append_nl:
         stream.write('\n')
 @save.register('bytes', mode='b')
-def save_bytes(stream, obj):
+def save_bytes(stream: Any, obj: Any) -> None:
     """Saves `bytes(obj)` to the given stream."""
     stream.write(bytes(obj))
 @save.register('repr', mode='t')
-def save_repr(stream, obj, append_nl=False):
+def save_repr(stream: Any, obj: Any, append_nl: Any=False) -> None:
     """Saves `repr(obj)` to the given stream."""
     stream.write(repr(obj))
     if append_nl:
         stream.write('\n')
 @save.register('text', '.txt', '.text', mode='t')
-def save_text(stream, lines, append_nls=False):
+def save_text(stream: Any, lines: Any, append_nls: Any=False) -> None:
     """Saves a blob of text or a sequence of lines to a stream or path.
 
     Parameters
@@ -491,7 +494,7 @@ def save_text(stream, lines, append_nls=False):
         for ln in lines:
             stream.write(ln)
 @save.register('pickle', '.pickle', '.pkl', '.pcl', mode='b')
-def save_pickle(stream, obj, protocol=None, save_ready=False, **kwargs):
+def save_pickle(stream: Any, obj: Any, protocol: Any=None, save_ready: Any=False, **kwargs: Any) -> None:
     """Saves a pickled object to a destination path or stream.
 
     All keyword options other than `save_ready` are forwarded to the
@@ -508,14 +511,14 @@ def save_pickle(stream, obj, protocol=None, save_ready=False, **kwargs):
     with save_ready_ctx(save_ready):
         pickle.dump(obj, stream, protocol, **kwargs)
 @save.register('numpy', '.npy', '.np', '.numpy', mode='b', gzip_suffix='.npz')
-def save_numpy(stream, obj, **kwargs):
+def save_numpy(stream: Any, obj: Any, **kwargs: Any) -> None:
     """Saves a numpy object to a destination path or stream.
 
     All keyword options are forwarded to the `numpy.save` function.
     """
     import numpy as np
     np.save(stream, obj, **kwargs)
-def json_default(obj):
+def json_default(obj: Any) -> Any:
     """Converts an object to a json-formattable object or raises TypeError.
     """
     if is_str(obj) or obj is None or obj is True or obj is False:
@@ -538,7 +541,7 @@ def json_default(obj):
     else:
         raise TypeError(type(obj))
 @save.register('json', '.json', mode='t')
-def save_json(stream, obj, /, default=json_default, **kwargs):
+def save_json(stream: Any, obj: Any, /, default: Any=json_default, **kwargs: Any) -> None:
     """Saves an object as a JSON string or raises a TypeError if not possible.
 
     All keywords are passed along to the `json.dump` function. The `default`
@@ -547,7 +550,7 @@ def save_json(stream, obj, /, default=json_default, **kwargs):
     """
     import json
     json.dump(obj, stream, default=default, **kwargs)
-def yaml_prepare(obj):
+def yaml_prepare(obj: Any) -> Any:
     """Returns a version of the argument that can be JSON/YAML serialized."""
     if is_str(obj) or obj is None or obj is True or obj is False:
         return obj
@@ -569,7 +572,7 @@ def yaml_prepare(obj):
     else:
         raise TypeError(type(obj))
 @save.register('yaml', '.yaml', mode='t')
-def save_yaml(stream, obj, /, **kwargs):
+def save_yaml(stream: Any, obj: Any, /, **kwargs: Any) -> None:
     """Saves an object as a YAML string or raises a TypeError if not possible.
 
     All keywords are passed along to the `yaml.Dumper` object that is used for
@@ -581,7 +584,7 @@ def save_yaml(stream, obj, /, **kwargs):
     import yaml
     yaml.dump(yaml_prepare(obj), stream, **kwargs)
 @save.register('csv', '.csv', mode='t')
-def save_csv(stream, obj, /, index=False, **kwargs):
+def save_csv(stream: Any, obj: Any, /, index: Any=False, **kwargs: Any) -> None:
     """Saves a pandas DataFrame to a CSV file.
 
     All options are passed along to `pandas.DataFrame.to_csv()`. The option
@@ -591,7 +594,7 @@ def save_csv(stream, obj, /, index=False, **kwargs):
     obj = pandas.DataFrame(obj)
     obj.to_csv(stream, index=index, **kwargs)
 @save.register('tsv', '.tsv', mode='t')
-def save_tsv(stream, obj, /, sep="\t", index=False, **kwargs):
+def save_tsv(stream: Any, obj: Any, /, sep: Any="\t", index: Any=False, **kwargs: Any) -> None:
     """Saves a pandas DataFrame to a TSV file.
 
     All options are passed along to `pandas.DataFrame.to_csv()`. The option
@@ -665,7 +668,7 @@ class Load(Formatter):
         (loadret, saveret) = self._call(src, format, gzip, **kwargs)
         return loadret
     @staticmethod
-    def from_dir(src, filter=None):
+    def from_dir(src: Any, filter: Any=None) -> Any:
         """Loads a nested dictionary structure of a directory.
 
         `Load.from_dir(path)` returns `path` if `path` refers to a file.
@@ -696,23 +699,23 @@ load = Load()
 
 # Register a few basic file formats.
 @load.register('str', mode='t')
-def load_str(stream, strip_nl=False, size=-1):
+def load_str(stream: Any, strip_nl: Any=False, size: Any=-1) -> Any:
     """Loads a string from the given source."""
     s = stream.read(size)
     if strip_nl:
         s = s.rstrip('\n')
     return s
 @load.register('bytes', mode='b')
-def load_bytes(stream, size=-1):
+def load_bytes(stream: Any, size: Any=-1) -> Any:
     """Loads a string from the given source."""
     return stream.read(size)
 @load.register('repr', mode='t')
-def load_repr(stream, size=-1):
+def load_repr(stream: Any, size: Any=-1) -> Any:
     """Loads an object using the `ast.literal_eval` function."""
     from ast import literal_eval
     return literal_eval(stream.read(size))
 @load.register('text', '.txt', '.text', mode='t')
-def load_text(stream, strip_nls=True, size=-1):
+def load_text(stream: Any, strip_nls: Any=True, size: Any=-1) -> Any:
     """Loads a blob of text or a sequence of lines from a stream or path.
 
     Parameters
@@ -729,7 +732,7 @@ def load_text(stream, strip_nls=True, size=-1):
     else:
         return stream.readlines(size)
 @load.register('pickle', '.pickle', '.pkl', '.pcl', mode='b')
-def load_pickle(stream, **kwargs):
+def load_pickle(stream: Any, **kwargs: Any) -> Any:
     """Loads a pickled object from a path or stream and returns the object.
 
     All keyword options are forwarded to the `pickle.load` function.
@@ -737,7 +740,7 @@ def load_pickle(stream, **kwargs):
     import pickle
     return pickle.load(stream, **kwargs)
 @load.register('numpy', '.npy', '.np', '.numpy', mode='b', gzip_suffix='.npz')
-def load_numpy(stream, **kwargs):
+def load_numpy(stream: Any, **kwargs: Any) -> Any:
     """Loads a numpy object from a path or stream and returns the object.
 
     All keyword options are forwarded to the `numpy.load` function.
@@ -745,7 +748,7 @@ def load_numpy(stream, **kwargs):
     import numpy as np
     return np.load(stream, **kwargs)
 @load.register('json', '.json', mode='t')
-def load_json(stream, /, **kwargs):
+def load_json(stream: Any, /, **kwargs: Any) -> Any:
     """Loads an object from a JSON stream or path and returns the object.
 
     All keywords are passed along to the `json.load` function.
@@ -753,7 +756,7 @@ def load_json(stream, /, **kwargs):
     import json
     return json.load(stream, **kwargs)
 @load.register('yaml', '.yaml', '.yml', mode='t')
-def load_yaml(stream, /, safe=True):
+def load_yaml(stream: Any, /, safe: Any=True) -> Any:
     """Loads an object from a YAML stream or path and returns the object.
 
     The optional argument `safe` may be set to `False` to use unsafe YAML
@@ -767,7 +770,7 @@ def load_yaml(stream, /, safe=True):
         # yaml.unsafe_load is its spelling of the unrestricted loader.
         return yaml.unsafe_load(stream)
 @load.register('csv', '.csv', mode='t')
-def load_csv(stream, /, sep=',', **kwargs):
+def load_csv(stream: Any, /, sep: Any=',', **kwargs: Any) -> Any:
     """Loads a pandas DataFrame from a CSV file.
 
     All options are passed along to `pandas.read_csv()`.
@@ -775,7 +778,7 @@ def load_csv(stream, /, sep=',', **kwargs):
     import pandas
     return pandas.read_csv(stream, sep=sep, **kwargs)
 @load.register('tsv', '.tsv', mode='t')
-def load_tsv(stream, /, sep="\t", **kwargs):
+def load_tsv(stream: Any, /, sep: Any="\t", **kwargs: Any) -> Any:
     """Loads a pandas DataFrame from a TSV file.
 
     All options are passed along to `pandas.read_csv()`.

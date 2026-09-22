@@ -5,7 +5,10 @@
 
 # Dependencies ################################################################
 
+from __future__ import annotations
+
 import os, sys
+from typing import Any
 from pathlib      import (Path, PurePath)
 
 from pcollections import (pdict, ldict, lazy)
@@ -20,7 +23,7 @@ _pyminor = int(sys.version.split('.')[1])
 _pyv3_12 = (_pymajor > 3 or (_pymajor == 3 and _pyminor > 11))
 _pathbase = Path if _pyv3_12 else type(Path())
 
-class CloudCachePath(_pathbase):
+class CloudCachePath(_pathbase):  # type: ignore[valid-type,misc]
     """A filesystem path wrapper for the CloudPath type.
 
     A `CloudCachePath` object is a simple wrapper around a `CloudPath` object.
@@ -30,7 +33,7 @@ class CloudCachePath(_pathbase):
     instances of their associated cloud paths. Interacting with files forces
     them to be downloaded.
     """
-    def __new__(cls, cloud_path):
+    def __new__(cls, cloud_path: Any) -> CloudCachePath:
         if not isinstance(cloud_path, CloudPath):
             raise TypeError(
                 f"CloudCachePath requires a CloudPath object, not"
@@ -47,7 +50,7 @@ class CloudCachePath(_pathbase):
             lcd = cloud_path.client._local_cache_dir
             fspath = Path(lcd).absolute() / str(cloud_path)[len(pre):]
             super().__init__(fspath)
-    def __truediv__(self, other):
+    def __truediv__(self, other: Any) -> CloudCachePath:
         return CloudCachePath(self.cloud_path / other)
     @property
     def parents(self):

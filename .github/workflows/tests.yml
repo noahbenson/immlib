@@ -158,3 +158,30 @@ jobs:
       - name: Run Tests
         run: |
           python -m immlib.test
+
+  # Static type checking. The annotations immlib carries are checked with
+  # mypy; its configuration lives in pyproject.toml ([tool.mypy]).
+  typecheck:
+    name: "mypy / ${{matrix.version}} - ${{github.event_name}}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - '3.10'
+          - '3.13'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: '2'
+      - name: Setup Python Environment
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.version }}
+      - name: Install immlib and mypy
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . mypy
+      - name: Run mypy
+        run: python -m mypy

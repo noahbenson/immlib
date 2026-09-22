@@ -791,7 +791,7 @@ class TestWorkflowCore(TestCase):
 # Module-level calcs and plans for the pickling tests (calcs are pickled by
 # reference to their functions, so they can't be defined inside a test).
 from immlib.workflow import calc as _calc, plan as _plan
-_PICKLE_RUNS = []
+_PICKLE_RUNS: list = []
 @_calc('x', lazy=False)
 def _pickle_check_x(x):
     _PICKLE_RUNS.append('check_x')

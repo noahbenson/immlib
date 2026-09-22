@@ -5,7 +5,10 @@
 
 # Dependencies ################################################################
 
+from __future__ import annotations
+
 import copy, textwrap, pickle
+from typing import Any
 from contextvars import ContextVar
 from collections.abc import (Callable, Mapping)
 from collections import (defaultdict, namedtuple)
@@ -799,7 +802,7 @@ class calc:
         if fn is not new_fn:
             object.__setattr__(new_calc, 'function', new_fn)
         return new_calc
-def is_calc(obj, /):
+def is_calc(obj: object, /) -> bool:
     """Determines if an object is a ``calc`` instance.
 
     ``is_calc(obj)`` returns ``True`` if `obj` is a ``calc`` object.
@@ -815,7 +818,7 @@ def is_calc(obj, /):
     calc, to_calc, is_calcfn
     """
     return isinstance(obj, calc)
-def is_calcfn(obj, /):
+def is_calcfn(obj: object, /) -> bool:
     """Determines if an object is function that was decorated by ``@calc``.
 
     ``is_calcfn(obj)`` returns ``True`` if `obj` is a function that was
@@ -831,7 +834,7 @@ def is_calcfn(obj, /):
     calc, to_calc, is_calc
     """
     return isinstance(getattr(obj, 'calc', None), calc)
-def to_calc(obj, /, update=True):
+def to_calc(obj: Any, /, update: bool = True) -> Any:
     """Converts an object into a ``calc`` object or raises a ``TypeError``.
 
     ``to_calc(obj)`` returns `obj` if `obj` is already a ``calc``
@@ -1438,7 +1441,7 @@ class plan(pdict):
         n = len(self.calcdata.calcs)
         m = len(self.inputs)
         return f"plan(<{n} calcs>, <{m} params>)"
-def is_plan(arg):
+def is_plan(arg: object) -> bool:
     """Determines if an object is a ``plan`` instance.
 
     ``is_plan(x)`` returns ``True`` if ``x`` is a calculation ``plan`` and
@@ -1477,7 +1480,7 @@ class PlanError(LazyError):
         the failure did not originate in a calculation (for example, if a lazy
         input value failed).
     """
-    def __init__(self, message, key=None, calc=None):
+    def __init__(self, message: str, key: Any = None, calc: Any = None) -> None:
         super().__init__(message)
         self.key = key
         self.calc = calc
@@ -1975,14 +1978,14 @@ def _unpickle_plandict(plan, inputs, ready, is_transient):
     return pd.transient() if is_transient else pd
 
 
-def is_plandict(arg):
+def is_plandict(arg: object) -> bool:
     """Determines if an object is a ``plandict`` instance.
 
     ``is_plandict(x)`` returns ``True`` if ``x`` is a ``plandict`` object and
     ``False`` otherwise.
     """
     return isinstance(arg, plandict)
-def is_tplandict(arg):
+def is_tplandict(arg: object) -> bool:
     """Determines if an object is a ``tplandict`` instance.
 
     ``is_tplandict(x)`` returns ``True`` if ``x`` is a ``tplandict`` object and

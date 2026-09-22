@@ -8,6 +8,7 @@
 import inspect
 from functools import (partial, wraps, update_wrapper)
 from collections import namedtuple
+from typing import Any
 
 import pint
 import numpy as np
@@ -27,10 +28,18 @@ from ._core import (
 
 # PyTorch Configuration #######################################################
 
-# If torch isn't imported or configured, that's fine, we just write our methods
-# to generate errors. We want these errors to explain the problem, so we create
-# our own error type, then have a wrapper for the functions that follow that
-# automatically raise the error when torch isn't found.
+# immlib never imports PyTorch at import time. Importing torch is slow, and on
+# a free-threaded interpreter it re-enables the GIL (PyTorch is not built for
+# free-threaded Python), so an eager import here would defeat immlib's own
+# free-threading support even in a program that never touches a tensor.
+# Instead the module-level name `torch` is a proxy (`_TorchProxy`) that imports
+# the real module the first time something actually needs it and otherwise
+# behaves as the module does. The common question "is this value a tensor?" is
+# answered without importing torch at all (see `_TorchProxy.is_tensor`), so a
+# program that uses only NumPy never pays for torch, and a program running
+# without torch installed works as before: every operation that genuinely needs
+# torch raises `TorchNotFound`, and every predicate that can answer `False`
+# without it does.
 
 class TorchNotFound(Exception):
     """Exception raised when PyTorch is requested but is not installed."""
@@ -41,99 +50,121 @@ class TorchNotFound(Exception):
             "certain operations to work.\n\n"
             "See https://pytorch.org/get-started/locally/ for help\n"
             "installing pytorch.")
-    @staticmethod
-    def raise_self(*args, **kw):
-        """Raises a `TorchNotFound` error."""
-        raise TorchNotFound()
-class FakeTorchPackage:
-    """A class that raises errors for the keras package if it cannot be loaded.
+class _TorchProxy:
+    """A lazy stand-in for the ``torch`` module.
+
+    Attribute access other than the members defined on this class imports the
+    real ``torch`` module on first use and then delegates to it; if torch is
+    not installed, the access raises ``TorchNotFound``. ``is_tensor`` is
+    answered without importing torch: a value can be a ``torch.Tensor`` only
+    if ``torch`` is already in ``sys.modules``, so when it is not, the answer
+    is ``False`` and no import happens.
     """
-    __slots__ = ('__version__')
-    def __new__(cls):
-        self = object.__new__(cls)
-        object.__setattr__(self, '__version__', '0.0.0')
-        return self
-    def __getattr__(self, k):
-        raise TorchNotFound()
-    @classmethod
-    def is_tensor(cls, arg):
-        return False
-try:
-    import torch
-    torch_found = True
-    def checktorch(f):
-        """Decorator, ensures that PyTorch functions throw an informative error
-        when PyTorch isn't found.
-        
-        A function that is wrapped with the ``@checktorch`` decorator will
-        always throw a descriptive error message when PyTorch isn't found on
-        the system rather than raising a complex exception. Any ``immlib``
-        function that uses the ``torch`` library should use this decorator.
 
-        The ``torch`` library was found on this system, so ``checktorch(f)``
-        always returns ``f``.
-        """
-        return f
-    def alttorch(f_alt):
-        """Decorator that runs an alternative function when PyTorch isn't
-        found on the system.
-        
-        A function ``f`` that is wrapped with the ``@alttorch(f_alt)``
-        decorator will always run `f_alt` instead of ``f`` when called if
-        PyTorch is not found on the system and will always run ``f`` when
-        `PyTorch` is found.
+    __slots__ = ('_module', '_error', '_loaded')
 
-        The ``torch`` library was found on this system, so
-        ``alttorch(f)(f_alt)`` always returns ``f``.
-        """
-        return (lambda f: f)
-except (ModuleNotFoundError, ImportError) as e:
-    torch = FakeTorchPackage()
-    torch_found = False
-    def checktorch(f):
-        """Decorator that ensures that PyTorch functions throw an informative
-        error when PyTorch isn't found.
-        
-        A function that is wrapped with the ``@checktorch`` decorator will
-        always throw a descriptive error message when PyTorch isn't found on
-        the system rather than raising a complex exception. Any ``immlib``
-        function that uses the ``torch`` library should use this decorator.
+    def __init__(self):
+        object.__setattr__(self, '_module', None)
+        object.__setattr__(self, '_error', None)
+        object.__setattr__(self, '_loaded', False)
 
-        The ``torch`` library was not found on this system, so
-        ``checktorch(f)`` always returns a function with the same docstring as
-        `f` but which raises a ``TorchNotFound`` exception.
-        """
-        from functools import wraps
-        return wraps(f)(TorchNotFound.raise_self)
-    def alttorch(f_alt):
-        """Decorator that runs an alternative function when PyTorch isn't
-        found on the system.
-        
-        A function ``f`` that is wrapped with the ``@alttorch(f_alt)``
-        decorator will always run `f_alt` instead of ``f`` when called if
-        PyTorch is not found on the system and will always run ``f`` when
-        PyTorch is found.
+    def _load(self):
+        """Imports and returns the real ``torch`` module, raising
+        ``TorchNotFound`` if it cannot be imported."""
+        if not self._loaded:
+            import importlib
+            try:
+                module = importlib.import_module('torch')
+            except ImportError as exc:
+                object.__setattr__(self, '_error', exc)
+                module = None
+            object.__setattr__(self, '_module', module)
+            object.__setattr__(self, '_loaded', True)
+        if self._module is None:
+            raise TorchNotFound()
+        return self._module
 
-        The ``torch`` library was not found on this system, so
-        ``alttorch(f)(f_alt)`` always returns `f_alt`, or rather a version of
-        `f_alt` wrapped to ``f``.
-        """
-        from functools import wraps
-        return (lambda f: wraps(f)(f_alt))
-    _sparse_torch_types = pdict()
-    _sparse_torch_layouts = pdict()
-# Get the torch version setup.
-_torch_version = torch.__version__.split('.')
-try:
-    _torch_version = (
-        int(_torch_version[0]),
-        int(_torch_version[1]),
-        int(_torch_version[2]))
-except Exception:
-    _torch_version = (
-        int(_torch_version[0]),
-        int(_torch_version[1]),
-        _torch_version[2])
+    @property
+    def is_loaded(self):
+        """``True`` if the real ``torch`` module has been imported."""
+        return self._loaded and self._module is not None
+
+    def is_installed(self):
+        """Returns ``True`` if PyTorch is available, importing it only if it
+        has already been imported and otherwise asking the importer whether it
+        could be found (which does not execute it)."""
+        if self._loaded:
+            return self._module is not None
+        import importlib.util
+        try:
+            return importlib.util.find_spec('torch') is not None
+        except (ImportError, ValueError):
+            return False
+
+    def __getattr__(self, name):
+        # Reached only for names that are not defined on the proxy itself.
+        return getattr(self._load(), name)
+
+    def __repr__(self):
+        if not self._loaded:
+            state = 'not yet imported'
+        elif self._module is None:
+            state = 'not installed'
+        else:
+            state = repr(self._module)
+        return f'<immlib.torch proxy: {state}>'
+
+    @staticmethod
+    def is_tensor(obj, /):
+        """Returns ``True`` if `obj` is a PyTorch tensor, without importing
+        torch (a value can be a ``torch.Tensor`` only if torch is already
+        imported)."""
+        import sys
+        module = sys.modules.get('torch')
+        if module is None:
+            return False
+        return isinstance(obj, module.Tensor)
+torch = _TorchProxy()
+def _torch_module_or_none():
+    """Returns the ``torch`` module if it has already been imported and
+    ``None`` otherwise, without importing it."""
+    import sys
+    return sys.modules.get('torch')
+def _is_torch_module(obj):
+    """Returns ``True`` if `obj` is the ``torch`` module, whether the real one
+    or the lazy proxy that stands in for it."""
+    return obj is torch or (torch.is_loaded and obj is torch._module)
+def checktorch(f):
+    """Decorator that ensures a function raises an informative error when
+    PyTorch is not installed.
+
+    A function wrapped with ``@checktorch`` raises a descriptive
+    ``TorchNotFound`` error when PyTorch cannot be imported rather than a
+    complex exception. Any ``immlib`` function that requires PyTorch should
+    use this decorator. PyTorch is imported when the wrapped function is first
+    called, not when the decorator runs.
+    """
+    @wraps(f)
+    def checked(*args, **kwargs):
+        torch._load()
+        return f(*args, **kwargs)
+    return checked
+def alttorch(f_alt):
+    """Decorator that runs an alternative function when PyTorch isn't found.
+
+    A function ``f`` wrapped with ``@alttorch(f_alt)`` runs `f_alt` instead of
+    ``f`` when PyTorch cannot be imported and runs ``f`` when it can. Whether
+    PyTorch is available is decided when the wrapped function is called, not
+    when the decorator runs, so no import happens until then.
+    """
+    def decorate(f):
+        @wraps(f)
+        def alt(*args, **kwargs):
+            if torch.is_installed():
+                return f(*args, **kwargs)
+            return f_alt(*args, **kwargs)
+        return alt
+    return decorate
 
 
 # Numerical Types #############################################################
@@ -174,7 +205,7 @@ def _is_numtype(obj, numtype, dtypes):
         return False
 from numbers import Number
 _number_dtypes = (np.number, np.bool_)
-def is_numberdata(obj, /):
+def is_numberdata(obj: Any, /) -> bool:
     """Returns ``True`` if an object is a Python number, otherwise ``False``.
 
     ``is_numberdata(obj)`` returns ``True`` if the given object ``obj`` is an
@@ -210,7 +241,7 @@ def is_numberdata(obj, /):
     """
     return _is_numtype(obj, Number, _number_dtypes)
 _bool_dtypes = (np.bool_,)
-def is_booldata(obj, /):
+def is_booldata(obj: Any, /) -> bool:
     """Returns ``True`` if an object is a boolean, otherwise ``False``.
 
     ``is_booldata(obj)`` returns ``True`` if the given object `obj` is an
@@ -236,7 +267,7 @@ def is_booldata(obj, /):
     return _is_numtype(obj, bool, _bool_dtypes)
 from numbers import Integral
 _integer_dtypes = (np.integer, np.bool_)
-def is_intdata(obj, /):
+def is_intdata(obj: Any, /) -> bool:
     """Returns ``True`` if an object is a Python integer, otherwise ``False``.
 
     ``is_intdata(obj)`` returns ``True`` if the given object `obj` is an
@@ -262,7 +293,7 @@ def is_intdata(obj, /):
     return _is_numtype(obj, Integral, _integer_dtypes)
 from numbers import Real
 _real_dtypes = (np.floating, np.integer, np.bool_)
-def is_realdata(obj, /):
+def is_realdata(obj: Any, /) -> bool:
     """Returns ``True`` if an object is a Python number, otherwise ``False``.
 
     ``is_realdata(obj)`` returns ``True`` if the given object `obj` is an
@@ -288,7 +319,7 @@ def is_realdata(obj, /):
     return _is_numtype(obj, Real, _real_dtypes)
 from numbers import Complex
 _complex_dtypes = (np.number, np.bool_)
-def is_complexdata(obj):
+def is_complexdata(obj: Any) -> bool:
     """Returns ``True`` if an object is a complex number, otherwise ``False``.
 
     ``is_complexdata(obj)`` returns ``True`` if the given object `obj` is an
@@ -320,7 +351,7 @@ def _is_scalar(obj, numtype):
             return False
         obj = obj.item()
     return isinstance(obj, numtype)
-def is_number(obj, /, dtype=None):
+def is_number(obj: Any, /, dtype: Any=None) -> bool:
     """Determines whether the argument is a scalar number or not.
 
     ``is_number(obj)`` returns ``True`` if `obj` is a scalar number and
@@ -361,7 +392,7 @@ def is_number(obj, /, dtype=None):
         return _is_scalar(obj, Complex)
     else:
         raise ValueError(f"invalid dtype: {dtype}")
-def is_bool(obj, /):
+def is_bool(obj: Any, /) -> bool:
     """Determines whether the argument is a scalar boolean or not.
 
     ``is_bool(obj)`` returns ``True`` if `obj` is a scalar boolean and
@@ -372,7 +403,7 @@ def is_bool(obj, /):
     is_scalar, is_booldata
     """
     return _is_scalar(obj, bool)
-def is_integer(obj, /):
+def is_integer(obj: Any, /) -> bool:
     """Determines whether the argument is a scalar integer or not.
 
     ``is_integer(obj)`` returns ``True`` if `obj` is a scalar integer and
@@ -383,7 +414,7 @@ def is_integer(obj, /):
     is_scalar, is_intdata
     """
     return _is_scalar(obj, Integral)
-def is_real(obj, /):
+def is_real(obj: Any, /) -> bool:
     """Determines whether the argument is a scalar real number or not.
 
     ``is_real(obj)`` returns ``True`` if `obj` is a scalar real number and
@@ -395,7 +426,7 @@ def is_real(obj, /):
     is_scalar, is_realdata
     """
     return _is_scalar(obj, Real)
-def is_complex(obj, /):
+def is_complex(obj: Any, /) -> bool:
     """Determines whether the argument is a scalar complex number or not.
 
     ``is_complex(obj)`` returns ``True`` if `obj` is a scalar complex number
@@ -598,7 +629,7 @@ def _numcoll_match(numcoll_shape, numcoll_dtype, ndim, shape, numel, dtype):
 # For testing whether numpy arrays or pytorch tensors have the appropriate
 # dimensionality, shape, and dtype, we use some helper functions.
 from numpy import dtype as numpy_dtype
-def is_numpydtype(obj, /):
+def is_numpydtype(obj: Any, /) -> bool:
     """Returns ``True`` for a ``numpy.dtype`` object and ``False`` otherwise.
 
     ``is_numpydtype(obj)`` returns ``True`` if the given object `obj` is an
@@ -615,7 +646,7 @@ def is_numpydtype(obj, /):
         ``True`` if `obj` is a valid ``numpy.dtype``, otherwise ``False``.
     """
     return isinstance(obj, numpy_dtype)
-def like_numpydtype(obj, /):
+def like_numpydtype(obj: Any, /) -> bool:
     """Returns ``True`` for any object that can be converted into a
     ``numpy.dtype`` object.
 
@@ -641,7 +672,7 @@ def like_numpydtype(obj, /):
             return is_numpydtype(np.dtype(obj))
         except TypeError:
             return False
-def to_numpydtype(obj, /):
+def to_numpydtype(obj: Any, /) -> Any:
     """Returns a ``numpy.dtype`` object equivalent to the given argument.
 
     ``to_numpydtype(obj)`` attempts to coerce the given `obj` into a
@@ -706,7 +737,7 @@ SparseLayout = namedtuple(
     ('name',
      'scipy_type', 'scipy_matrix_type', 'scipy_tomethod',
      'torch_constructor', 'torch_layout', 'torch_tomethod'))
-_sparse_layouts = tdict(
+_sparse_layouts: Any = tdict(
     bsr=SparseLayout(
         'bsr',
         sps.bsr_array, sps.bsr_matrix, 'tobsr',
@@ -739,38 +770,62 @@ _sparse_layouts = tdict(
         'lil',
         sps.lil_array, sps.lil_matrix, 'tolil',
         None, None, None))
-for (k,v) in tuple(_sparse_layouts.items()):
-    try:
-        con = getattr(torch, v.torch_constructor)
-        lay = getattr(torch, v.torch_layout)
-        cas = getattr(torch.Tensor, v.torch_tomethod)
-        _sparse_layouts[k] = SparseLayout(
-            v.name, v.scipy_type, v.scipy_matrix_type, v.scipy_tomethod,
-            con, lay, cas)
-    except Exception:
-        _sparse_layouts[k] = SparseLayout(
-            v.name, v.scipy_type, v.scipy_matrix_type, v.scipy_tomethod,
-            None, None, None)
 _sparse_layouts = _sparse_layouts.persistent()
-# Indices for going from type or layout to SparseLayout:
-_sparse_index = tdict()
-for (k,st) in _sparse_layouts.items():
+# The torch fields of each SparseLayout (its constructor, its layout object,
+# and its Tensor casting method) are resolved when torch is first needed rather
+# than here at import time, so that importing immlib does not import torch.
+# Until then those fields hold the *names* of the torch attributes they name;
+# when torch is not installed they become ``None``. The torch paths below run
+# only with a torch tensor in hand, and so only after torch has been imported.
+# The scipy fields are real objects and are indexed immediately.
+_sparse_index: Any = tdict()
+for st in _sparse_layouts.values():
     if st.scipy_type is not None:
         _sparse_index[st.scipy_type] = st
     if st.scipy_matrix_type is not None:
         _sparse_index[st.scipy_matrix_type] = st
-    if st.torch_layout is not None:
-        _sparse_index[st.torch_layout] = st
 _sparse_index = _sparse_index.persistent()
-_sparse_torch_layouts = frozenset(
-    st.torch_layout
-    for st in _sparse_layouts.values()
-    if st.torch_layout is not None)
+_sparse_torch_layouts: Any = frozenset()
+_torch_sparse_resolved = False
+def _resolve_torch_sparse():
+    """Resolves the torch fields of the sparse-layout table, importing torch
+    the first time this is called. It is idempotent, and does nothing but mark
+    the torch fields unavailable when torch is not installed."""
+    global _sparse_layouts, _sparse_index, _sparse_torch_layouts
+    global _torch_sparse_resolved
+    if _torch_sparse_resolved:
+        return
+    layouts = _sparse_layouts.transient()
+    index = _sparse_index.transient()
+    torch_layouts = []
+    for (k, v) in tuple(layouts.items()):
+        if v.torch_layout is None:
+            continue
+        con = lay = cas = None
+        if torch.is_installed():
+            try:
+                con = getattr(torch, v.torch_constructor)
+                lay = getattr(torch, v.torch_layout)
+                cas = getattr(torch.Tensor, v.torch_tomethod)
+            except Exception:
+                pass
+        st = SparseLayout(
+            v.name, v.scipy_type, v.scipy_matrix_type, v.scipy_tomethod,
+            con, lay, cas)
+        layouts[k] = st
+        if lay is not None:
+            index[lay] = st
+            torch_layouts.append(lay)
+    _sparse_layouts = layouts.persistent()
+    _sparse_index = index.persistent()
+    _sparse_torch_layouts = frozenset(torch_layouts)
+    _torch_sparse_resolved = True
 def torch__is_sparse(obj):
     if not torch.is_tensor(obj):
         return False
+    _resolve_torch_sparse()
     return obj.layout in _sparse_torch_layouts
-def sparse_layout(obj, /):
+def sparse_layout(obj: Any, /) -> Any:
     """Returns a tuple containing data about a sparse array layout.
 
     ``sparse_layout(name)`` returns the ``SparseLayout`` tuple for the sparse
@@ -803,6 +858,7 @@ def sparse_layout(obj, /):
      - ``torch_tomethod``: The name of the torch ``Tensor`` method for casting
        (e.g., ``'to_sparse_csr'``).
     """
+    _resolve_torch_sparse()
     if isinstance(obj, SparseLayout):
         return obj
     elif isinstance(obj, pint.Quantity):
@@ -816,7 +872,7 @@ def sparse_layout(obj, /):
         return _sparse_index.get(type(obj), None)
     else:
         return _sparse_index.get(obj, None)
-def sparse_haslayout(arr, layout):
+def sparse_haslayout(arr: Any, layout: Any) -> bool:
     """Returns ``True`` if the given sparse array or tensor has the given
     layout.
 
@@ -836,7 +892,7 @@ def sparse_haslayout(arr, layout):
         return False
     srclay = sparse_layout(arr)
     return srclay.name == dstlay.name
-def sparse_find(arr, /):
+def sparse_find(arr: Any, /) -> Any:
     """Returns the indices and values of nonzero elements of a sparse object.
     
     ``sparse_find(sp_array)`` is equivalent to ``scipy.sparse.find(sp_array)``
@@ -871,7 +927,7 @@ def sparse_find(arr, /):
         return tuple(arr.indices()) + (arr.values().clone().detach(),)
     else:
         raise TypeError(f"sparse_find requires a sparse array or sparse tensor")
-def sparse_indices(arr, /):
+def sparse_indices(arr: Any, /) -> Any:
     """Returns the indices of the nonzero values in the given sparse object.
 
     ``sparse_indices(arr)`` is roughly equivalent to the expression
@@ -891,7 +947,7 @@ def sparse_indices(arr, /):
         return arr.indices()
     else:
         raise TypeError(f"sparse_data requires a sparse array or sparse tensor")
-def sparse_data(arr, /):
+def sparse_data(arr: Any, /) -> Any:
     """Returns the data vector for the given sparse array or sparse tensor.
 
     ``sparse_data(arr)`` is equivalent to ``sparse_find(arr)[-1]``---i.e., it
@@ -914,7 +970,7 @@ def sparse_data(arr, /):
         return arr.values()
     else:
         raise TypeError(f"sparse_data requires a sparse array or sparse tensor")
-def sparse_tolayout(obj, layout):
+def sparse_tolayout(obj: Any, layout: Any) -> Any:
     """Copies a sparse object into another sparse object with a given layout.
 
     ``sparse_tolayout(sparr, layout)`` copies the given sparse SciPy array or
@@ -952,9 +1008,9 @@ def sparse_tolayout(obj, layout):
             "sparse_tolayout requires a sparse scipy array or"
             " a sparse pytorch tensor")
 @docwrap(format='numpy', inheritparams=_doc_numeric_params)
-def is_array(obj, /, *,
-             dtype=None, shape=None, ndim=None, numel=None, frozen=None,
-             sparse=None, quant=None, unit=Ellipsis, ureg=None):
+def is_array(obj: Any, /, *,
+             dtype: Any=None, shape: Any=None, ndim: Any=None, numel: Any=None, frozen: Any=None,
+             sparse: Any=None, quant: Any=None, unit: Any=Ellipsis, ureg: Any=None) -> bool:
     """Returns ``True`` if an object is a ``numpy.ndarray`` object, otherwise
     returns ``False``.
 
@@ -1144,9 +1200,9 @@ def _spec_to_quant(obj, ureg):
         return obj
     return _quant_of_spec(spec)
 @docwrap(format='numpy', inheritparams=_doc_numeric_params)
-def to_array(obj, /, dtype=None, *,
-             order=None, copy=False, sparse=None, frozen=None,
-             quant=None, ureg=None, unit=Ellipsis, detach=True):
+def to_array(obj: Any, /, dtype: Any=None, *,
+             order: Any=None, copy: Any=False, sparse: Any=None, frozen: Any=None,
+             quant: Any=None, ureg: Any=None, unit: Any=Ellipsis, detach: Any=True) -> Any:
     """Reinterprets `obj` as a NumPy array or quantity with an array magnitude.
 
     ``immlib.to_array`` is roughly equivalent to the ``numpy.asarray`` function
@@ -1452,12 +1508,12 @@ def to_array(obj, /, dtype=None, *,
 
 # PyTorch Tensors #############################################################
 
-# At this point, either torch has been imported or it hasn't, but either way,
-# we can use @checktorch to make sure that errors are thrown when torch isn't
-# present. Otherwise, we can just write the functions assuming that torch is
-# imported.
-@alttorch(lambda dt: False)
-def is_torchdtype(obj, /):
+# The functions below assume that torch is available when they actually need
+# it: @checktorch turns a missing torch into an informative TorchNotFound
+# error, and the predicates that must work without torch either answer from
+# sys.modules (is_torchdtype) or fall back (like_torchdtype) rather than
+# importing it merely to say "no".
+def is_torchdtype(obj: Any, /) -> bool:
     """Returns ``True`` for a PyTroch ``dtype`` object and ``False`` otherwise.
     
     ``is_torchdtype(obj)`` returns ``True`` if the given object `obj` is an
@@ -1474,8 +1530,9 @@ def is_torchdtype(obj, /):
     bool
         ``True`` if `obj` is a valid ``torch.dtype``, otherwise ``False``.
     """
-    return isinstance(obj, torch.dtype)
-def like_torchdtype(obj, /):
+    module = _torch_module_or_none()
+    return module is not None and isinstance(obj, module.dtype)
+def like_torchdtype(obj: Any, /) -> bool:
     """Returns ``True`` for any object that can be converted into a
     ``torch.dtype``.
     
@@ -1499,6 +1556,8 @@ def like_torchdtype(obj, /):
     """
     if is_torchdtype(obj):
         return True
+    elif not torch.is_installed():
+        return False
     elif is_numpydtype(obj):
         try:
             return None is not torch.from_numpy(np.array((), dtype=obj))
@@ -1517,7 +1576,7 @@ def like_torchdtype(obj, /):
         except Exception:
             return False
 @checktorch
-def to_torchdtype(obj, /):
+def to_torchdtype(obj: Any, /) -> Any:
     """Returns a ``torch.dtype`` object equivalent to the given argument `obj`.
 
     ``to_torchdtype(obj)`` attempts to coerce the given `obj` into a
@@ -1553,17 +1612,11 @@ def to_torchdtype(obj, /):
         return obj
     else:
         return torch.as_tensor(np.array([], dtype=obj)).dtype
-def _is_never_tensor(obj,
-                     dtype=None, shape=None, ndim=None, numel=None,
-                     device=None, requires_grad=None,
-                     sparse=None, quant=None, unit=Ellipsis, ureg=None):
-    return False
-@alttorch(_is_never_tensor)
 @docwrap(format='numpy', inheritparams=_doc_numeric_params)
-def is_tensor(obj, /, dtype=None, *,
-              shape=None, ndim=None, numel=None,
-              device=None, requires_grad=None,
-              sparse=None, quant=None, unit=Ellipsis, ureg=None):
+def is_tensor(obj: Any, /, dtype: Any=None, *,
+              shape: Any=None, ndim: Any=None, numel: Any=None,
+              device: Any=None, requires_grad: Any=None,
+              sparse: Any=None, quant: Any=None, unit: Any=Ellipsis, ureg: Any=None) -> bool:
     """Returns ``True`` if the argument is a ``torch.tensor`` object, otherwise
     returns ``False``.
 
@@ -1709,9 +1762,9 @@ def is_tensor(obj, /, dtype=None, *,
         return True
     return _numcoll_match(obj.shape, obj.dtype, ndim, shape, numel, dtype)
 @docwrap(format='numpy', inheritparams=_doc_numeric_params)
-def to_tensor(obj, /, dtype=None, *,
-              device=None, requires_grad=None, copy=False,
-              sparse=None, quant=None, ureg=None, unit=Ellipsis):
+def to_tensor(obj: Any, /, dtype: Any=None, *,
+              device: Any=None, requires_grad: Any=None, copy: Any=False,
+              sparse: Any=None, quant: Any=None, ureg: Any=None, unit: Any=Ellipsis) -> Any:
     """Reinterprets `obj` as a PyTorch tensor or as a ``pint`` quantity with
     a tensor magnitude.
 
@@ -1959,9 +2012,9 @@ def to_tensor(obj, /, dtype=None, *,
 # General Numeric Collection Functions ########################################
 
 @docwrap(format='numpy', inheritparams=_doc_numeric_params)
-def is_numeric(obj, /, dtype=None, *,
-               shape=None, ndim=None, numel=None,
-               sparse=None, quant=None, unit=Ellipsis, ureg=None):
+def is_numeric(obj: Any, /, dtype: Any=None, *,
+               shape: Any=None, ndim: Any=None, numel: Any=None,
+               sparse: Any=None, quant: Any=None, unit: Any=Ellipsis, ureg: Any=None) -> bool:
     """Returns ``True`` if an object is a numerical collection type and
     ``False`` otherwise.
 
@@ -2051,8 +2104,8 @@ def is_numeric(obj, /, dtype=None, *,
                         dtype=dtype, shape=shape, ndim=ndim, numel=numel,
                         sparse=sparse, quant=quant, unit=unit, ureg=ureg)
 @docwrap(format='numpy', inheritparams=_doc_numeric_params)
-def to_numeric(obj, /, dtype=None, *,
-               copy=False, sparse=None, quant=None, ureg=None, unit=Ellipsis):
+def to_numeric(obj: Any, /, dtype: Any=None, *,
+               copy: Any=False, sparse: Any=None, quant: Any=None, ureg: Any=None, unit: Any=Ellipsis) -> Any:
     """Reinterprets `obj` as a numeric type or quantity with such a magnitude.
 
     ``immlib.to_numeric`` is roughly equivalent to the ``torch.as_tensor`` or
@@ -2143,9 +2196,9 @@ def to_numeric(obj, /, dtype=None, *,
 # Sparse Matrices and Dense Collections #######################################
 
 @docwrap(format='numpy', inheritparams=is_numeric)
-def is_sparse(obj, /, dtype=None, *,
-              shape=None, ndim=None, numel=None,
-              quant=None, ureg=None, unit=Ellipsis):
+def is_sparse(obj: Any, /, dtype: Any=None, *,
+              shape: Any=None, ndim: Any=None, numel: Any=None,
+              quant: Any=None, ureg: Any=None, unit: Any=Ellipsis) -> bool:
     """Returns ``True`` if an object is a sparse SciPy array or a sparse
     PyTorch tensor.
 
@@ -2171,7 +2224,7 @@ def is_sparse(obj, /, dtype=None, *,
                       dtype=dtype, shape=shape, ndim=ndim, numel=numel,
                       quant=quant, ureg=ureg, unit=unit)
 @docwrap(format='numpy', inheritparams=to_numeric)
-def to_sparse(obj, /, dtype=None, *, quant=None, ureg=None, unit=Ellipsis):
+def to_sparse(obj: Any, /, dtype: Any=None, *, quant: Any=None, ureg: Any=None, unit: Any=Ellipsis) -> Any:
     """Returns a sparse version of the numerical object `obj`.
 
     ``to_sparse(obj)`` returns `obj` if it is already a PyTorch sparse tensor
@@ -2194,9 +2247,9 @@ def to_sparse(obj, /, dtype=None, *, quant=None, ureg=None, unit=Ellipsis):
                       dtype=dtype, quant=quant,
                       ureg=ureg, unit=unit)
 @docwrap(format='numpy', inheritparams=is_numeric)
-def is_dense(obj, /, dtype=None, *,
-             shape=None, ndim=None, numel=None,
-             quant=None, ureg=None, unit=Ellipsis):
+def is_dense(obj: Any, /, dtype: Any=None, *,
+             shape: Any=None, ndim: Any=None, numel: Any=None,
+             quant: Any=None, ureg: Any=None, unit: Any=Ellipsis) -> bool:
     """Returns ``True`` if an object is a dense NumPy array or PyTorch tensor.
 
     ``is_dense(obj)`` returns ``True`` if the given object `obj` is an instance
@@ -2219,7 +2272,7 @@ def is_dense(obj, /, dtype=None, *,
                       dtype=dtype, shape=shape, ndim=ndim, numel=numel,
                       quant=quant, ureg=ureg, unit=unit)
 @docwrap(format='numpy', inheritparams=to_numeric)
-def to_dense(obj, /, dtype=None, *, quant=None, ureg=None, unit=Ellipsis):
+def to_dense(obj: Any, /, dtype: Any=None, *, quant: Any=None, ureg: Any=None, unit: Any=Ellipsis) -> Any:
     """Returns a dense version of the numerical object `obj`.
 
     ``to_dense(obj)`` returns `obj` if it is already a PyTorch dense tensor or
@@ -2384,16 +2437,18 @@ class numapi:
                         f" must have 1-3 values but got {rvallen}")
             if rval is np:
                 return self._call_numpy(args, kwargs)
-            elif rval is torch:
+            elif _is_torch_module(rval):
                 return self._call_torch(args, kwargs)
             else:
                 raise ValueError(
                     f"invalid value returned from numapi base_func: {rval}")
-        if torch_found:
-            any_arg = any(map(is_tensor, args))
-            any_inp = any_arg or any(map(is_tensor, kwargs.values()))
-            if any_inp:
-                return self._call_torch(args, kwargs)
+        # If any argument is a tensor, use the tensor implementation. This
+        # test does not import torch (see _TorchProxy.is_tensor), so a call
+        # whose arguments are all arrays never pays for it.
+        any_arg = any(map(is_tensor, args))
+        any_inp = any_arg or any(map(is_tensor, kwargs.values()))
+        if any_inp:
+            return self._call_torch(args, kwargs)
         # Otherwise we use the array form.
         return self._call_numpy(args, kwargs)
 
@@ -2512,7 +2567,7 @@ def _promote_args_decorate(arglist, args_try_fn, keep_arrays, fn):
         args_try_fn, fn,
         sig, sig_args, sig_varargs, sig_kwargs, keep_arrays)
     return wraps(fn)(dispatch)
-def tensor_args(fn=None, /, *args, keep_arrays=False):
+def tensor_args(fn: Any=None, /, *args: Any, keep_arrays: Any=False) -> Any:
     """Converts arguments of the decorated function into PyTorch tensors.
 
     The decorator ``@tensor_args``, when applied to a function, will convert
@@ -2562,7 +2617,7 @@ def tensor_args(fn=None, /, *args, keep_arrays=False):
         # or as
         #   fn = tensor_args(lambda a,b: ..., 'a').
         return _promote_args_decorate(args, _args_try_tensor, keep_arrays, fn)
-def array_args(fn=None, /, *args):
+def array_args(fn: Any=None, /, *args: Any) -> Any:
     """Converts arguments of the decorated function into NumPy arrays.
 
     The decorator ``@array_args``, when applied to a function, will convert all
@@ -2600,7 +2655,7 @@ def array_args(fn=None, /, *args):
         # or as
         #   fn = array_args(lambda a,b: ..., 'a').
         return _promote_args_decorate(args, _args_try_array, False, fn)
-def numeric_args(fn=None, /, *args):
+def numeric_args(fn: Any=None, /, *args: Any) -> Any:
     """Converts arguments of the decorated function into either NumPy arrays or
     PyTorch tensors.
 

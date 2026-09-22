@@ -5,7 +5,10 @@
 
 # Dependencies ################################################################
 
+from __future__ import annotations
+
 import operator as op
+from typing import Any
 from inspect import (signature, getfullargspec)
 from functools import (wraps, partial, lru_cache)
 from joblib import Memory
@@ -22,7 +25,7 @@ from contextvars import ContextVar
 
 # Strings #####################################################################
 
-def is_str(obj):
+def is_str(obj: object) -> bool:
     """Returns ``True`` if an object is a string and ``False`` otherwise.
 
     ``is_str(obj)`` returns ``True`` if the given object `obj` is an instance 
@@ -40,7 +43,7 @@ def is_str(obj):
     """
     return isinstance(obj, str)
 from unicodedata import normalize as unicodedata_normalize
-def strnorm(s, /, case=False, *, unicode=True):
+def strnorm(s: str, /, case: Any=False, *, unicode: Any=True) -> str:
     """Normalizes a string using the ``unicodedata`` package.
 
     ``strnorm(s)`` returns a version of `s` that has been unicode-normalized
@@ -100,7 +103,7 @@ def _strbinop_prep(a, b, case=True, unicode=None, strip=False):
         a = a.strip(strip)
         b = b.strip(strip)
     return (a,b)
-def strcmp(a, b, /, case=True, *, unicode=None, strip=False, split=False):
+def strcmp(a: Any, b: Any, /, case: object=True, *, unicode: object=None, strip: object=False, split: object=False) -> int | None:
     """Determines if the given objects are strings and compares them if so.
 
     ``strcmp(a, b)`` returns ``None`` if either `a` or `b` is not a string;
@@ -176,7 +179,7 @@ def strcmp(a, b, /, case=True, *, unicode=None, strip=False, split=False):
         b = ''.join(b)
     return (-1 if a < b else 1 if a > b else 0)
 @docwrap(format='numpy', inheritparams=strcmp)
-def streq(a, b, /, case=True, *, unicode=None, strip=False, split=False):
+def streq(a: Any, b: Any, /, case: object=True, *, unicode: object=None, strip: object=False, split: object=False) -> bool | None:
     """Determines if the given objects are equal strings or not.
 
     ``streq(a, b)`` returns ``True`` if `a` and `b` are both strings and are
@@ -199,7 +202,7 @@ def streq(a, b, /, case=True, *, unicode=None, strip=False, split=False):
     cmpval = strcmp(a, b, case=case, unicode=unicode, strip=strip, split=split)
     return None if cmpval is None else (cmpval == 0)
 @docwrap(format='numpy', inheritparams=strcmp)
-def strends(a, b, /, case=True, *, unicode=None, strip=False):
+def strends(a: Any, b: Any, /, case: object=True, *, unicode: object=None, strip: object=False) -> bool | None:
     """Determines whether or not the string `a` ends with the string `b`.
 
     ``strends(a, b)`` returns ``True`` if `a` and `b` are both strings and if
@@ -221,7 +224,7 @@ def strends(a, b, /, case=True, *, unicode=None, strip=False):
     # Check the ending
     return a.endswith(b)
 @docwrap(format='numpy', inheritparams=strcmp)
-def strstarts(a, b, /, case=True, *, unicode=None, strip=False):
+def strstarts(a: Any, b: Any, /, case: object=True, *, unicode: object=None, strip: object=False) -> bool | None:
     """Determines whether or not the string `a` starts with the string `b`.
 
     ``strstarts(a, b)`` returns ``True`` if `a` and `b` are both strings and if
@@ -242,7 +245,7 @@ def strstarts(a, b, /, case=True, *, unicode=None, strip=False):
     else: (a, b) = prep
     # Check the beginning.
     return a.startswith(b)
-def strissym(s):
+def strissym(s: Any) -> bool | None:
     """Determines if the given string is a valid symbol (identifier).
 
     ``strissym(s)`` returns ``True`` if `s` is both a string and a valid
@@ -255,7 +258,7 @@ def strissym(s):
     """
     return s.isidentifier() if is_str(s) else None
 from keyword import iskeyword
-def striskey(s):
+def striskey(s: Any) -> bool | None:
     """Determines if the given string is a valid keyword.
 
     ``strissym(s)`` returns ``True`` if `s` is both a string and a valid keyword
@@ -267,7 +270,7 @@ def striskey(s):
     strissym, strisvar
     """
     return iskeyword(s) if is_str(s) else None
-def strisvar(s):
+def strisvar(s: Any) -> bool | None:
     """Determines if the given string is a valid variable name.
 
     ``strissym(s)`` returns ``True`` if `s` is both a string and a valid name
@@ -287,7 +290,7 @@ def strisvar(s):
 # Builtin Python Abstract Types ###############################################
 
 from collections.abc import Callable
-def is_acallable(obj):
+def is_acallable(obj: object) -> bool:
     """Returns ``True`` if an object is a callable object like a function.
 
     ``is_acallable(obj)`` returns ``True`` if the given object `obj` is an
@@ -306,9 +309,9 @@ def is_acallable(obj):
     bool
         ``True`` if `obj` is an instance of ``Callable``, otherwise ``False``.
     """
-    return isinstance(obj, Callable)
+    return isinstance(obj, Callable)  # type: ignore[arg-type]
 from types import LambdaType
-def is_lambda(obj):
+def is_lambda(obj: object) -> bool:
     """Returns ``True`` if an object is a lambda function, otherwise ``False``.
 
     ``is_lambda(obj)`` returns ``True`` if the given object `obj` is an
@@ -328,7 +331,7 @@ def is_lambda(obj):
     """
     return isinstance(obj, LambdaType)
 from collections.abc import Sized
-def is_asized(obj):
+def is_asized(obj: object) -> bool:
     """Returns ``True`` if an object implements ``len()``, otherwise ``False``.
 
     ``is_asized(obj)`` returns ``True`` if the given object `obj` is an
@@ -347,7 +350,7 @@ def is_asized(obj):
     """
     return isinstance(obj, Sized)
 from collections.abc import Container
-def is_acontainer(obj):
+def is_acontainer(obj: object) -> bool:
     """Returns ``True`` if an object implements ``__contains__``, otherwise
     ``False``.
 
@@ -366,7 +369,7 @@ def is_acontainer(obj):
     """
     return isinstance(obj, Container)
 from collections.abc import Iterable
-def is_aiterable(obj):
+def is_aiterable(obj: object) -> bool:
     """Returns ``True`` if an object implements ``__iter__``, otherwise
     ``False``.
 
@@ -385,7 +388,7 @@ def is_aiterable(obj):
     """
     return isinstance(obj, Iterable)
 from collections.abc import Iterator
-def is_aiterator(obj):
+def is_aiterator(obj: object) -> bool:
     """Returns ``True`` if an object is an instance of
     ``collections.abc.Iterator``.
 
@@ -404,7 +407,7 @@ def is_aiterator(obj):
     """
     return isinstance(obj, Iterator)
 from collections.abc import Reversible
-def is_areversible(obj):
+def is_areversible(obj: object) -> bool:
     """Returns ``True`` if an object is an instance of ``Reversible``.
 
     ``is_areversible(obj)`` returns ``True`` if the given object `obj` is an
@@ -423,7 +426,7 @@ def is_areversible(obj):
     """
     return isinstance(obj, Reversible)
 from collections.abc import Collection
-def is_acoll(obj):
+def is_acoll(obj: object) -> bool:
     """Returns ``True`` if an object is a collection (a sized iterable
     container).
 
@@ -443,7 +446,7 @@ def is_acoll(obj):
     """
     return isinstance(obj, Collection)
 from collections.abc import Sequence
-def is_aseq(obj):
+def is_aseq(obj: object) -> bool:
     """Returns ``True`` if an object is a sequence, otherwise ``False``.
 
     ``is_aseq(obj)`` returns ``True`` if the given object `obj` is an instance
@@ -461,7 +464,7 @@ def is_aseq(obj):
     """
     return isinstance(obj, Sequence)
 from collections.abc import MutableSequence
-def is_amseq(obj):
+def is_amseq(obj: object) -> bool:
     """Returns ``True`` if an object is a mutable sequence, otherwise
     ``False``.
 
@@ -482,7 +485,7 @@ def is_amseq(obj):
     """
     return isinstance(obj, MutableSequence)
 from pcollections.abc import PersistentSequence
-def is_apseq(obj):
+def is_apseq(obj: object) -> bool:
     """Returns ``True`` if an object is a persistent sequence, otherwise
     ``False``.
 
@@ -503,7 +506,7 @@ def is_apseq(obj):
     """
     return isinstance(obj, PersistentSequence)
 _ByteString = (bytes, bytearray)
-def is_abytes(obj):
+def is_abytes(obj: object) -> bool:
     """Returns ``True`` if an object is a byte-string, otherwise ``False``.
 
     ``is_abytes(obj)`` returns ``True`` if the given object `obj` is an
@@ -521,7 +524,7 @@ def is_abytes(obj):
         ``False``.
     """
     return isinstance(obj, _ByteString)
-def is_bytes(obj):
+def is_bytes(obj: object) -> bool:
     """Returns ``True`` if an object is a ``bytes`` object, otherwise
     ``False``.
 
@@ -540,7 +543,7 @@ def is_bytes(obj):
     """
     return isinstance(obj, bytes)
 from collections.abc import Set
-def is_aset(obj):
+def is_aset(obj: object) -> bool:
     """Returns ``True`` if an object is a set type, otherwise ``False``.
 
     ``is_aset(obj)`` returns ``True`` if the given object `obj` is an instance
@@ -558,7 +561,7 @@ def is_aset(obj):
     """
     return isinstance(obj, Set)
 from collections.abc import MutableSet
-def is_amset(obj):
+def is_amset(obj: object) -> bool:
     """Returns ``True`` if an object is a mutable set, otherwise ``False``.
 
     ``is_amset(obj)`` returns ``True`` if the given object `obj` is an instance
@@ -577,7 +580,7 @@ def is_amset(obj):
     """
     return isinstance(obj, MutableSet)
 from pcollections.abc import PersistentSet
-def is_apset(obj):
+def is_apset(obj: object) -> bool:
     """Returns ``True`` if an object is a persistent set, otherwise ``False``.
 
     ``is_apset(obj)`` returns ``True`` if the given object `obj` is an instance
@@ -597,7 +600,7 @@ def is_apset(obj):
     """
     return isinstance(obj, PersistentSet)
 from collections.abc import Mapping
-def is_amap(obj):
+def is_amap(obj: object) -> bool:
     """Returns ``True`` if an object is an abstract mapping, otherwise
     ``False``.
 
@@ -616,7 +619,7 @@ def is_amap(obj):
     """
     return isinstance(obj, Mapping)
 from collections.abc import MutableMapping
-def is_ammap(obj):
+def is_ammap(obj: object) -> bool:
     """Returns ``True`` if an object is a mutable mapping, otherwise ``False``.
 
     ``is_ammap(obj)`` returns ``True`` if the given object ``obj`` is an
@@ -636,7 +639,7 @@ def is_ammap(obj):
     """
     return isinstance(obj, MutableMapping)
 from pcollections.abc import PersistentMapping
-def is_apmap(obj):
+def is_apmap(obj: object) -> bool:
     """Returns ``True`` if an object is a persistent mapping, otherwise
     ``False``.
 
@@ -657,7 +660,7 @@ def is_apmap(obj):
     """
     return isinstance(obj, PersistentMapping)
 from collections.abc import Hashable
-def is_ahashable(obj):
+def is_ahashable(obj: object) -> bool:
     """Returns ``True`` if an object is a hashable object, otherwise ``False``.
 
     ``is_ahashable(obj)`` returns ``True`` if the given object `obj` is an
@@ -684,7 +687,7 @@ def is_ahashable(obj):
 
 # Builtin Python Concrete Types ###############################################
 
-def is_list(obj):
+def is_list(obj: object) -> bool:
     """Returns ``True`` if an object is a ``list`` object.
 
     ``is_list(obj)`` returns ``True`` if the given object `obj` is an instance
@@ -701,7 +704,7 @@ def is_list(obj):
         ``True`` if `obj` is an instance of ``list``, otherwise ``False``.
     """
     return isinstance(obj, list)
-def is_tuple(obj):
+def is_tuple(obj: object) -> bool:
     """Returns ``True`` if an object is a ``tuple`` object.
 
     ``is_tuple(obj)`` returns ``True`` if the given object `obj` is an instance
@@ -719,7 +722,7 @@ def is_tuple(obj):
     """
     return isinstance(obj, tuple)
 from pcollections import plist
-def is_plist(obj):
+def is_plist(obj: object) -> bool:
     """Returns ``True`` if an object is a persistent list object.
 
     ``is_plist(obj)`` returns ``True`` if the given object `obj` is an instance
@@ -737,7 +740,7 @@ def is_plist(obj):
     """
     return isinstance(obj, plist)
 from pcollections import tlist
-def is_tlist(obj):
+def is_tlist(obj: object) -> bool:
     """Returns ``True`` if an object is a transient list object.
 
     ``is_tlist(obj)`` returns ``True`` if the given object `obj` is an instance
@@ -755,7 +758,7 @@ def is_tlist(obj):
     """
     return isinstance(obj, tlist)
 from pcollections import llist
-def is_llist(obj):
+def is_llist(obj: object) -> bool:
     """Returns ``True`` if an object is a persistent lazy list object.
 
     ``is_llist(obj)`` returns ``True`` if the given object `obj` is an instance
@@ -772,7 +775,7 @@ def is_llist(obj):
         ``True`` if `obj` is an instance of ``llist``, otherwise ``False``.
     """
     return isinstance(obj, llist)
-def is_set(obj):
+def is_set(obj: object) -> bool:
     """Returns ``True`` if an object is a ``set`` object.
 
     ``is_set(obj)`` returns ``True`` if the given object `obj` is an instance
@@ -795,7 +798,7 @@ def is_set(obj):
     is_aset, is_amset, is_apset, is_pset, is_tset, is_frozenset
     """
     return isinstance(obj, set)
-def is_frozenset(obj):
+def is_frozenset(obj: object) -> bool:
     """Returns ``True`` if an object is a ``frozenset`` object.
 
     ``is_frozenset(obj)`` returns ``True`` if the given object `obj` is an
@@ -817,7 +820,7 @@ def is_frozenset(obj):
     """
     return isinstance(obj, frozenset)
 from pcollections import pset
-def is_pset(obj):
+def is_pset(obj: object) -> bool:
     """Returns ``True`` if an object is a persistent set object.
 
     ``is_pset(obj)`` returns ``True`` if the given object `obj` is an instance
@@ -840,7 +843,7 @@ def is_pset(obj):
     """
     return isinstance(obj, pset)
 from pcollections import tset
-def is_tset(obj):
+def is_tset(obj: object) -> bool:
     """Returns ``True`` if an object is a transient set object.
 
     ``is_tset(obj)`` returns ``True`` if the given object `obj` is an instance
@@ -857,7 +860,7 @@ def is_tset(obj):
         ``True`` if `obj` is an instance of ``tset``, otherwise ``False``.
     """
     return isinstance(obj, tset)
-def is_dict(obj):
+def is_dict(obj: object) -> bool:
     """Returns ``True`` if an object is a ``dict`` object.
 
     ``is_dict(obj)`` returns ``True`` if the given object `obj` is an instance
@@ -875,7 +878,7 @@ def is_dict(obj):
     """
     return isinstance(obj, dict)
 from collections import OrderedDict
-def is_odict(obj):
+def is_odict(obj: object) -> bool:
     """Returns ``True`` if an object is an ``OrderedDict`` object.
 
     ``is_odict(obj)`` returns ``True`` if the given object `obj` is an instance
@@ -895,7 +898,7 @@ def is_odict(obj):
     """
     return isinstance(obj, OrderedDict)
 from collections import defaultdict
-def is_ddict(obj):
+def is_ddict(obj: object) -> bool:
     """Returns ``True`` if an object is a ``defaultdict`` object.
 
     ``is_ddict(obj)`` returns ``True`` if the given object `obj` is an instance
@@ -914,7 +917,7 @@ def is_ddict(obj):
     """
     return isinstance(obj, defaultdict)
 from pcollections import pdict
-def is_pdict(obj):
+def is_pdict(obj: object) -> bool:
     """Returns ``True`` if an object is a persistent dictionary object.
 
     ``is_pdict(obj)`` returns ``True`` if the given object `obj` is an instance
@@ -935,7 +938,7 @@ def is_pdict(obj):
     """
     return isinstance(obj, pdict)
 from pcollections import tdict, tldict
-def is_tdict(obj):
+def is_tdict(obj: object) -> bool:
     """Returns ``True`` if an object is a transient dictionary object.
 
     ``is_tdict(obj)`` returns ``True`` if the given object `obj` is an instance
@@ -953,7 +956,7 @@ def is_tdict(obj):
     """
     return isinstance(obj, tdict)
 from pcollections import ldict
-def is_ldict(obj):
+def is_ldict(obj: object) -> bool:
     """Returns ``True`` if an object is a persistent lazy dictionary object.
 
     ``is_ldict(obj)`` returns ``True`` if the given object `obj` is an instance
@@ -970,7 +973,7 @@ def is_ldict(obj):
         ``True`` if `obj` is an instance of ``ldict``, otherwise ``False``.
     """
     return isinstance(obj, ldict)
-def hashsafe(obj):
+def hashsafe(obj: Any) -> int | None:
     """Returns ``hash(obj)`` if `obj` is hashable, otherwise returns ``None``.
 
     This function attempts to hash an object and returns ``None`` when doing so
@@ -998,7 +1001,7 @@ def hashsafe(obj):
         return hash(obj)
     except TypeError:
         return None
-def can_hash(obj):
+def can_hash(obj: object) -> bool:
     """Returns ``True`` if `obj` is safe to hash and ``False`` otherwise.
 
     ``can_hash(obj)`` is equivalent to ``hashsafe(obj) is not None``. This
@@ -1014,7 +1017,7 @@ def can_hash(obj):
     hashsafe, is_ahashable
     """
     return hashsafe(obj) is not None
-def itersafe(obj):
+def itersafe(obj: Any) -> Any:
     """Returns an iterator of the given object or ``None`` if it is not
     iterable.
 
@@ -1041,7 +1044,7 @@ def itersafe(obj):
         return iter(obj)
     except TypeError:
         return None
-def can_iter(obj):
+def can_iter(obj: object) -> bool:
     """Returns ``True`` if `obj` is safe to iterate and ``False`` otherwise.
 
     ``can_iter(obj)`` is equivalent to ``itersafe(obj) is not None``. This
@@ -1054,7 +1057,7 @@ def can_iter(obj):
     itersafe, is_aiterable
     """
     return itersafe(obj) is not None
-def is_pcoll(obj):
+def is_pcoll(obj: object) -> bool:
     """Detects if an object is a ``plist``, ``pset``, ``pdict``, ``llist`` or
     ``ldict``.
 
@@ -1078,9 +1081,9 @@ def is_pcoll(obj):
     bool
         ``True`` if `obj` is a persistent collection and ``False`` otherwise.
     """
-    return isinstance(obj, is_pcoll.types)
-is_pcoll.types = (plist, pset, pdict, llist, ldict)
-def is_tcoll(obj):
+    return isinstance(obj, is_pcoll.types)  # type: ignore[attr-defined]
+is_pcoll.types = (plist, pset, pdict, llist, ldict)  # type: ignore[attr-defined]
+def is_tcoll(obj: object) -> bool:
     """Returns ``True`` if an object is a transient ``tlist``, ``tset``, or
     ``tdict``.
 
@@ -1099,9 +1102,9 @@ def is_tcoll(obj):
         ``True`` if `obj` is a ``tlist``, ``tset``, or ``tdict`` and ``False``
         otherwise.
     """
-    return isinstance(obj, is_tcoll.types)
-is_tcoll.types = (tlist, tset, tdict)
-def is_mcoll(obj):
+    return isinstance(obj, is_tcoll.types)  # type: ignore[attr-defined]
+is_tcoll.types = (tlist, tset, tdict)  # type: ignore[attr-defined]
+def is_mcoll(obj: object) -> bool:
     """Returns ``True`` if an object is a mutable ``list``, ``set``, or
     ``dict``.
 
@@ -1120,8 +1123,8 @@ def is_mcoll(obj):
         ``True`` if `obj` is a ``list``, ``set``, or ``dict`` and ``False``
         otherwise.
     """
-    return isinstance(obj, is_mcoll.types)
-is_mcoll.types = (list, set, dict)
+    return isinstance(obj, is_mcoll.types)  # type: ignore[attr-defined]
+is_mcoll.types = (list, set, dict)  # type: ignore[attr-defined]
 def to_pcoll(obj):
     """Returns a persistent copy of `obj`.
 
@@ -1251,7 +1254,7 @@ def to_mcoll(obj, /, copy=True):
         return dict(obj)
     else:
         raise TypeError(f"argument is not a collection")
-def freezearray(arr):
+def freezearray(arr: Any) -> None:
     """Freezes a NumPy array or SciPy sparse array in-place.
 
     ``freezearray(x)`` sets the ``'WRITEABLE'`` bit on the numpy array ``x`` or
@@ -1278,7 +1281,7 @@ def freezearray(arr):
         raise TypeError(
             f"freezearray requires a numpy array or scipy sparse array,"
             f" but type {type(arr)} was given")
-def frozenarray(obj, /, dtype=None, *, copy=False, **kwargs):
+def frozenarray(obj: Any, /, dtype: Any=None, *, copy: Any=False, **kwargs: Any) -> Any:
     """Roughly equivalent to ``numpy.array`` but returns read-only arrays.
 
     ``frozenarray(obj)`` is equivalent to ``numpy.array(obj)`` with a small
@@ -1332,7 +1335,7 @@ def frozenarray(obj, /, dtype=None, *, copy=False, **kwargs):
 
 # Mapping/Sequence Utilities ##################################################
 
-def get(d, k, /, *args, **kwargs):
+def get(d: Any, k: Any, /, *args: Any, **kwargs: Any) -> Any:
     """Returns a value from either a mapping or a sequence.
 
     The ``get`` function is essentially a function version of the ``get``
@@ -1409,7 +1412,7 @@ def get(d, k, /, *args, **kwargs):
         raise KeyError(k)
     else:
         return default
-def nestget(d, /, *args, **kwargs):
+def nestget(d: Any, /, *args: Any, **kwargs: Any) -> Any:
     """Returns a value from a data structure of nested mappings and sequences.
 
     The ``nestget`` function is essentially a nested version of the ``get``
@@ -1489,7 +1492,7 @@ def nestget(d, /, *args, **kwargs):
 from pcollections import lazy
 def _lazyvalmap_extract(f, d, k, *args, **kw):
     return f(d[k], *args, **kw)
-def lazyvalmap(f, d, /, *args, **kwargs):
+def lazyvalmap(f: Any, d: Any, /, *args: Any, **kwargs: Any) -> Any:
     """Returns a dict object whose values are transformed by a function.
 
     ``lazyvalmap(f, d)`` returns a dict whose keys are the same as those of the
@@ -1518,7 +1521,7 @@ def lazyvalmap(f, d, /, *args, **kwargs):
         This function always returns a lazy dictionary object of type
         ``pcollections.ldict``.
     """
-    t = tldict()
+    t: Any = tldict()
     if is_ammap(d):
         # For mutable maps, we do not try to respect laziness; they may change
         # so we cannot rely on them.
@@ -1530,7 +1533,7 @@ def lazyvalmap(f, d, /, *args, **kwargs):
         for k in d.keys():
             t[k] = lazy(_lazyvalmap_extract, f, d, k, *args, **kwargs)
     return t.persistent()
-def valmap(f, d, /, *args, **kwargs):
+def valmap(f: Any, d: Any, /, *args: Any, **kwargs: Any) -> Any:
     """Returns a dictionary object whose values are transformed by a function.
 
     ``valmap(f, d)`` returns a dict whose keys are the same as those of the
@@ -1567,13 +1570,13 @@ def valmap(f, d, /, *args, **kwargs):
     if is_ldict(d):
         return lazyvalmap(f, d, *args, **kwargs)
     elif is_pdict(d):
-        t = tdict()
+        t: Any = tdict()
         for (k,v) in d.items():
             t[k] = f(v, *args, **kwargs)
         return t.persistent()
     else:
         return {k: f(v, *args, **kwargs) for (k,v) in d.items()}
-def lazykeymap(f, d, /, *args, **kwargs):
+def lazykeymap(f: Any, d: Any, /, *args: Any, **kwargs: Any) -> Any:
     """Returns a object of type ``pcollections.ldict`` whose values are a
     function of the keys of the mapping `d`.
 
@@ -1608,11 +1611,11 @@ def lazykeymap(f, d, /, *args, **kwargs):
         keys = d.keys()
     else:
         keys = d
-    t = tldict()
+    t: Any = tldict()
     for k in keys:
         t[k] = lazy(f, k, *args, **kwargs)
     return t.persistent()
-def keymap(f, d, /, *args, **kwargs):
+def keymap(f: Any, d: Any, /, *args: Any, **kwargs: Any) -> Any:
     """Returns a dict object whose values are a function of a dict's keys.
 
     ``keymap(f, d)`` returns a dict whose keys are the same as those of the
@@ -1649,7 +1652,7 @@ def keymap(f, d, /, *args, **kwargs):
         ``pcollections.pdict`` or ``dict``, depending on the type of `d`.
     """
     if is_pdict(d):
-        t = tdict()
+        t: Any = tdict()
         for k in d.keys():
             t[k] = f(k, *args, **kwargs)
         return t.persistent()
@@ -1660,7 +1663,7 @@ def keymap(f, d, /, *args, **kwargs):
     return {k: f(k, *args, **kwargs) for k in keys}
 def _lazyitemmap_extract(f, d, k, *args, **kw):
     return f(k, d[k], *args, **kw)
-def lazyitemmap(f, d, /, *args, **kwargs):
+def lazyitemmap(f: Any, d: Any, /, *args: Any, **kwargs: Any) -> Any:
     """Returns an ``ldict`` object whose values are a function of a dict's
     items.
 
@@ -1692,7 +1695,7 @@ def lazyitemmap(f, d, /, *args, **kwargs):
         This function always returns a lazy dictionary object of type
         ``pcollections.ldict``.
     """
-    t = tldict()
+    t: Any = tldict()
     if is_ammap(d):
         # For mutable maps, we do not try to respect laziness; they may change
         # so we cannot rely on them.
@@ -1704,7 +1707,7 @@ def lazyitemmap(f, d, /, *args, **kwargs):
         for k in d.keys():
             t[k] = lazy(_lazyitemmap_extract, f, d, k, *args, **kwargs)
     return t.persistent()
-def itemmap(f, d, /, *args, **kwargs):
+def itemmap(f: Any, d: Any, /, *args: Any, **kwargs: Any) -> Any:
     """Returns a dictionary object whose values are a function of a given
     dictionary's items.
 
@@ -1745,13 +1748,13 @@ def itemmap(f, d, /, *args, **kwargs):
     if is_ldict(d):
         return lazyitemmap(f, d, *args, **kwargs)
     elif is_pdict(d):
-        t = tdict()
+        t: Any = tdict()
         for (k,v) in d.items():
             t[k] = f(k, v, *args, **kwargs)
         return t.persistent()
     else:
         return {k: f(k, v, *args, **kwargs) for (k,v) in d.items()}
-def dictmap(f, keys, /, *args, **kwargs):
+def dictmap(f: Any, keys: Any, /, *args: Any, **kwargs: Any) -> Any:
     """Returns a dict with the given keys and the values ``map(f, keys)``.
 
     ``dictmap(f, keys)`` returns a dict object whose keys are the elements of
@@ -1782,7 +1785,7 @@ def dictmap(f, keys, /, *args, **kwargs):
         ``f(k)``.
     """
     return {k: f(k, *args, **kwargs) for k in keys}
-def pdictmap(f, keys, /, *args, **kwargs):
+def pdictmap(f: Any, keys: Any, /, *args: Any, **kwargs: Any) -> Any:
     """Returns a ``pdict`` with the given keys and the values ``map(f, keys)``.
 
     ``pdictmap(f, keys)`` returns a ``pdict`` object whose keys are the
@@ -1813,11 +1816,11 @@ def pdictmap(f, keys, /, *args, **kwargs):
         A persistent dictionary of the given `keys` with each key ``k`` mapped
         to ``f(k)``.
     """
-    t = tdict()
+    t: Any = tdict()
     for k in keys:
         t[k] = f(k, *args, **kwargs)
     return t.persistent()
-def ldictmap(f, keys, *args, **kwargs):
+def ldictmap(f: Any, keys: Any, *args: Any, **kwargs: Any) -> Any:
     """Returns a lazy dictionary with the given keys and the values
     ``map(f, keys)``.
 
@@ -1849,11 +1852,11 @@ def ldictmap(f, keys, *args, **kwargs):
         A persistent lazy dictionary of the given `keys` with each key ``k``
         mapped to ``f(k)``.
     """
-    t = tldict()
+    t: Any = tldict()
     for k in keys:
         t[k] = lazy(f, k, *args, **kwargs)
     return t.persistent()
-def merge(*args, **kwargs):
+def merge(*args: Any, **kwargs: Any) -> Any:
     '''Merges dict-like objects left-to-right. See also ``rmerge``.
 
     ``merge(...)`` collapses all arguments, which must be ``Mapping`` objects
@@ -1906,7 +1909,7 @@ def merge(*args, **kwargs):
         from pcollections import lazy as _lazy
         lazy = any(isinstance(u, _lazy) for u in kwargs.values())
     return ldict(res) if lazy else pdict(res)
-def rmerge(*args, **kwargs):
+def rmerge(*args: Any, **kwargs: Any) -> Any:
     '''Merges dictionary objects right-to-left. See also ``merge``.
 
     ``rmerge(...)`` collapses all arguments, which must be python ``Mapping``
@@ -1956,7 +1959,7 @@ def rmerge(*args, **kwargs):
         else:
             res.update(d)
     return ldict(res) if lazy else pdict(res)
-def assoc(d, /, *args, **kwargs):
+def assoc(d: Any, /, *args: Any, **kwargs: Any) -> Any:
     """Returns a copy of the given dictionary with additional key-value pairs.
 
     ``assoc(d, key, val)`` returns a copy of the dictionary `d` with the given
@@ -2017,7 +2020,7 @@ def assoc(d, /, *args, **kwargs):
     else:
         raise TypeError(f"cannot assoc to type {type(d)}")
     return d
-def dissoc(d, /, *args):
+def dissoc(d: Any, /, *args: Any) -> Any:
     """Returns a copy of the given dictionary with certain keys removed.
 
     ``dissoc(d, key)`` returns a copy of the dictionary `d` with the given
@@ -2084,7 +2087,7 @@ def _lambdadict_call(data, fn):
             if k in dflts:
                 kwargs[k] = dflts[k]
     return fn(*args, **kwargs)
-def lambdadict(*args, **kwargs):
+def lambdadict(*args: Any, **kwargs: Any) -> Any:
     """Builds and returns a ``ldict`` with lambda functions calculated lazily.
 
     ``lambdadict(args...)`` is equivalent to ``merge(args...)`` except that
@@ -2149,11 +2152,11 @@ class args(argstuple):
     """
     def __new__(cls, *args, **kwargs):
         return argstuple.__new__(cls, args, kwargs)
-    def __rmatmul__(self, fn):
+    def __rmatmul__(self, fn: Any) -> Any:
         return fn(*self.args, **self.kwargs)
-    def passto(self, fn):
+    def passto(self, fn: Any) -> Any:
         return fn(*self.args, **self.kwargs)
-    def copy(self, args=None, kwargs=None):
+    def copy(self, args: Any=None, kwargs: Any=None) -> Any:
         """Returns a copy of the current ``args``, potentially with updates."""
         if args is None:
             args = self.args
@@ -2162,7 +2165,7 @@ class args(argstuple):
         if args is self.args and kwargs is self.kwargs:
             return self
         return argstuple.__new__(type(self), args, kwargs)
-def argfilter(fn=None, /, **kwargs):
+def argfilter(fn: Any=None, /, **kwargs: Any) -> Any:
     """A decorator that creates decorators that filter function arguments.
 
     A function decorated with ``@argfilter`` is turned into a an argument
@@ -2291,7 +2294,7 @@ def _argfilter_dispatch(filter_fn, f, fsig,
 
 # Indentation #################################################################
 
-def detect_indentation(text, /, skip_first=True, tabsize=8):
+def detect_indentation(text: str, /, skip_first: bool=True, tabsize: int=8) -> int | None:
     """Given a block of text that is part of a docstring, guess the level of
     indentation used to write it.
 
@@ -2337,8 +2340,8 @@ def detect_indentation(text, /, skip_first=True, tabsize=8):
         elif ln_ident < ident:
             ident = ln_ident
     return ident
-def reindent(text, new_indent=0, /,
-             skip_first=True, tabsize=8, final_endline=True, default_indent=0):
+def reindent(text: str, new_indent: int=0, /,
+             skip_first: Any=True, tabsize: Any=8, final_endline: Any=True, default_indent: Any=0) -> str:
     """Returns a block of text with a different indentation.
 
     ``reindent(text, n)`` returns a copy of `text` after removing its current
@@ -2407,7 +2410,7 @@ def reindent(text, new_indent=0, /,
 _default_ureg_override = ContextVar('immlib_default_ureg', default=None)
 # The global default registry; this is what `immlib.units = ureg` sets (see
 # immlib/__init__.py) and is initialized in immlib.util._quantity.
-_global_ureg = [None]
+_global_ureg: list = [None]
 def _default_ureg():
     """Returns the unit registry that ``immlib`` functions use by default:
     the registry set by an enclosing ``immlib.default_ureg`` block in the
@@ -2415,7 +2418,7 @@ def _default_ureg():
     registry otherwise. ``immlib.units`` always returns this registry."""
     ureg = _default_ureg_override.get()
     return _global_ureg[0] if ureg is None else ureg
-def unitregistry(obj, /, *args):
+def unitregistry(obj: Any, /, *args: Any) -> pint.UnitRegistry:
     """Returns the ``pint.UnitRegistry`` object for the given unit or quantity.
 
     ``unitregistry(u)`` for a ``pint.Unit`` object ``u`` returns the
@@ -2462,7 +2465,7 @@ def unitregistry(obj, /, *args):
 
 # Caching #####################################################################
 
-def to_pathcache(obj):
+def to_pathcache(obj: Any) -> Any:
     """Returns a ``joblib.Memory`` object that corresponds to the given path
     object.
 
@@ -2522,7 +2525,7 @@ def to_pathcache(obj):
     else:
         raise TypeError(
             f"to_pathcache: arg must be path, str, or None; not {type(obj)}")
-def to_lrucache(obj):
+def to_lrucache(obj: Any) -> Any:
     """Returns an ``lru_cache`` function appropriate for the given object.
 
     ``to_lrucache(obj)`` converts the given object `obj` into either
@@ -2562,6 +2565,6 @@ def to_lrucache(obj):
 
 # Other #######################################################################
     
-def identfn(x):
+def identfn(x: Any) -> Any:
     "The identify function; ``identfn(x)`` returns `x`."
     return x

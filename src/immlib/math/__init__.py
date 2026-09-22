@@ -24,8 +24,7 @@ PyTorch tensor (matching ordinary NumPy/PyTorch ergonomics for masks and
 indexing) rather than a unit-less ``Quantity``.
 
 See the ``immlib.math._core`` module docstring for the full set of governing
-design principles, and the design spec (section 9-11) for the original
-rationale.
+design principles.
 
 Examples
 --------

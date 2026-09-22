@@ -38,9 +38,6 @@ submodules : tuple of str
 
 # Imports #####################################################################
 
-# We always load _init first.
-from ._init    import reclaim
-# Then the core library.
 from .util     import *
 from .pathlib  import *
 from .iolib    import *
@@ -54,7 +51,6 @@ from ._version import (version, Version)
 # Modules/Reloading ###########################################################
 
 submodules = (
-    'immlib._init',
     'immlib.util._core',
     'immlib.util._numeric',
     'immlib.util._quantity',
@@ -128,5 +124,3 @@ class _ImmlibModule(_types.ModuleType):
         _global_ureg[0] = ureg
 _sys.modules[__name__].__class__ = _ImmlibModule
 del _sys, _types
-# We want to mark our functions as being from the immlib module.
-reclaim(__name__, __all__, del_reclaim=True)

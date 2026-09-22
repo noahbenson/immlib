@@ -1,10 +1,10 @@
 # -*- Coding: utf-8 -*-
 ###############################################################################
-# pimms/types/_core.py
+# immlib/types/_core.py
 
-"""The pimms subpackage containing various utility types.
+"""The immlib subpackage containing various utility types.
 
-The utility types included in pimms are:
+The utility types included in immlib are:
  * `MetaObject` is a `planobject` type that implements metadata via the
    value `metadata` (a lazy dictionary) and the `withmeta` and `dropmeta`
    methods.
@@ -16,8 +16,11 @@ The utility types included in pimms are:
 
 # Dependencies ################################################################
 
+from __future__ import annotations
+
 import math
 import operator as op
+from typing import Any
 from functools import partial
 from warnings import warn
 from collections import namedtuple
@@ -62,14 +65,14 @@ class MetaObject(planobject):
     metadata : ldict
         A lazy dictionary of the metadata tracked by the object.
     """
-    def __init__(self, metadata=None):
+    def __init__(self, metadata: Any = None) -> None:
         if metadata is None:
             metadata = ldict.empty
         self.metadata = metadata
     @calc('metadata', lazy=False)
     def filter_metadata(metadata):
         return ldict.empty if metadata is None else ldict(metadata)
-    def withmeta(self, *args, **kwargs):
+    def withmeta(self, *args: Any, **kwargs: Any) -> Any:
         """Return a duplicate object with updated metadata.
 
         The arguments and keyword arguments to ``withmeta`` are merged,
@@ -78,7 +81,7 @@ class MetaObject(planobject):
         """
         new_metadata = merge(self.metadata, *args, **kwargs)
         return self.set_metadata(new_metadata)
-    def dropmeta(self, *args):
+    def dropmeta(self, *args: Any) -> Any:
         """Returns a duplicate object with given metadata keys cleared.
 
         The arguments must be keys, which are dropped from the metadata of
@@ -88,7 +91,7 @@ class MetaObject(planobject):
         for k in args:
             md = md.drop(k)
         return self.set_metadata(md)
-    def set_metadata(self, md):
+    def set_metadata(self, md: Any) -> Any:
         """Returns a duplicate object with the given metadata dictionary.
 
         The argument must be a dict-like object.
@@ -96,7 +99,7 @@ class MetaObject(planobject):
         if md is self.metadata:
             return self
         return self.copy(metadata=md)
-    def clear_metadata(self):
+    def clear_metadata(self) -> Any:
         """Returns a duplicate object with its metadata dictionary cleared."""
         if len(self.metadata) == 0:
             return self
@@ -212,7 +215,9 @@ class ArrayIndex:
         return ArrayIndexFlatData(flatids, flatins)
     # Construction ------------------------------------------------------------
     __slots__ = ('array', '_flatdata')
-    def __new__(cls, array, freeze=True):
+    array: Any
+    _flatdata: Any
+    def __new__(cls, array: Any, freeze: bool = True) -> ArrayIndex:
         if not freeze and is_array(array, frozen=True):
             freeze = True
         else:
@@ -225,7 +230,7 @@ class ArrayIndex:
     # `default` is documented although the signature does not name it: it is
     # taken from **kw, so that "not given" can be told from "given as None".
     @docwrap(format='numpy', extraparam='default')
-    def find(self, ids, *, ravel=False, **kw):
+    def find(self, ids: Any, *, ravel: bool = False, **kw: Any) -> Any:
         """Finds and returns the indices of the given identities.
         
         ``index.find(id)`` returns the index, in the original array on which
@@ -315,7 +320,7 @@ class ArrayIndex:
                 ins = np.unravel_index(ins, self.array.shape)
         return ins
     @property
-    def flatdata(self):
+    def flatdata(self) -> Any:
         """Returns a named tuple containing the flattened data used by the
         ``ArrayIndex`` type to lookup identities.
 

@@ -34,10 +34,14 @@ jobs:
           cache: pip # Implicitly uses requirements.txt for cache key
       - name: Install immlib and Dependencies
         run: pip install -e .[docs]
-      # Build the book
+      # Build the book. The API-reference pages are generated from the
+      # docstrings first, then the Jupyter Book 2 (mystmd) site is built from
+      # within the project directory (which is where its myst.yml lives).
       - name: Build Documentation
         run: |
-          jupyter-book build docs/immlib/
+          python docs/generate_api.py
+          cd docs/immlib
+          jupyter-book build --html --execute
       # Upload the book's HTML as an artifact
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v5

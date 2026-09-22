@@ -11,11 +11,6 @@ for coercing types into other types, and functions for querying numpy arrays
 and pytorch tensors.
 """
 
-# The _init module provides useful utilities for use during import, but these
-# utilities happen to rightfully belong in this namespace.
-from .._init import (
-    reclaim)
-
 from ._core import (
     is_str,
     strnorm,
@@ -294,10 +289,3 @@ __all__ = (
     "argfilter",
     "is_url",
     "url_download")
-
-# Mark all the imported functions as belonging to this module instead of the
-# hidden submodules. Most of these will later get claimed by the immlib primary
-# module, but any that aren't belong here in immlib.util.
-reclaim(__name__, del_reclaim=False)
-# We also want to claim the `reclaim` function for util.
-reclaim.__module__ = __name__

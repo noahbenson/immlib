@@ -47,8 +47,3 @@ __all__ = (
     "planobject",
     "is_plantype",
     "is_planobject")
-
-# Mark all the imported functions as belonging to this module instead of the
-# hidden submodules:
-from .._init import reclaim
-reclaim(__name__, del_reclaim=True)

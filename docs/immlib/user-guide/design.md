@@ -184,3 +184,6 @@ time. Other shared state is handled as follows:
 * `immlib` relies on `pint`, whose unit registries are not documented as
   thread-safe; `immlib`'s tests exercise concurrent use of a registry, but
   `pint` makes no guarantees.
+* Importing `immlib` does not import PyTorch, which would re-enable the GIL.
+  PyTorch is imported the first time an operation needs it, so a free-threaded
+  program that uses only NumPy never imports it.

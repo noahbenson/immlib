@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 ################################################################################
-# pimms/test/iolib/__init__.py
+# immlib/test/iolib/__init__.py
 
-"""Tests fot pimms.iolib."""
+"""Tests for immlib.iolib."""
 
 from .test_core import TestIOLibCore

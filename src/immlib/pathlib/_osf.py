@@ -5,7 +5,10 @@
 
 # Dependencies ################################################################
 
+from __future__ import annotations
+
 import mimetypes, json, os
+from typing import Any
 from pathlib import (PosixPath, PurePosixPath, Path)
 from urllib.parse import urlparse
 from functools import reduce
@@ -188,12 +191,12 @@ def _osf_crawl(proj, path=None,
         kind='directory',
         contents=ldict(ls),
         cache_path=cache_path)
-def osf_contents(proj,
-                 storage='osfstorage',
-                 cache_path=None,
-                 mkdir_mode=0o775,
-                 pagesize=100,
-                 lazy=True):
+def osf_contents(proj: Any,
+                 storage: Any = 'osfstorage',
+                 cache_path: Any = None,
+                 mkdir_mode: Any = 0o775,
+                 pagesize: Any = 100,
+                 lazy: Any = True) -> Any:
     """Returns a dictionary of the contents of the given OSF project and path.
 
     ``osf_contents(project_name)`` returns a dictionary of the contents of the
@@ -270,12 +273,12 @@ class OSFClient(Client):
                 raise FileNotFoundError(f"No such directory: {repr(p)}")
             contents = contents[p]
         return contents
-    def __init__(self, project='xxxxx', storage='osfstorage',
-                 file_cache_mode=None,
-                 local_cache_dir=None,
-                 content_type_method=mimetypes.guess_type,
-                 pagesize=100,
-                 mkdir_mode=0o775):
+    def __init__(self, project: Any = 'xxxxx', storage: Any = 'osfstorage',
+                 file_cache_mode: Any = None,
+                 local_cache_dir: Any = None,
+                 content_type_method: Any = mimetypes.guess_type,
+                 pagesize: Any = 100,
+                 mkdir_mode: Any = 0o775) -> None:
         super().__init__(
             file_cache_mode=file_cache_mode,
             local_cache_dir=local_cache_dir,
@@ -516,7 +519,7 @@ class OSFPath(CloudPath):
         return self.client._path_kind(self) == "file"
     def mkdir(self, parents=False, exist_ok=False):
         raise TypeError(f"OSF CloudPath operations are read-only")
-    def touch(self, exist_ok: bool = True):
+    def touch(self, exist_ok: bool = True, mode=None):
         raise TypeError(f"OSF CloudPath operations are read-only")
     def stat(self):
         ent = self.client._path_entry(self)

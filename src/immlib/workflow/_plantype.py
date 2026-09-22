@@ -5,6 +5,8 @@
 
 # Dependencies ################################################################
 
+from __future__ import annotations
+
 import inspect
 from functools import wraps
 from copy import copy
@@ -312,7 +314,7 @@ class planobject(plantype.planobject_base, metaclass=plantype):
 
 # Utilities ###################################################################
 
-def is_planobject(obj):
+def is_planobject(obj: object) -> bool:
     '''Determines if an object is an instance of a ``immlib.plantype`` object.
     
     ``is_planobject(obj)`` returns ``True`` if ``obj`` is an instance of a
@@ -321,7 +323,7 @@ def is_planobject(obj):
     See also: ``plantype``, ``is_plantype``
     '''
     return isinstance(obj, planobject)
-def is_plantype(obj):
+def is_plantype(obj: object) -> bool:
     '''Determines if an object is a ``immlib.plantype``.
     
     ``is_plantype(obj)`` returns ``True`` if ``obj`` is a ``immlib``

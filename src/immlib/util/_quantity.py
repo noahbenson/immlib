@@ -5,11 +5,14 @@
 
 # Dependencies ################################################################
 
+from __future__ import annotations
+
 import importlib
 import inspect
 import operator
 import warnings
 from functools import (partial, wraps)
+from typing import Any
 
 import pint
 import numpy as np
@@ -19,7 +22,7 @@ import scipy.sparse as sps
 from ._core import (is_set, is_str, is_tuple, is_amap, unitregistry,
                     _default_ureg, _default_ureg_override)
 from ._numeric import (
-    torch, alttorch, checktorch, scipy__is_sparse,
+    torch, scipy__is_sparse,
     is_array, is_tensor, is_numeric, is_sparse, to_sparse,
     to_array, to_tensor, to_numeric, to_sparse, to_dense)
 
@@ -31,8 +34,7 @@ from ._numeric import (
 # can be used to change the function's behavior depending on the units attached
 # to an object.
 # Setup pint / units:
-from pint import UnitRegistry
-def is_ureg(obj):
+def is_ureg(obj: object) -> bool:
     """Returns ``True`` if an object is a ``ping.UnitRegistry`` object.
 
     ``is_ureg(obj)`` returns ``True`` if the given object `obj` is an instance
@@ -52,7 +54,7 @@ def is_ureg(obj):
     """
     return isinstance(obj, pint.UnitRegistry)
 from pint import Unit
-def is_unit(q, /, *, ureg=None):
+def is_unit(q: object, /, *, ureg: Any = None) -> bool:
     """Returns ``True`` if `q` is a ``pint.Unit`` object and ``False``
     otherwise.
 
@@ -92,7 +94,7 @@ def is_unit(q, /, *, ureg=None):
     else:
         raise TypeError("parameter ureg must be a UnitRegistry")
 @docwrap(format='numpy', inheritraises=is_unit)
-def is_quant(obj, /, unit=Ellipsis, *, ureg=None):
+def is_quant(obj: object, /, unit: object = Ellipsis, *, ureg: Any = None) -> bool:
     """Returns ``True`` if given a ``pint.Quantity`` object and ``False``
     otherwise.
 
@@ -777,7 +779,7 @@ class Quantity(pint.Quantity):
             return inst
         return super().__new__(cls, value, units)
     # Matching argument types -------------------------------------------
-    def as_input_type(self, *args):
+    def as_input_type(self, *args: object) -> object:
         """Returns this quantity if any argument is a quantity, and its
         magnitude otherwise.
 
@@ -810,11 +812,11 @@ class Quantity(pint.Quantity):
         return self._magnitude
     # Backend ------------------------------------------------------------
     @property
-    def backend(self):
+    def backend(self) -> Any:
         """``numpy`` if this quantity's magnitude is a NumPy array or a
         SciPy sparse array/matrix, or ``torch`` if it is a PyTorch tensor.
         """
-        return torch if torch.is_tensor(self._magnitude) else np
+        return torch._load() if torch.is_tensor(self._magnitude) else np
     # Persistence ---------------------------------------------------------
     #: Whether this quantity has been made immutable. It is a class
     #: attribute so that every quantity has it without paying for an
@@ -823,10 +825,10 @@ class Quantity(pint.Quantity):
     _persistent = False
 
     @property
-    def is_persistent(self):
+    def is_persistent(self) -> bool:
         """Whether this quantity has been made immutable by ``persist``."""
         return self._persistent
-    def persist(self):
+    def persist(self) -> Quantity:
         """Makes this quantity immutable, and returns it.
 
         A persistent quantity's ``units`` and ``magnitude`` refer to the
@@ -946,7 +948,7 @@ class Quantity(pint.Quantity):
 
     # Units of None ------------------------------------------------------
     @property
-    def units(self):
+    def units(self) -> pint.Unit | None:  # type: ignore[override]
         """This quantity's units, or ``None`` if it has none.
 
         ``None`` is immlib's "no units at all", which is not Pint's
@@ -956,11 +958,11 @@ class Quantity(pint.Quantity):
             return None
         return self._REGISTRY.Unit(self._units)
     @property
-    def u(self):
+    def u(self) -> pint.Unit | None:  # type: ignore[override]
         "An alias of ``units``."
         return self.units
     @property
-    def dimensionless(self):
+    def dimensionless(self) -> bool:
         """Whether this quantity's units are dimensionless.
 
         A quantity with no units (``units is None``) is *not*
@@ -971,7 +973,7 @@ class Quantity(pint.Quantity):
             return False
         return super().dimensionless
     @property
-    def dimensionality(self):
+    def dimensionality(self) -> Any:
         """This quantity's dimensionality, as a mapping of base dimension
         to exponent.
 
@@ -987,7 +989,7 @@ class Quantity(pint.Quantity):
                 " undefined for a unitless immlib quantity")
         return super().dimensionality
     @docwrap(format='numpy', inheritparams=pint.Quantity.check)
-    def check(self, dimension):
+    def check(self, dimension: Any) -> bool:
         """Returns whether this quantity's dimensionality matches
         `dimension`; a quantity with no units matches nothing, not even a
         dimensionless one.
@@ -1004,7 +1006,7 @@ class Quantity(pint.Quantity):
             return False
         return super().check(dimension)
     @docwrap(format='numpy', inheritparams=pint.Quantity.to)
-    def to(self, other=None, *contexts, **ctx_kwargs):
+    def to(self, other: Any = None, *contexts: Any, **ctx_kwargs: Any) -> Quantity:
         """Returns this quantity converted into the units `other`.
 
         Converting to or from ``None`` units is always possible and never
@@ -1033,9 +1035,9 @@ class Quantity(pint.Quantity):
                     "to: contexts are not supported when converting to or"
                     " from a unitless (units=None) quantity")
             return self.__class__(self._magnitude, other)
-        return super().to(other, *contexts, **ctx_kwargs)
+        return super().to(other, *contexts, **ctx_kwargs)  # type: ignore[return-value]
     @docwrap(format='numpy', inheritparams=pint.Quantity.to)
-    def ito(self, other=None, *contexts, **ctx_kwargs):
+    def ito(self, other: Any = None, *contexts: Any, **ctx_kwargs: Any) -> None:
         """Converts this quantity into the units `other` in place, and
         returns ``None``.
 
@@ -1052,11 +1054,11 @@ class Quantity(pint.Quantity):
             self._units = new._units
             return None
         return super().ito(other, *contexts, **ctx_kwargs)
-    def __str__(self):
+    def __str__(self) -> str:
         if self._units is None:
             return str(self._magnitude)
         return super().__str__()
-    def __repr__(self):
+    def __repr__(self) -> str:
         # Pint's own __repr__ unconditionally quotes the units part of the
         # repr (`f"...'{self._units}'..."`), which, when self._units is
         # None, renders it as the *string* "'None'"--indistinguishable at
@@ -1090,7 +1092,7 @@ class Quantity(pint.Quantity):
     # 'Lx' is listed before 'L' so it is removed as a whole rather than
     # leaving a stray 'x' behind.
     _PINT_FORMAT_FLAGS = ('Lx', 'L', 'H', 'P', 'C', 'D', '~', '#')
-    def __format__(self, spec):
+    def __format__(self, spec: str) -> str:
         if self._is_0d():
             # See the note on 0-dimensional magnitudes, below.
             return format(
@@ -1107,7 +1109,7 @@ class Quantity(pint.Quantity):
                 # didn't anticipate); this should be rare in practice.
                 return str(self._magnitude)
         return super().__format__(spec)
-    def m_as(self, units):
+    def m_as(self, units: object) -> Any:
         """Returns this quantity's magnitude in the units `units`.
 
         ``q.m_as(None)`` returns the bare magnitude, whatever units `q` has,
@@ -1140,20 +1142,20 @@ class Quantity(pint.Quantity):
                 "m_as: quantity has no units (units is None); use .to() to"
                 " attach units or .magnitude/.m to obtain the raw value")
         return super().m_as(units)
-    def __bool__(self):
+    def __bool__(self) -> bool:
         if self._units is None:
             return bool(self._magnitude)
         return super().__bool__()
     __nonzero__ = __bool__
 
-    def ito_root_units(self):
+    def ito_root_units(self) -> None:
         """Converts this quantity into its root units in place, and returns
         ``None``; ``to_root_units`` returns a new quantity instead."""
         if self._persistent:
             raise self._refuse(
                 "converting the units in place (ito_root_units)")
         return super().ito_root_units()
-    def ito_base_units(self):
+    def ito_base_units(self) -> None:
         """Converts this quantity into its base units in place, and returns
         ``None``; ``to_base_units`` returns a new quantity instead."""
         if self._persistent:
@@ -1172,60 +1174,60 @@ class Quantity(pint.Quantity):
     # by delegating to immlib.math, which honors both rules, and they take
     # immlib.math's (i.e. PyTorch's) arguments: `dim` and `keepdim`, with
     # `axis` and `keepdims` accepted as aliases.
-    def sum(self, dim=None, keepdim=False, **kwargs):
+    def sum(self, dim: object = None, keepdim: bool = False, **kwargs: object) -> Quantity:
         "Returns the sum of this quantity's elements; see ``immlib.math.sum``."
         return _math().sum(self, dim, keepdim, **kwargs)
-    def prod(self, dim=None, keepdim=False, **kwargs):
+    def prod(self, dim: object = None, keepdim: bool = False, **kwargs: object) -> Quantity:
         "Returns the product of the elements; see ``immlib.math.prod``."
         return _math().prod(self, dim, keepdim, **kwargs)
-    def mean(self, dim=None, keepdim=False, **kwargs):
+    def mean(self, dim: object = None, keepdim: bool = False, **kwargs: object) -> Quantity:
         "Returns the mean of the elements; see ``immlib.math.mean``."
         return _math().mean(self, dim, keepdim, **kwargs)
-    def std(self, dim=None, keepdim=False, correction=1, **kwargs):
+    def std(self, dim: object = None, keepdim: bool = False, correction: int = 1, **kwargs: object) -> Quantity:
         """Returns the standard deviation of the elements; see
         ``immlib.math.std``, including the default ``correction=1``."""
         return _math().std(self, dim, keepdim, correction, **kwargs)
-    def var(self, dim=None, keepdim=False, correction=1, **kwargs):
+    def var(self, dim: object = None, keepdim: bool = False, correction: int = 1, **kwargs: object) -> Quantity:
         "Returns the variance of the elements; see ``immlib.math.var``."
         return _math().var(self, dim, keepdim, correction, **kwargs)
-    def min(self, dim=None, keepdim=False, **kwargs):
+    def min(self, dim: object = None, keepdim: bool = False, **kwargs: object) -> Any:
         """Returns the minimum element, or, for a given `dim`, a ``(values,
         indices)`` tuple; see ``immlib.math.min``."""
         return _math().min(self, dim, keepdim, **kwargs)
-    def max(self, dim=None, keepdim=False, **kwargs):
+    def max(self, dim: object = None, keepdim: bool = False, **kwargs: object) -> Any:
         "Returns the maximum element; see ``immlib.math.max`` and ``min``."
         return _math().max(self, dim, keepdim, **kwargs)
-    def amin(self, dim=None, keepdim=False, **kwargs):
+    def amin(self, dim: object = None, keepdim: bool = False, **kwargs: object) -> Quantity:
         "Returns the minimum value(s) alone; see ``immlib.math.amin``."
         return _math().amin(self, dim, keepdim, **kwargs)
-    def amax(self, dim=None, keepdim=False, **kwargs):
+    def amax(self, dim: object = None, keepdim: bool = False, **kwargs: object) -> Quantity:
         "Returns the maximum value(s) alone; see ``immlib.math.amax``."
         return _math().amax(self, dim, keepdim, **kwargs)
-    def all(self, dim=None, keepdim=False, **kwargs):
+    def all(self, dim: object = None, keepdim: bool = False, **kwargs: object) -> Any:
         """Returns whether every element is truthy, as a plain bool array or
         tensor; see ``immlib.math.all``."""
         return _math().all(self, dim, keepdim, **kwargs)
-    def any(self, dim=None, keepdim=False, **kwargs):
+    def any(self, dim: object = None, keepdim: bool = False, **kwargs: object) -> Any:
         """Returns whether any element is truthy, as a plain bool array or
         tensor; see ``immlib.math.any``."""
         return _math().any(self, dim, keepdim, **kwargs)
-    def cumsum(self, dim, **kwargs):
+    def cumsum(self, dim: object, **kwargs: object) -> Quantity:
         """Returns the cumulative sum along `dim`, which is required, as it is
         in ``torch.cumsum``; see ``immlib.math.cumsum``."""
         return _math().cumsum(self, dim, **kwargs)
-    def round(self, decimals=0):
+    def round(self, decimals: int = 0) -> Quantity:
         "Returns the elements rounded; see ``immlib.math.round``."
         return _math().round(self, decimals)
-    def conj(self):
+    def conj(self) -> Quantity:
         "Returns the elementwise conjugate; see ``immlib.math.conj``."
         return _math().conj(self)
-    def conjugate(self):
+    def conjugate(self) -> Quantity:
         "An alias of ``conj``."
         return _math().conj(self)
-    def reshape(self, *shape):
+    def reshape(self, *shape: object) -> Quantity:
         "Returns this quantity reshaped; see ``immlib.math.reshape``."
         return _math().reshape(self, *shape)
-    def transpose(self, dim0=None, dim1=None):
+    def transpose(self, dim0: object = None, dim1: object = None) -> Quantity:
         """Returns this quantity with two dimensions exchanged; see
         ``immlib.math.transpose``. Given no arguments, every dimension is
         reversed, as ``permute`` does with none--the one concession to
@@ -1233,22 +1235,22 @@ class Quantity(pint.Quantity):
         if dim0 is None and dim1 is None:
             return _math().permute(self)
         return _math().transpose(self, dim0, dim1)
-    def permute(self, *dims):
+    def permute(self, *dims: object) -> Quantity:
         "Returns this quantity with its dimensions permuted; see ``permute``."
         return _math().permute(self, *dims)
-    def squeeze(self, dim=None, **kwargs):
+    def squeeze(self, dim: object = None, **kwargs: object) -> Quantity:
         "Returns this quantity with size-1 dimensions removed; see ``squeeze``."
         return _math().squeeze(self, dim, **kwargs)
-    def unsqueeze(self, dim, **kwargs):
+    def unsqueeze(self, dim: object, **kwargs: object) -> Quantity:
         "Returns this quantity with a dimension inserted; see ``unsqueeze``."
         return _math().unsqueeze(self, dim, **kwargs)
-    def ravel(self):
+    def ravel(self) -> Quantity:
         "Returns this quantity flattened; see ``immlib.math.ravel``."
         return _math().ravel(self)
-    def flatten(self, start_dim=0, end_dim=-1):
+    def flatten(self, start_dim: int = 0, end_dim: int = -1) -> Quantity:
         "Returns this quantity flattened; see ``immlib.math.flatten``."
         return _math().flatten(self, start_dim, end_dim)
-    def astype(self, dtype, **kwargs):
+    def astype(self, dtype: object, **kwargs: object) -> Quantity:
         """Returns this quantity with its magnitude cast to `dtype`, keeping
         its backend: a tensor magnitude stays a tensor (PyTorch spells this
         ``Tensor.to``, a name Pint has already given to unit conversion). The
@@ -1271,15 +1273,15 @@ class Quantity(pint.Quantity):
         else:
             mag = round(mag, ndigits)
         return self.__class__(mag, self._units)
-    def __int__(self):
+    def __int__(self) -> int:
         if self._units is None:
             return int(self._magnitude)
         return super().__int__()
-    def __float__(self):
+    def __float__(self) -> float:
         if self._units is None:
             return float(self._magnitude)
         return super().__float__()
-    def __complex__(self):
+    def __complex__(self) -> complex:
         if self._units is None:
             return complex(self._magnitude)
         return super().__complex__()
@@ -1397,7 +1399,7 @@ class Quantity(pint.Quantity):
         else:
             y = other.__class__(ym, other._units)
         return (x, y)
-    def __setitem__(self, key, value):
+    def __setitem__(self, key: object, value: object) -> None:
         """Assigns into this quantity's magnitude, converting `value` into
         this quantity's units first.
 
@@ -1700,21 +1702,21 @@ class Quantity(pint.Quantity):
         if isinstance(other, pint.Quantity):
             return torch.is_tensor(other._magnitude)
         return torch.is_tensor(other)
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> Any:
         if self._units is None or (
                 isinstance(other, pint.Quantity) and other._units is None):
             return self._binop_none_bool(other, operator.eq)
         if self._is_tensor_op(other):
             return self._tensor_eq(other, False)
         return super().__eq__(other)
-    def __ne__(self, other):
+    def __ne__(self, other: object) -> Any:
         if self._units is None or (
                 isinstance(other, pint.Quantity) and other._units is None):
             return self._binop_none_bool(other, operator.ne)
         if self._is_tensor_op(other):
             return self._tensor_eq(other, True)
         return super().__ne__(other)
-    def tospec(self):
+    def tospec(self) -> Any:
         """Returns this quantity as a hashable ``(magnitude, unit)`` pair.
 
         ``q.tospec()`` returns the spec that ``immlib.quant`` accepts in
@@ -1780,8 +1782,8 @@ class Quantity(pint.Quantity):
     # `isinstance(q, collections.abc.Hashable)` is False, which is how
     # Python says this. Use the magnitude and the units--`(q.m.item(),
     # str(q.u))`, say--to build a key when one is needed.
-    __hash__ = None
-    def __reduce__(self):
+    __hash__ = None  # type: ignore[assignment]
+    def __reduce__(self) -> Any:
         # Pint pickles a quantity as a plain pint.Quantity attached to Pint's
         # application registry, which would lose both the immlib.Quantity type
         # and units of None. We instead reattach unpickled quantities to the
@@ -1791,7 +1793,7 @@ class Quantity(pint.Quantity):
         return (
             _unpickle_quantity,
             (self._magnitude, self._units, self._persistent))
-    def compare(self, other, op):
+    def compare(self, other: object, op: object) -> Any:
         """Returns the elementwise result of the ordered comparison `op`
         between this quantity and `other`.
 
@@ -1917,8 +1919,7 @@ class Quantity(pint.Quantity):
         work without this) does the natural, unit-aware thing instead of
         failing outright. Anything not covered here returns
         ``NotImplemented``, in which case PyTorch raises its own error;
-        broader coverage is left to ``immlib.math`` and to later
-        refinement, per the design spec's phased implementation plan.
+        broader coverage is left to ``immlib.math``.
         """
         kwargs = kwargs or {}
         name = func.__name__
@@ -2025,7 +2026,8 @@ class UnitRegistry(pint.UnitRegistry):
         expression string--still produce Pint's real ``dimensionless``
         unit.
     """
-    Quantity = type('ImmlibQuantity', (Quantity, pint.UnitRegistry.Quantity), {})
+    Quantity = type(  # type: ignore[assignment]
+        'ImmlibQuantity', (Quantity, pint.UnitRegistry.Quantity), {})
 
 
 _initial_global_ureg = UnitRegistry()
@@ -2038,7 +2040,7 @@ with warnings.catch_warnings():
 # Make sure there's a pixel unit
 if not hasattr(_initial_global_ureg, 'pixels'):
     _initial_global_ureg.define('pixel = [image_length] = px')
-def like_unit(obj, /, *, ureg=Ellipsis):
+def like_unit(obj: Any, /, *, ureg: Any = Ellipsis) -> bool:
     """Returns ``True`` if `obj` is or names a ``pint.Unit`` and ``False``
     otherwise.
 
@@ -2073,7 +2075,7 @@ def like_unit(obj, /, *, ureg=Ellipsis):
         return hasattr(ureg, obj) and isinstance(getattr(ureg, obj), pint.Unit)
     else:
         return False
-def unit(obj, /, ureg=None):
+def unit(obj: Any, /, ureg: Any = None) -> pint.Unit:
     """Converts the argument into a a ``pint.Unit`` object.
 
     ``unit(obj)`` returns the ``immlib``-library unit object for the given unit
@@ -2129,7 +2131,7 @@ def unit(obj, /, ureg=None):
     else:
         raise ValueError(f'unrecognized unit argument: {obj}')
 _unitlike_types = (str, pint.Unit, pint.Quantity)
-def alike_units(a, b, /, *, ureg=None):
+def alike_units(a: object, b: object, /, *, ureg: Any = None) -> bool:
     """Returns ``True`` if the arguments are alike units, otherwise ``False``.
 
     ``alike_units(a, b)`` returns ``True`` if `a` and `b` can be cast to
@@ -2206,7 +2208,7 @@ def _quant_magnitude(mag):
             f" (type {type(mag).__name__})")
     return arr
 @docwrap(format='numpy')
-def quant_spec(obj, /, *, ureg=None):
+def quant_spec(obj: object, /, *, ureg: object = None) -> Any:
     """Returns the ``(magnitude, unit, ureg)`` spec `obj` is written as.
 
     ``immlib.quant`` and its relatives accept a quantity written as a tuple
@@ -2287,7 +2289,7 @@ def quant_spec(obj, /, *, ureg=None):
         return None
     return (mag, u, r)
 @docwrap(format='numpy')
-def is_quantspec(obj, /, *, ureg=None):
+def is_quantspec(obj: object, /, *, ureg: object = None) -> bool:
     """Returns ``True`` if `obj` is written as a quantity spec.
 
     ``is_quantspec(obj)`` is ``quant_spec(obj) is not None``: it asks
@@ -2366,7 +2368,7 @@ def _tuplify(obj):
         return tuple(map(_tuplify, obj))
     return obj
 @docwrap(format='numpy')
-def like_quant(obj, /, *, ureg=None):
+def like_quant(obj: object, /, *, ureg: object = None) -> bool:
     """Returns ``True`` if ``immlib.quant`` can make a quantity of `obj`.
 
     ``like_quant(obj)`` is ``True`` for anything ``quant`` accepts: a
@@ -2450,7 +2452,7 @@ def _quant_persist(q, mag, persist):
         return q.persist()
     else:
         return _quant_unpersist(q)
-def quant(mag, /, unit=Ellipsis, *, ureg=None, persist=None):
+def quant(mag: Any, /, unit: Any = Ellipsis, *, ureg: Any = None, persist: Any = None) -> Quantity:
     """Returns a ``pint.Quantity`` object with the given magnitude and unit.
 
     ``quant(mag, unit)`` returns a ``pint.Quantity`` object with the given
@@ -2625,7 +2627,7 @@ def quant(mag, /, unit=Ellipsis, *, ureg=None, persist=None):
     else:
         return _quant_persist(q, mag, persist)
 @docwrap(format='numpy', inheritparams=quant, inheritraises=quant)
-def ilquant(mag, /, unit=Ellipsis, *, ureg=Ellipsis, persist=None):
+def ilquant(mag: object, /, unit: object = Ellipsis, *, ureg: object = Ellipsis, persist: object = None) -> Quantity:
     """Returns an ``immlib.Quantity`` with the given magnitude and unit.
 
     ``ilquant`` is ``immlib.quant`` with one difference: `ureg` defaults to
@@ -2658,8 +2660,8 @@ def ilquant(mag, /, unit=Ellipsis, *, ureg=Ellipsis, persist=None):
     --------
     quant
     """
-    return quant(mag, unit, ureg=ureg, persist=persist)
-def mag(obj, /, unit=Ellipsis, *, strict=False):
+    return quant(mag, unit, ureg=ureg, persist=persist)  # type: ignore[return-value]
+def mag(obj: Any, /, unit: Any = Ellipsis, *, strict: bool = False) -> Any:
     """Returns the magnitude of the given object.
 
     ``mag(quantity)`` returns the magnitude of the given quantity, regardless
@@ -2744,9 +2746,6 @@ def mag(obj, /, unit=Ellipsis, *, strict=False):
 
 # Promotion ###################################################################
 
-def _array_promote(*args, ureg=None):
-    return [to_array(el, ureg=ureg) for el in args]
-@alttorch(_array_promote)
 def promote(*args, ureg=None):
     """Promotes all arguments into quantities with compatible magnitudes.
 
@@ -3131,14 +3130,14 @@ def _qw_decorate(arglist, unit, require_unit, runit, require_runit,
         ureg)
     return wraps(fn)(dispatch)
 @docwrap(format='numpy')
-def quantwrap(fn=None, /, *args,
-              unit=None,
-              require_unit=None,
-              runit=Ellipsis,
-              require_runit=Ellipsis,
-              return_quant=None,
-              persist=None,
-              ureg=Ellipsis):
+def quantwrap(fn: object = None, /, *args: object,
+              unit: object = None,
+              require_unit: object = None,
+              runit: object = Ellipsis,
+              require_runit: object = Ellipsis,
+              return_quant: object = None,
+              persist: object = None,
+              ureg: object = Ellipsis) -> Any:
     """Converts the arguments of the decorated function into quantities.
 
     The decorator ``@quantwrap``, when applied to a function, converts that
