@@ -397,6 +397,76 @@ class TestWorkflowCore(TestCase):
             self.assertIn(k, nwm.input_docs)
         for k in ('mean', 'weights'):
             self.assertIn(k, nwm.output_docs)
+    def test_filter_inputs(self):
+        """A filter calc sees filtered values for its non-filter inputs.
+
+        A calc that is a filter for one value (its output is also an input)
+        that also consumes a value filtered by another calc must run after that
+        other calc, so that it is handed the filtered value rather than the raw
+        parameter.
+        """
+        from immlib.workflow import (calc, plan, planobject)
+        seen = {}
+        @calc('x', lazy=False)
+        def fx(x):
+            seen['fx'] = x
+            return x * 10
+        @calc('z', lazy=False)          # filter: output 'z' is also an input
+        def fz(x, z=None):
+            seen['fz_x'] = x
+            return x + 1
+        p = plan(fx=fx, fz=fz)
+        pd = p(x=1)
+        self.assertEqual(seen['fx'], 1)
+        self.assertEqual(seen['fz_x'], 10)   # fz sees the filtered x, not 1
+        self.assertEqual(pd['x'], 10)
+        self.assertEqual(pd['z'], 11)
+        # The same behavior through a planobject.
+        class FilterObj(planobject):
+            def __init__(self, x):
+                self.x = x
+            @calc('x', lazy=False)
+            def fx(x):
+                return x * 10
+            @calc('z', lazy=False)
+            def fz(x, z=None):
+                return x + 1
+        obj = FilterObj(x=1)
+        self.assertEqual(obj.x, 10)
+        self.assertEqual(obj.z, 11)
+        # A non-filter consuming the same filtered value also sees it filtered
+        # (this already worked; kept here as a guard).
+        @calc('w', lazy=False)
+        def fw(x):
+            return x + 1
+        self.assertEqual(plan(fx=fx, fw=fw)(x=1)['w'], 11)
+
+    def test_filter_chain(self):
+        """Two filters on the same value form a chain, and consumers see the
+        final value.
+
+        Both filters transform the value in place (their output is their
+        input); they must both run, in either order, and a later calc that
+        consumes the value must see the result of the whole chain rather than
+        one of its intermediate values.
+        """
+        from immlib.workflow import (calc, plan)
+        seen = {}
+        @calc('x', lazy=False)
+        def add1a(x):
+            return x + 1
+        @calc('x', lazy=False)
+        def add1b(x):
+            return x + 1
+        @calc('w', lazy=False)
+        def consume(x):
+            seen['x'] = x
+            return x * 100
+        pd = plan(a=add1a, b=add1b, c=consume)(x=3)
+        self.assertEqual(pd['x'], 5)      # both filters ran (order-independent)
+        self.assertEqual(seen['x'], 5)    # the consumer sees the chained value
+        self.assertEqual(pd['w'], 500)
+
     def test_multifilter(self):
         """Tests the ability of plans to contain multi-input filters."""
         import numpy as np

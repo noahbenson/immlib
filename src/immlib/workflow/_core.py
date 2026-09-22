@@ -760,8 +760,16 @@ class calc:
             params.append(v)
         newsig = self.signature.replace(parameters=params)
         object.__setattr__(tr, 'signature', newsig)
-        # The reversed version of d (for inputs).
-        r = {v:(k if isinstance(k, str) else k[0]) for (k,v) in d.items()}
+        # The reversed version of d (for inputs): maps the name each parameter
+        # was renamed to back to its original name. A filter's translation is
+        # the 2-tuple (input_name, output_name); only the input name matters
+        # here, so a tuple value is reversed on its first element. (Using the
+        # tuple itself as the key, as before, matched no argument name, so a
+        # calc that consumes another filter's intermediate value was called
+        # with the renamed keyword and raised TypeError.)
+        r = {}
+        for (k,v) in d.items():
+            r[v[0] if isinstance(v, tuple) else v] = k
         fn = self.function
         def _tr_fn_wrapper(*args, **kwargs):
             # We may need to untranslate some of the keys.
@@ -1196,7 +1204,29 @@ class plan(pdict):
             filters, key=lambda
             f:-len(to_calc(self[f]).inputs)))
         filters = pset(filts)
-        is_ready = lambda f: to_calc(self[f]).inputs <= inputs
+        # The calcs that produce each value, whether as an ordinary output or
+        # as a filter (a calc whose output is also one of its inputs). A calc
+        # must not run before the calc(s) that produce its inputs; otherwise it
+        # would be handed a value (e.g. a raw plan parameter) that a filter is
+        # about to transform, which is wrong when the calc both consumes that
+        # value and is itself a filter for another one.
+        producers = defaultdict(set)
+        for (v,(outs,fcalcs,ins)) in val2calc.items():
+            producers[v].update(outs)
+            producers[v].update(fcalcs)
+        def is_ready(f):
+            c = to_calc(self[f])
+            if not (c.inputs <= inputs):
+                return False
+            for v in c.inputs:
+                # A filter transforms its own output value in place, so it is
+                # not made to wait for the other calcs that produce that value.
+                if v in c.outputs:
+                    continue
+                for g in producers.get(v, ()):
+                    if g != f and g in calcs:
+                        return False
+            return True
         while len(calcs) > 0:
             # We start by greedily selecting filters.
             if len(filts) > 0:
