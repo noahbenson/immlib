@@ -68,7 +68,12 @@ immlib = ["py.typed"]
 # immlib is annotated progressively, so the checker is kept lenient on bodies
 # that are not annotated yet; the point of running it in CI is to keep the
 # annotations that do exist honest, not to require every function to have them.
-python_version = "3.10"
+#
+# The target Python version is deliberately not pinned: mypy then follows the
+# interpreter that runs it. Pinning it to an older version makes mypy parse
+# with that version's grammar, which fails on dependency stubs that use newer
+# syntax (numpy's stubs use PEP 695 `type` statements, which need 3.12+), and
+# the CI matrix checks the annotations under more than one interpreter.
 files = ["src/immlib"]
 ignore_missing_imports = true
 check_untyped_defs = false
