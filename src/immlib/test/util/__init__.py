@@ -5,6 +5,7 @@
 """Tests of the immlib.util module."""
 
 
+from .test_arrayindex import TestArrayIndex
 from .test_core     import TestUtilCore
 from .test_docs     import TestDocs
 from .test_numeric  import TestUtilNumeric

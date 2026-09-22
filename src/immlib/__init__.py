@@ -42,7 +42,6 @@ from .util     import *
 from .pathlib  import *
 from .iolib    import *
 from .workflow import *
-from .types    import *
 from . import  math
 # We want the version object from the ._version namespace; this is always last.
 from ._version import (version, Version)
@@ -64,8 +63,6 @@ submodules = (
     'immlib.workflow._core',
     'immlib.workflow._plantype',
     'immlib.workflow',
-    'immlib.types._core',
-    'immlib.types',
     'immlib.math._core',
     'immlib.math',
     'immlib._version')

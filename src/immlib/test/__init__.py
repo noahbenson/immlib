@@ -10,7 +10,6 @@ examples of the library's usage.
 
 from .test_version import TestVersion
 from .util     import *
-from .types    import *
 from .pathlib  import *
 from .iolib    import *
 from .workflow import *

@@ -91,6 +91,9 @@ from ._core import (
     to_lrucache,
     identfn)
 
+from ._arrayindex import (
+    ArrayIndex)
+
 from ._numeric import (
     checktorch,
     alttorch,
@@ -162,6 +165,7 @@ from ._url import (
     url_download)
 
 __all__ = (
+    "ArrayIndex",
     #"checktorch",
     #"alttorch",
     #"is_numpydtype",

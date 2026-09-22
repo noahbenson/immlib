@@ -1,16 +1,13 @@
-# -*- Coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 ###############################################################################
-# immlib/types/_core.py
+# immlib/util/_arrayindex.py
 
-"""The immlib subpackage containing various utility types.
+"""The `ArrayIndex` type: an index of the (unique) elements of an array.
 
-The utility types included in immlib are:
- * `MetaObject` is a `planobject` type that implements metadata via the
-   value `metadata` (a lazy dictionary) and the `withmeta` and `dropmeta`
-   methods.
- * `PropTable` is a lazy table similar to a pandas `DataFrame` but built around
-   the abilities to lazily load properties (columns) and to annotating multiple
-   values for each property along arbitrary dimensions such as time or depth.
+`ArrayIndex` was originally defined in the `immlib.types` subpackage; it lives
+here because it is a general-purpose utility that depends only on the rest of
+`immlib.util` (and NumPy), and because nothing in `immlib` used the other types
+that subpackage defined.
 """
 
 
@@ -18,153 +15,20 @@ The utility types included in immlib are:
 
 from __future__ import annotations
 
-import math
-import operator as op
-from typing import Any
-from functools import partial
-from warnings import warn
 from collections import namedtuple
 from threading import Lock
-LockType = type(Lock())
+from typing import Any
 
 import numpy as np
-import scipy as sp
 from docshare import docwrap
-from pcollections import *
-from numpy.lib.mixins import NDArrayOperatorsMixin
 
-from ..util import (
-    freezearray,
-    frozenarray,
-    is_integer,
-    is_tuple,
-    is_amap,
-    is_array,
-    is_realdata,
-    is_tensor,
-    is_array,
-    merge,
-    to_array)
-from ..workflow import *
+from ._core import (is_tuple, freezearray)
+from ._numeric import (is_array, to_array)
 
 
-# MetaObject ##################################################################
+# Globals #####################################################################
 
-class MetaObject(planobject):
-    """Base planobject type for objects that keep track of metadata.
-
-    Parameters
-    ----------
-    metadata : None or Mapping, optional
-        The dictionary of metadata that is to be attached to the object. If the
-        argument ``None`` is provided (the default), then the empty dictionary
-        is used.
-
-    Attributes
-    ----------
-    metadata : ldict
-        A lazy dictionary of the metadata tracked by the object.
-    """
-    def __init__(self, metadata: Any = None) -> None:
-        if metadata is None:
-            metadata = ldict.empty
-        self.metadata = metadata
-    @calc('metadata', lazy=False)
-    def filter_metadata(metadata):
-        return ldict.empty if metadata is None else ldict(metadata)
-    def withmeta(self, *args: Any, **kwargs: Any) -> Any:
-        """Return a duplicate object with updated metadata.
-
-        The arguments and keyword arguments to ``withmeta`` are merged,
-        left-to-right, into the current metadata; this new dictionary is used
-        as the metadata parameter of the new object.
-        """
-        new_metadata = merge(self.metadata, *args, **kwargs)
-        return self.set_metadata(new_metadata)
-    def dropmeta(self, *args: Any) -> Any:
-        """Returns a duplicate object with given metadata keys cleared.
-
-        The arguments must be keys, which are dropped from the metadata of
-        the duplicate object.
-        """
-        md = self.metadata
-        for k in args:
-            md = md.drop(k)
-        return self.set_metadata(md)
-    def set_metadata(self, md: Any) -> Any:
-        """Returns a duplicate object with the given metadata dictionary.
-
-        The argument must be a dict-like object.
-        """
-        if md is self.metadata:
-            return self
-        return self.copy(metadata=md)
-    def clear_metadata(self) -> Any:
-        """Returns a duplicate object with its metadata dictionary cleared."""
-        if len(self.metadata) == 0:
-            return self
-        return self.copy(metadata=None)
-
-
-# Immutable ###################################################################
-
-class ImmutableType(type):
-    """A meta-class for types that are immutable.
-
-    When this metaclass is used in a class, objects of the type become
-    immutable immediately after the ``__init__`` method is run. Such types
-    should not overload the ``__new__`` classmethod and instead should see to
-    their initialization in ``__init__`` as usual. Once the ``__init__`` method
-    has finished, the ``__setattr__``, ``__delattr__``, ``__setitem__``, and
-    ``__delitem__`` methods will raise a ``TypeError``.
-    """
-    class ImmutableBase:
-        "The base class of all immlib immutable classes."
-        __slots__ = ('__init_status',)
-        def __setattr__(self, k, v):
-            if self.__init_status:
-                raise TypeError(f"{type(self)} is immutable")
-            else:
-                return object.__setattr__(self, k, v)
-        def __delattr__(self, k):
-            if self.__init_status:
-                raise TypeError(f"{type(self)} is immutable")
-            else:
-                return object.__delattr__(self, k)
-        def __init_wrap(self, *args, **kw):
-            # Find the correct __init__ function to run:
-            initfn = next(
-                filter(
-                    None,
-                    (getattr(c, f'_{c.__name__}__init__', None)
-                     for c in type(self).__mro__)),
-                None)
-            if initfn:
-                initfn(self, *args, **kw)
-            # Note that we have now initialized everything.
-            self.__init_status = True
-        def __new__(cls, *args, **kw):
-            self = object.__new__(cls)
-            object.__setattr__(self, '_ImmutableBase__init_status', False)
-            return self
-    def __new__(cls, name, bases, attrs, **kwargs):
-        init_orig = attrs.get('__init__')
-        if init_orig:
-            attrs[f'_{name}__init__'] = init_orig
-        base = ImmutableType.ImmutableBase
-        attrs['__init__'] = base._ImmutableBase__init_wrap
-        if base not in bases:
-            bases = bases + (base,)
-        return type.__new__(cls, name, bases, attrs, **kwargs)
-class Immutable(ImmutableType.ImmutableBase, metaclass=ImmutableType):
-    """A type that becomes immutable immediately after initialization.
-
-    Any class that inherits from ``Immutable`` should implement an ``__init__``
-    method, within which it is allowed to change the attributes of the ``self``
-    object normally. After the ``__init__`` method terminates, the object
-    becomes read-only and can no longer be updated.
-    """
-    __slots__ = ()
+LockType = type(Lock())
 
 
 # ArrayIndex ##################################################################
@@ -232,11 +96,11 @@ class ArrayIndex:
     @docwrap(format='numpy', extraparam='default')
     def find(self, ids: Any, *, ravel: bool = False, **kw: Any) -> Any:
         """Finds and returns the indices of the given identities.
-        
+
         ``index.find(id)`` returns the index, in the original array on which
         ``index`` is based, of the identity ``id``. If ``id`` is not in the
         original array, then a ``KeyError`` is raised.
-        
+
         Parameters
         ----------
         ids : array-like

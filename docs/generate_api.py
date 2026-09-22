@@ -29,7 +29,6 @@ import immlib
 import immlib.math
 import immlib.pathlib
 import immlib.iolib
-import immlib.types
 import immlib.util
 import immlib.workflow
 
@@ -41,7 +40,6 @@ MODULES = [
     ('immlib.workflow', immlib.workflow),
     ('immlib.pathlib', immlib.pathlib),
     ('immlib.iolib', immlib.iolib),
-    ('immlib.types', immlib.types),
     ('immlib.util', immlib.util),
 ]
 

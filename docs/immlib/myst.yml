@@ -48,7 +48,6 @@ project:
         - file: api/immlib-workflow.md
         - file: api/immlib-pathlib.md
         - file: api/immlib-iolib.md
-        - file: api/immlib-types.md
         - file: api/immlib-util.md
 
 site:
