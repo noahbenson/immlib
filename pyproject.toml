@@ -36,15 +36,25 @@ classifiers = [
 dependencies = [
      'pcollections >= 1.0.0rc1',
      'numpy >= 1.24.0',
-     'scipy >= 1.7.0',
+     # The sparse *array* classes (scipy.sparse.csr_array, etc.) that
+     # immlib.util._numeric uses to describe sparse layouts were added in
+     # scipy 1.8.0.
+     'scipy >= 1.8.0',
      # immlib.Quantity subclasses pint.Quantity and overrides some of Pint's
-     # private methods and attributes (see immlib.util._quantity), so an
-     # upper bound is pinned to the minor series it has been tested against;
-     # see the "stability and compatibility" section of the documentation.
-     'pint >= 0.24.0, < 0.25',
+     # private methods and attributes (see immlib.util._quantity), so an upper
+     # bound is kept to the minor series it has been tested against. The test
+     # suite passes against pint 0.24.4, 0.25.3, and 0.26.1 (see the "Pint
+     # contract" tests in immlib.test.util.test_pint); note that pint 0.25+
+     # requires Python 3.11 and pint 0.26+ requires Python 3.12, so a Python
+     # 3.10 install resolves to pint 0.24.x.
+     'pint >= 0.24.0, < 0.27',
      'docshare >= 0.2.0',
      'joblib >= 1.3.0',
-     'cloudpathlib[s3,gs,azure] >= 0.18.0',
+     # immlib reaches into a few cloudpathlib internals (notably the private
+     # Client._local_cache_dir, and the CloudPath._no_prefix helpers), so an
+     # upper bound is kept to the minor series it has been tested against
+     # (0.25.0).
+     'cloudpathlib[s3,gs,azure] >= 0.18.0, < 0.26',
      'pyyaml >= 6.0']
 
 [project.optional-dependencies]

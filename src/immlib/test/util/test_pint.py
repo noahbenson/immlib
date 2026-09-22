@@ -35,14 +35,16 @@ class TestPintContract(TestCase):
         """The installed Pint is within the range immlib declares support for.
 
         Bumping this test is the deliberate act of claiming a new Pint works;
-        the rest of this file is what justifies the claim.
+        the rest of this file is what justifies the claim. Pint 0.25 requires
+        Python 3.11 and Pint 0.26 requires Python 3.12, so an older interpreter
+        simply sees an older Pint here.
         """
         parts = pint.__version__.split('.')
         (major, minor) = (int(parts[0]), int(parts[1]))
-        self.assertEqual(
-            (major, minor), (0, 24),
+        self.assertIn(
+            (major, minor), ((0, 24), (0, 25), (0, 26)),
             f"Pint {pint.__version__} is outside immlib's declared support"
-            f" range (>= 0.24, < 0.25); verify the internals this file checks"
+            f" range (>= 0.24, < 0.27); verify the internals this file checks"
             f" still hold, then update pyproject.toml and this test")
 
     def test_dispatch_methods_exist(self):

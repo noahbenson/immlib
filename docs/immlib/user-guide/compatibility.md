@@ -28,11 +28,11 @@ declaration.
 | ------- | --------- | ----- |
 | `pcollections` | `>= 1.0.0rc1` | The persistent and lazy collections that underlie every immutable data structure in `immlib`. |
 | `numpy` | `>= 1.24.0` | Array magnitudes, and the default numerical backend. |
-| `scipy` | `>= 1.7.0` | Sparse arrays. |
-| `pint` | `>= 0.24.0, < 0.25` | Units. See "Compatibility with Pint" below for why the upper bound is pinned tightly. |
+| `scipy` | `>= 1.8.0` | Sparse arrays. The sparse *array* classes (`csr_array`, etc.) immlib uses appeared in 1.8. |
+| `pint` | `>= 0.24.0, < 0.27` | Units. See "Compatibility with Pint" below. The suite passes against 0.24.4, 0.25.3, and 0.26.1; note that Pint 0.25+ needs Python 3.11 and 0.26+ needs 3.12, so a Python 3.10 install resolves to 0.24.x. |
 | `docshare` | `>= 0.2.0` | Docstring parsing and inheritance, which `immlib` uses to read a `calc`'s inputs and outputs. |
 | `joblib` | `>= 1.3.0` | Filesystem caching (`pathcache`). |
-| `cloudpathlib[s3,gs,azure]` | `>= 0.18.0` | Remote paths (S3, Google Storage, Azure) and the local cache behind them. |
+| `cloudpathlib[s3,gs,azure]` | `>= 0.18.0, < 0.26` | Remote paths (S3, Google Storage, Azure) and the local cache behind them. The upper bound is kept because immlib reads a few of cloudpathlib's private members (notably `Client._local_cache_dir`), and 0.25.0 is the version it is tested against. |
 | `pyyaml` | `>= 6.0` | The `yaml` save/load format. |
 
 ## Optional dependencies
@@ -76,7 +76,7 @@ the `_magnitude`, `_units`, and `_REGISTRY` attributes. None of those is part
 of Pint's public API, so a new Pint release may change them.
 
 Two things guard against that. The dependency declares an upper bound
-(`pint < 0.25`), so a new minor series cannot arrive by accident; and
+(`pint < 0.27`), so a new minor series cannot arrive by accident; and
 `immlib`'s test suite includes a set of *Pint contract* tests
 (`immlib.test.util.test_pint`) that fail, with a message naming the broken
 assumption, if a Pint release changes any internal that `immlib` depends on.

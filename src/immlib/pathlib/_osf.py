@@ -28,6 +28,25 @@ osf_basepath = 'https://api.osf.io/v2/nodes/%s/files/%s/'
 osf_pagesize_format = 'page[size]='
 osf_pagesize_check = 'page%5Bsize%5D='
 osf_pagecache_filename = 'osf_treecache.json'
+def _osf_timestamp(text):
+    """Parses an OSF ISO-8601 timestamp into a POSIX time, or 0 when the
+    timestamp is absent or cannot be parsed.
+
+    OSF timestamps are ISO-8601 and end in ``Z`` (possibly after a fractional
+    second, e.g. ``2020-01-02T03:04:05.000000Z``). Some Python versions'
+    ``datetime.fromisoformat`` reject the trailing ``Z``, so it is stripped
+    and the text is retried before giving up.
+    """
+    if not text:
+        return 0
+    try:
+        return datetime.fromisoformat(str(text)).timestamp()
+    except ValueError:
+        pass
+    try:
+        return datetime.fromisoformat(str(text).rstrip('Zz')).timestamp()
+    except ValueError:
+        return 0
 def _osf_pageload(proj, path,
                   pageno=0,
                   url=None,
@@ -42,14 +61,14 @@ def _osf_pageload(proj, path,
         path = '' if path is None else str(path).lstrip('/')
         cache_path = (cache_root / path) if cache_root else None
         url = (osf_basepath % (proj, storage)) + path
-    if pagesize is not None:
-        if osf_pagesize_format not in url and osf_pagesize_check not in url:
-            if '?page=' in url:
-                url = url + '&' + osf_pagesize_format + str(pagesize)
-            elif osf_pagesize_check not in url:
-                url = url + '?' + osf_pagesize_format + str(pagesize)
-    else:
+    if pagesize is None:
         pagesize = 0
+    elif osf_pagesize_format not in url and osf_pagesize_check not in url:
+        # The page-size marker is added once, if the URL does not already
+        # carry one (an OSF paging link may). '?page=' means there is already
+        # a query string, so the marker joins it with '&'.
+        sep = '&' if '?page=' in url else '?'
+        url = url + sep + osf_pagesize_format + str(pagesize)
     # First step is to load the data url.
     dat = None
     fromcache = False
@@ -62,7 +81,9 @@ def _osf_pageload(proj, path,
                 with cache_flnm.open('rt') as fl:
                     dat = json.load(fl)
                 fromcache = True
-            except Exception:
+            except (OSError, ValueError):
+                # A missing or corrupt cache entry is not fatal; the page is
+                # fetched from the network below as if it were not cached.
                 pass
     if dat is None:
         # We need to load the data from the OSF website.
@@ -116,6 +137,7 @@ def _osf_cache_file(url, path, mkdir_mode=0o775):
         raise RuntimeError(f"url failed to download: {url} -> {path}")
     return path
 def _osf_fileentry(name, json, cache_path=None, mkdir_mode=0o775):
+    """Builds the contents entry for one file from its OSF JSON."""
     if cache_path is None:
         cp = None
     else:
@@ -258,6 +280,12 @@ class OSFClient(Client):
     """Client class for the OSF."""
     @staticmethod
     def _extract_path(contents, path):
+        """Returns the OSF contents entry for `path` within `contents`.
+
+        `contents` is the nested dictionary returned by `osf_contents` (or a
+        subtree of it). Raises ``NotADirectoryError`` when a part of `path`
+        is a file and ``FileNotFoundError`` when it does not exist.
+        """
         path = str(path)
         if path.startswith('osf://'):
             path = path[6:]
@@ -314,11 +342,11 @@ class OSFClient(Client):
     # Several of the abstract methods are non-operational for OSF, because all
     # OSF operations are currently read-only.
     def _move_file(self, src, dst, remove_src=True):
-        raise RuntimeError(f"OSF CloudPath operations are read-only")
+        raise RuntimeError("OSF CloudPath operations are read-only")
     def _remove(self, path, missing_ok=True):
-        raise RuntimeError(f"OSF CloudPath operations are read-only")
+        raise RuntimeError("OSF CloudPath operations are read-only")
     def _upload_file(self, local_path, cloud_path):
-        raise RuntimeError(f"OSF CloudPath operations are read-only")
+        raise RuntimeError("OSF CloudPath operations are read-only")
     # Other abstract methods are valid, however.
     def _download_file(self, cloud_path, local_path, mkdir_mode=0o775):
         if not isinstance(cloud_path, OSFPath):
@@ -365,9 +393,11 @@ class OSFClient(Client):
             raise TypeError("cannot query path that is not an OSFPath")
         return self._extract_path(self.root_contents, cloud_path)
     def _get_public_url(self, cloudpath):
+        """OSF paths have no public (unsigned) URL; this always raises."""
         raise TypeError(
-            f"{type(self)} does not support _generate_public_url")
+            f"{type(self)} does not support _get_public_url")
     def _generate_presigned_url(self, cloudpath, expire_seconds=60*60):
+        """OSF paths have no presigned URL; this always raises."""
         raise TypeError(
             f"{type(self)} does not support _generate_presigned_url")
 
@@ -502,7 +532,6 @@ class OSFPath(CloudPath):
                     mkdir_mode=mkdir_mode,
                     pagesize=pagesize)
         else:
-            self.client = OSFClient()
             raise TypeError("OSFPaths require OSFClient objects as clients")
         self.client = client
         # At this point we have a cloud path and client that are both valid.
@@ -518,19 +547,15 @@ class OSFPath(CloudPath):
     def is_file(self):
         return self.client._path_kind(self) == "file"
     def mkdir(self, parents=False, exist_ok=False):
-        raise TypeError(f"OSF CloudPath operations are read-only")
+        raise TypeError("OSF CloudPath operations are read-only")
     def touch(self, exist_ok: bool = True, mode=None):
-        raise TypeError(f"OSF CloudPath operations are read-only")
+        raise TypeError("OSF CloudPath operations are read-only")
     def stat(self):
         ent = self.client._path_entry(self)
         if ent['kind'] != 'file':
             raise NoStatError(f"No stats available for directory: {self}")
-        mtime = ent.get('date_modified')
-        ctime = ent.get('date_created')
-        mtime = datetime.fromisoformat(mtime).timestamp() if mtime else 0
-        # The [:-1] chops off a character at the end not recognized by the ISO
-        # standard in all versions.
-        ctime = datetime.fromisoformat(ctime[:-1]).timestamp() if ctime else 0
+        mtime = _osf_timestamp(ent.get('date_modified'))
+        ctime = _osf_timestamp(ent.get('date_created'))
         stat = (
             None, # mode
             None, # ino

@@ -19,6 +19,7 @@ import numpy as np
 from ...pathlib import *
 from ...iolib   import *
 from ...util    import is_str
+from ..pathlib._osf_fixture import osf_mock, PROJECT
 
 
 # Whether pandas, which the csv and tsv formats need, is importable. It is not
@@ -86,11 +87,15 @@ class TestIOLibCore(TestCase):
                 d = load(fl, "json")
             self.assertEqual(json_example, d)
     def test_save_cloudpath(self):
-        """Tests that load works with a CloudPath. Requires network access."""
-        with TemporaryDirectory() as tmpdir:
-            p = osfpath("osf://bw9ec", local_cache_dir=tmpdir)
-            lns = load(p / "analysis.m", "text")
-            self.assertEqual(len(lns), 94)
+        """Tests that load works with an OSF CloudPath.
+
+        The OSF project is served from a fixture, so this does not require
+        network access.
+        """
+        with osf_mock(), TemporaryDirectory() as tmpdir:
+            p = osfpath(f"osf://{PROJECT}", local_cache_dir=tmpdir)
+            lns = load(p / "a.txt", "text")
+            self.assertEqual(lns, ["hello world"])
             self.assertTrue(all(is_str(ln) for ln in lns))
 
     # Format ###################################################################
