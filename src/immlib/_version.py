@@ -37,8 +37,8 @@ class Version(VersionTuple):
     package_name : str or None, optional
         If the first argument (``string``) is provided, then this argument is
         ignored; otherwise, the version string is first searched for by this
-        package name using the ``importlib`` or ``importlib_metadata``
-        packages. If found, then this version string is represented in the
+        package name using the ``importlib.metadata`` package. If found, then
+        this version string is represented in the
         ``Version`` object.
     pyproject_path : path-like or None, optional
         If the first argument (``string``) is not given and the
@@ -101,13 +101,10 @@ class Version(VersionTuple):
         if package_name is None and pyproject_path is None:
             raise ValueError("Version.getstring() requires 1 or 2 arguments")
         if package_name is not None:
-            try:
-                from importlib.metadata import version
-                from importlib.metadata import PackageNotFoundError
-            except ModuleNotFoundError:
-                from importlib_metadata import version
-                from importlib_metadata import (  # type: ignore[assignment]
-                    PackageNotFoundError)
+            # immlib requires Python 3.10 or later, so importlib.metadata is
+            # always available (the importlib_metadata backport is not needed).
+            from importlib.metadata import version
+            from importlib.metadata import PackageNotFoundError
             if pyproject_path is None:
                 return version(package_name)
             # Try to deduce the version string but don't raise if this fails.
