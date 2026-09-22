@@ -77,7 +77,7 @@ import builtins
 import operator
 from collections.abc import Sequence
 from numbers import Number
-from typing import TYPE_CHECKING, Any, Union
+from typing import TYPE_CHECKING, Any, Union, cast
 from collections import namedtuple
 
 import numpy as np
@@ -898,7 +898,9 @@ def prod(a: QuantityLike, dim: Any=None, keepdim: bool=False, **kwargs: Any) -> 
         else:
             rmag = torch.prod(m, dim=axis, keepdim=keepdims)
     else:
-        rmag = np.prod(m, axis=axis, keepdims=keepdims)
+        # numpy's stubs type `keepdims` as a Literal, so a run-time `bool`
+        # matches no overload; cast it away (the value is what numpy wants).
+        rmag = np.prod(m, axis=axis, keepdims=cast(Any, keepdims))
     if a.units is None:
         u = None
     else:
