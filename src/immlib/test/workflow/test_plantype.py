@@ -246,3 +246,34 @@ class TestWorkflowPlanType(TestCase):
         self.assertFalse(is_planobject(None))
         self.assertTrue(is_plantype(SimpleObj))
         self.assertFalse(is_plantype(type))
+    def test_inherited_init(self):
+        """A planobject subclass that omits __init__ inherits its base's."""
+        class Base(planobject):
+            def __init__(self, x, b=5):
+                self.x = x
+                self.b = b
+            @calc('y')
+            def calc_y(x, b):
+                return x + b
+        class Sub(Base):
+            @calc('w')
+            def calc_w(y):
+                return y * 2
+        # The base's __init__ -- including its default for `b` -- is inherited,
+        # so `b` need not be supplied when a Sub is created.
+        s = Sub(x=1)
+        self.assertEqual(s.b, 5)
+        self.assertEqual(s.y, 6)
+        self.assertEqual(s.w, 12)
+        # Defining __init__ still wins, and super().__init__ delegates upward.
+        class Sub2(Base):
+            def __init__(self, x, b=100):
+                super().__init__(x, b)
+        self.assertEqual(Sub2(x=1).b, 100)
+        # A class with no inherited initializer still gets the generated one,
+        # which takes every input as an argument.
+        class Plain(planobject):
+            @calc('x')
+            def filter_x(x):
+                return (int(x),)
+        self.assertEqual(Plain(x=3).x, 3)

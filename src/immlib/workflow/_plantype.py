@@ -170,7 +170,18 @@ class plantype(type):
             else:
                 attrs[k] = v
         # (2) We want to save the init function and update it to our version.
-        init = attrs.get('__init__', plantype.planobject_base.__init__)
+        init = attrs.get('__init__')
+        if init is None:
+            # A subclass that does not define __init__ inherits its nearest
+            # base's planobject initializer (whatever that base stored in
+            # __planobject_init__), rather than falling back to the generic
+            # merge-based initializer, which ignores the base's __init__.
+            # Bases are searched in their declared order, which is Python's
+            # own lookup order.
+            init = next(
+                (getattr(b, '__planobject_init__')
+                 for b in bases if hasattr(b, '__planobject_init__')),
+                plantype.planobject_base.__init__)
         attrs['__planobject_init__'] = init
         def _initfn(self, *args, **kwargs):
             return plantype.planobject_base._init_wrapper(
