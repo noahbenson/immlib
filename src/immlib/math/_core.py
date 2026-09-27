@@ -85,7 +85,7 @@ import pint
 import scipy.sparse as sps
 from docshare import docwrap
 
-from ..util._numeric import torch
+from ..util._numeric import torch, to_tensor
 from ..util._core import unitregistry
 from ..util._quantity import (Quantity, quant, mag, alike_units,
                                promote, is_quant)
@@ -2084,3 +2084,343 @@ def dot(a: QuantityLike, b: QuantityLike) -> Quantity:
             f"immlib.math.dot: both arguments must have the same length"
             f" (got {np.shape(ma)[0]} and {np.shape(mb)[0]})")
     return a @ b
+
+
+# Linear algebra ###############################################################
+
+def _linalg_mag(fname, a):
+    """Returns the unit-less magnitude of `a` for a linear-algebra function.
+
+    Like ``exp`` and ``log``, these functions require an argument with no units
+    (``units=None``), because a decomposition or a fit produces several values
+    whose units differ and are not tracked here. Sparse arguments and arguments
+    with fewer than two dimensions are rejected.
+    """
+    a = quant(a)
+    _require_unitless(a, fname)
+    m = a.m
+    if sps.issparse(m):
+        raise _sparse_dense_error(fname)
+    if np.ndim(m) < 2:
+        raise ValueError(
+            f"immlib.math.{fname}: the argument must have at least 2"
+            f" dimensions (got {np.ndim(m)})")
+    return m
+
+def _linalg_tol(m, atol, rtol):
+    """Returns ``(atol, rtol)`` with PyTorch's defaults filled in.
+
+    PyTorch's ``pinv`` and ``matrix_rank`` default to ``atol=0`` and
+    ``rtol = eps * max(m, n)`` (``eps`` being the dtype's machine epsilon).
+    Filling them in here and applying the same rule to both backends is what
+    keeps an array and a tensor in agreement.
+    """
+    (rows, cols) = (m.shape[-2], m.shape[-1])
+    if torch.is_tensor(m):
+        eps = float(torch.finfo(m.dtype).eps)
+    else:
+        eps = float(np.finfo(m.dtype).eps)
+    if atol is None:
+        atol = 0.0
+    if rtol is None:
+        rtol = eps * builtins.max(rows, cols)
+    return (atol, rtol)
+
+
+@docwrap(format='numpy', inheritparams=_doc_params)
+def movedim(a, source, destination):
+    """Returns `a` with the dimensions `source` moved to `destination`, keeping
+    its units.
+
+    This is ``torch.movedim``; ``numpy.moveaxis`` is the same operation under
+    another name, so ``moveaxis`` is an alias of this function.
+
+    Parameters
+    ----------
+    source : int or sequence of int
+        The dimension or dimensions to move. Negative dimensions count from
+        the end.
+    destination : int or sequence of int
+        The position or positions to move them to; it must have the same
+        number of elements as `source`.
+
+    Returns
+    -------
+    immlib.Quantity
+        `a` with the given dimensions moved to the given positions, with the
+        same units as `a`.
+    """
+    a = quant(a)
+    m = a.m
+    if sps.issparse(m):
+        raise _sparse_dense_error('movedim')
+    if torch.is_tensor(m):
+        rmag = torch.movedim(m, source, destination)
+    else:
+        rmag = np.moveaxis(m, source, destination)
+    return quant(rmag, a.units)
+moveaxis = movedim
+
+
+@docwrap(format='numpy', inheritparams=_doc_params)
+def svd(a, full_matrices=True, *, driver=None):
+    """Returns the singular value decomposition of `a`.
+
+    The result is the triple ``(U, S, Vh)`` that ``torch.linalg.svd`` returns
+    (and that ``numpy.linalg.svd`` returns as well), so that ``a`` is ``U @
+    diag(S) @ Vh`` up to the trailing dimensions when `full_matrices` is
+    ``False``. The argument must be unit-less, and the result is returned as
+    plain arrays or tensors rather than quantities, since its parts have
+    different units.
+
+    Parameters
+    ----------
+    full_matrices : bool, optional
+        Whether to return the full ``(m, m)`` and ``(n, n)`` unitary matrices
+        (``True``, the default) or only the leading ``min(m, n)`` columns of
+        each (``False``).
+    driver : str or None, optional
+        The LAPACK driver to use, as ``torch.linalg.svd`` accepts it. NumPy's
+        SVD has no driver, so giving one with an array argument is an error.
+
+    Returns
+    -------
+    U : array or tensor
+        The left singular vectors.
+    S : array or tensor
+        The singular values, in descending order.
+    Vh : array or tensor
+        The right singular vectors, already transposed (and conjugated).
+    """
+    m = _linalg_mag('svd', a)
+    if torch.is_tensor(m):
+        return tuple(torch.linalg.svd(m, full_matrices=full_matrices,
+                                      driver=driver))
+    if driver is not None:
+        raise TypeError(
+            "immlib.math.svd: the 'driver' option is only supported for"
+            " tensors; numpy.linalg.svd has no driver")
+    return tuple(np.linalg.svd(m, full_matrices=full_matrices))
+
+
+@docwrap(format='numpy', inheritparams=_doc_params)
+def pinv(a, *, atol=None, rtol=None, hermitian=False):
+    """Returns the pseudo-inverse of `a`.
+
+    This is ``torch.linalg.pinv``, with its default tolerance rule
+    (``atol=0`` and ``rtol = eps * max(m, n)``) reproduced for both backends,
+    so that an array and a tensor give the same result. A singular value (or,
+    for a Hermitian argument, an eigenvalue) at or below the cutoff ``atol +
+    rtol * S.max()`` is treated as zero. The argument must be unit-less, and
+    the result is a plain array or tensor.
+
+    Parameters
+    ----------
+    atol : float or None, optional
+        The absolute tolerance. The default, ``None``, is ``0``.
+    rtol : float or None, optional
+        The relative tolerance. The default, ``None``, is ``eps * max(m, n)``,
+        where ``eps`` is the dtype's machine epsilon.
+    hermitian : bool, optional
+        Whether `a` is assumed Hermitian (or symmetric), which allows a
+        faster eigendecomposition-based path. The default is ``False``.
+
+    Returns
+    -------
+    array or tensor
+        The pseudo-inverse of `a`.
+    """
+    m = _linalg_mag('pinv', a)
+    (atol, rtol) = _linalg_tol(m, atol, rtol)
+    if torch.is_tensor(m):
+        return torch.linalg.pinv(m, atol=atol, rtol=rtol, hermitian=hermitian)
+    if hermitian:
+        (w, V) = np.linalg.eigh(m)
+        aw = np.abs(w)
+        keep = aw > (atol + rtol * aw[..., -1:])
+        winv = np.where(keep, 1.0 / np.where(keep, w, 1.0), 0.0)
+        Vh = np.swapaxes(V, -1, -2).conj()
+        return V @ (winv[..., :, None] * Vh)
+    (U, S, Vh) = np.linalg.svd(m, full_matrices=False)
+    keep = S > (atol + rtol * S[..., :1])
+    Sinv = np.where(keep, 1.0 / np.where(keep, S, 1.0), 0.0)
+    Uh = np.swapaxes(U, -1, -2).conj()
+    return np.swapaxes(Vh, -1, -2).conj() @ (Sinv[..., :, None] * Uh)
+
+
+@docwrap(format='numpy', inheritparams=_doc_params)
+def matrix_rank(a, *, atol=None, rtol=None, hermitian=False):
+    """Returns the rank of `a`.
+
+    This is ``torch.linalg.matrix_rank``, with its default tolerance rule
+    (``atol=0`` and ``rtol = eps * max(m, n)``) reproduced for both backends,
+    so that an array and a tensor give the same result: the rank is the number
+    of singular values (or, for a Hermitian argument, eigenvalues) larger than
+    ``atol + rtol * S.max()``. The argument must be unit-less, and the result
+    is a plain integer array or tensor.
+
+    Parameters
+    ----------
+    atol : float or None, optional
+        The absolute tolerance. The default, ``None``, is ``0``.
+    rtol : float or None, optional
+        The relative tolerance. The default, ``None``, is ``eps * max(m, n)``,
+        where ``eps`` is the dtype's machine epsilon.
+    hermitian : bool, optional
+        Whether `a` is assumed Hermitian (or symmetric), which allows a
+        faster eigendecomposition-based path. The default is ``False``.
+
+    Returns
+    -------
+    array or tensor of int
+        The rank of `a`.
+    """
+    m = _linalg_mag('matrix_rank', a)
+    (atol, rtol) = _linalg_tol(m, atol, rtol)
+    if torch.is_tensor(m):
+        return torch.linalg.matrix_rank(m, atol=atol, rtol=rtol,
+                                        hermitian=hermitian)
+    if hermitian:
+        s = np.abs(np.linalg.eigvalsh(m))
+        smax = s[..., -1:]
+    else:
+        s = np.linalg.svd(m, compute_uv=False)
+        smax = s[..., :1]
+    return (s > (atol + rtol * smax)).sum(axis=-1)
+
+
+@docwrap(format='numpy')
+def einsum(equation, *operands):
+    """Evaluates an Einstein-summation expression over unit-less operands.
+
+    This is ``torch.einsum`` (and ``numpy.einsum`` for array operands),
+    following ``immlib.math``'s backend rule: if any operand is a tensor then
+    all of them are treated as tensors, and otherwise they are treated as
+    arrays. Every operand must be unit-less -- the units of an arbitrary
+    contraction are not computed here -- and the result is a plain array or
+    tensor.
+
+    Parameters
+    ----------
+    equation : str
+        The summation expression, in either library's notation.
+    operands
+        The operands of the expression.
+
+    Returns
+    -------
+    array or tensor
+        The result of the contraction.
+    """
+    mags = []
+    for op in operands:
+        q = quant(op)
+        _require_unitless(q, 'einsum')
+        mags.append(q.m)
+    if builtins.any(sps.issparse(x) for x in mags):
+        raise _sparse_dense_error('einsum')
+    if builtins.any(torch.is_tensor(x) for x in mags):
+        # As in matmul, a non-tensor operand is promoted onto the first
+        # tensor's device *and* dtype: torch.einsum, unlike NumPy, requires
+        # its operands to share an exact dtype.
+        first = next(x for x in mags if torch.is_tensor(x))
+        ops = [
+            x if torch.is_tensor(x)
+            else to_tensor(x, dtype=first.dtype, device=first.device)
+            for x in mags]
+        return torch.einsum(equation, *ops)
+    return np.einsum(equation, *mags)
+
+
+def _np_lstsq(m, mb, rcond):
+    """Returns ``(solution, rank, singular_values)`` for a possibly batched
+    two-dimensional least-squares system.
+
+    ``numpy.linalg.lstsq`` handles only 2-D systems, so batched inputs are
+    solved one slice at a time and the results stacked.
+    """
+    if m.ndim == 2:
+        (sol, _res, rank, sv) = np.linalg.lstsq(m, mb, rcond=rcond)
+        return (sol, np.array(rank), sv)
+    batch = np.broadcast_shapes(m.shape[:-2], mb.shape[:-2])
+    ms = np.broadcast_to(m, batch + m.shape[-2:])
+    bs = np.broadcast_to(mb, batch + mb.shape[-2:])
+    sols, ranks, svs = [], [], []
+    for idx in np.ndindex(batch):
+        (sol, _res, rank, sv) = np.linalg.lstsq(ms[idx], bs[idx], rcond=rcond)
+        sols.append(sol)
+        ranks.append(rank)
+        svs.append(sv)
+    return (np.stack(sols), np.array(ranks), np.stack(svs))
+
+
+@docwrap(format='numpy', inheritparams=_doc_params)
+def lstsq(a, b, rcond=None, *, driver=None):
+    """Returns the least-squares solution to ``a @ x = b``.
+
+    This is ``torch.linalg.lstsq``, and the result is its 4-tuple
+    ``(solution, residuals, rank, singular_values)``. Which of the parts are
+    computed follows PyTorch's conventions for both backends: `residuals` is
+    empty unless a driver that computes it is given (``'gels'``, ``'gelsd'`` or
+    ``'gelss'``) *and* the system is overdetermined; `rank` is empty for
+    ``'gels'`` (which does not compute it); and `singular_values` is present
+    only for ``'gelsd'`` and ``'gelss'``. An empty part is a 1-dimensional empty
+    array or tensor, as it is in PyTorch. Both arguments must be unit-less, and
+    the results are plain arrays or tensors.
+
+    Parameters
+    ----------
+    rcond : float or None, optional
+        The cutoff for small singular values, as both libraries accept it. The
+        default, ``None``, uses the dtype's machine epsilon times ``max(m, n)``.
+    driver : str or None, optional
+        The LAPACK driver to use: ``'gels'``, ``'gelsy'``, ``'gelsd'`` or
+        ``'gelss'``. The default, ``None``, leaves the choice to the backend
+        (``'gelsy'`` on CPU PyTorch). NumPy has no driver, so for an array this
+        option selects which parts of the result are returned rather than how
+        the solve is done.
+
+    Returns
+    -------
+    solution : array or tensor
+        The least-squares solution ``x``, of shape ``(..., n, k)``.
+    residuals : array or tensor
+        The sum of squared residuals for each right-hand side, of shape
+        ``(..., k)``, or an empty array when they are not computed.
+    rank : array or tensor of int
+        The rank of `a`, or an empty array when it is not computed.
+    singular_values : array or tensor
+        The singular values of `a`, or an empty array when they are not
+        computed.
+    """
+    ma = _linalg_mag('lstsq', a)
+    mb = _linalg_mag('lstsq', b)
+    drivers = (None, 'gels', 'gelsy', 'gelsd', 'gelss')
+    if driver not in drivers:
+        raise ValueError(
+            f"immlib.math.lstsq: unrecognized driver {driver!r}; expected one"
+            f" of {tuple(d for d in drivers if d is not None)}")
+    if torch.is_tensor(ma) or torch.is_tensor(mb):
+        if torch.is_tensor(ma) and torch.is_tensor(mb):
+            pass
+        else:
+            first = ma if torch.is_tensor(ma) else mb
+            ma = (ma if torch.is_tensor(ma)
+                  else to_tensor(ma, dtype=first.dtype, device=first.device))
+            mb = (mb if torch.is_tensor(mb)
+                  else to_tensor(mb, dtype=first.dtype, device=first.device))
+        r = torch.linalg.lstsq(ma, mb, rcond=rcond, driver=driver)
+        return (r.solution, r.residuals, r.rank, r.singular_values)
+    # NumPy: solve (2-D only, batched by _np_lstsq) and then reproduce which
+    # parts torch's driver computes exactly, with the same empty shapes.
+    (rows, cols) = (ma.shape[-2], ma.shape[-1])
+    (sol, rank, sv) = _np_lstsq(ma, mb, rcond)
+    if driver in ('gels', 'gelsd', 'gelss') and rows > cols:
+        residuals = np.sum((ma @ sol - mb) ** 2, axis=-2)
+    else:
+        residuals = np.zeros(0)
+    if driver == 'gels':
+        rank = np.zeros(0)
+    if driver not in ('gelsd', 'gelss'):
+        sv = np.zeros(0)
+    return (sol, residuals, rank, sv)

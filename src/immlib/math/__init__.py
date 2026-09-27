@@ -145,7 +145,14 @@ from ._core import (
     isfinite,
     clamp,
     clip,
-    pad)
+    pad,
+    movedim,
+    moveaxis,
+    svd,
+    pinv,
+    matrix_rank,
+    einsum,
+    lstsq)
 
 __all__ = (
     "quant",
@@ -263,4 +270,11 @@ __all__ = (
     "isfinite",
     "clamp",
     "clip",
-    "pad")
+    "pad",
+    "movedim",
+    "moveaxis",
+    "svd",
+    "pinv",
+    "matrix_rank",
+    "einsum",
+    "lstsq")

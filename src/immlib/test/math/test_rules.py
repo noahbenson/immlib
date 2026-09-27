@@ -141,6 +141,10 @@ UNARY_CALLS = [
     ('split', ([1, 2], 1), {}, 'mm'),
     ('chunk', (2, 1), {}, 'mm'),
     ('chunk', (3, 1), {}, 'mm'),
+    # Rearrangement and linear algebra.
+    ('movedim', (0, 1), {}, 'mm'),
+    ('pinv', (), {}, None),
+    ('matrix_rank', (), {}, None),
 ]
 
 # Calls whose second argument is a quantity of the same kind as the first,
@@ -477,14 +481,23 @@ class TestRules(TestCase):
         covered |= {'quant', 'ilquant', 'quantwrap', 'quant_spec',
                     'is_quantspec', 'like_quant', 'mag', 'promote',
                     'to_array', 'to_tensor', 'matmul', 'where', 'min_result',
-                    'max_result', 'sort_result', 'median_result'}
+                    'max_result', 'sort_result', 'median_result',
+                    # svd's singular *vectors* are only defined up to a sign,
+                    # which the two backends choose independently, so it is
+                    # compared by its singular values and by reconstruction in
+                    # test_math.test_linalg instead of elementwise here; einsum
+                    # takes several operands and is tested in
+                    # test_math.test_einsum, and lstsq takes two operands and
+                    # is tested in test_math.test_lstsq.
+                    'svd', 'einsum', 'lstsq'}
         # Aliases of a covered function are covered by it.
         aliases = {'swapaxes': 'transpose', 'swapdims': 'transpose',
                    'acos': 'arccos', 'atan': 'arctan', 'atan2': 'arctan2',
                    'arcsin': 'asin', 'ne': 'not_equal',
                    'lt': 'less', 'le': 'less_equal', 'gt': 'greater',
                    'ge': 'greater_equal', 'absolute': 'abs',
-                   'acos': 'arccos', 'clip': 'clamp'}
+                   'acos': 'arccos', 'clip': 'clamp',
+                   'moveaxis': 'movedim'}
         missing = []
         for name in im.__all__:
             if name in covered or aliases.get(name) in covered:

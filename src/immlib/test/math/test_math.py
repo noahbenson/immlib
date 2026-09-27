@@ -695,3 +695,156 @@ class TestMath(TestCase):
             [len(p) for p in np.split(np.arange(10.0), [4, 8])])
         with self.assertRaises(ValueError):
             im.chunk(a, 0)
+
+
+    # Rearrangement and linear algebra ########################################
+    def test_movedim(self):
+        import immlib as il
+        import immlib.math as im
+        import numpy as np
+        import torch
+        import scipy.sparse as sps
+        a = il.quant(np.arange(6.0).reshape(2, 3), 'm')
+        r = im.movedim(a, 0, 1)
+        self.assertTrue(np.array_equal(r.m, np.moveaxis(a.m, 0, 1)))
+        self.assertEqual(str(r.units), 'meter')
+        # moveaxis is an alias of movedim, as numpy spells it.
+        self.assertIs(im.moveaxis, im.movedim)
+        # Negative dimensions and sequences of dimensions are accepted.
+        self.assertTrue(
+            np.array_equal(im.movedim(a, -1, 0).m, np.moveaxis(a.m, -1, 0)))
+        # A tensor argument keeps its backend.
+        t = il.quant(torch.arange(6.0).reshape(2, 3), 'm')
+        self.assertIsInstance(im.movedim(t, 0, 1).m, torch.Tensor)
+        # Sparse arguments are not supported.
+        with self.assertRaises(TypeError):
+            im.movedim(il.quant(sps.csr_matrix(np.eye(3)), None), 0, 1)
+
+    def test_linalg(self):
+        import immlib as il
+        import immlib.math as im
+        import numpy as np
+        import torch
+        import pint
+        import scipy.sparse as sps
+        A = np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
+        # svd: reconstruction, shapes, and the full/false forms.
+        (U, S, Vh) = im.svd(A)
+        self.assertTrue(np.allclose(U[:, :len(S)] @ np.diag(S) @ Vh, A))
+        self.assertEqual((U.shape, Vh.shape), ((3, 3), (2, 2)))
+        (U, S, Vh) = im.svd(A, full_matrices=False)
+        self.assertTrue(np.allclose(U @ np.diag(S) @ Vh, A))
+        self.assertEqual(U.shape, (3, 2))
+        with self.assertRaises(TypeError):
+            im.svd(A, driver='gesvd')       # driver is a tensor-only option
+        # The results are plain arrays/tensors, not quantities.
+        self.assertFalse(isinstance(U, pint.Quantity))
+        # pinv agrees with each library's own and is sign-independent.
+        self.assertTrue(np.allclose(im.pinv(A), np.linalg.pinv(A, rcond=None)))
+        self.assertTrue(
+            torch.allclose(im.pinv(torch.tensor(A)),
+                           torch.linalg.pinv(torch.tensor(A))))
+        # matrix_rank counts tolerance-small singular values as zero.
+        D = np.array([[1.0, 2.0, 3.0], [2.0, 4.0, 6.0], [3.0, 6.0, 9.0]])
+        self.assertEqual(int(im.matrix_rank(D)), 1)
+        self.assertEqual(int(im.matrix_rank(torch.tensor(D))), 1)
+        self.assertFalse(isinstance(im.matrix_rank(D), pint.Quantity))
+        self.assertEqual(int(im.matrix_rank(D, rtol=2.0)), 0)
+        self.assertEqual(int(im.matrix_rank(D, hermitian=True)), 1)
+        # Batched arguments work.
+        Ab = np.stack([A, 2.0 * A])
+        (Ub, Sb, Vhb) = im.svd(Ab, full_matrices=False)
+        self.assertEqual((Ub.shape, Sb.shape, Vhb.shape),
+                         ((2, 3, 2), (2, 2), (2, 2, 2)))
+        self.assertEqual(im.pinv(Ab).shape, (2, 2, 3))
+        self.assertTrue(np.array_equal(im.matrix_rank(Ab), [2, 2]))
+        # The argument must be unit-less, at least 2-dimensional, and dense.
+        with self.assertRaises(TypeError):
+            im.svd(il.quant(A, 'm'))
+        with self.assertRaises(ValueError):
+            im.pinv(np.array([1.0, 2.0, 3.0]))
+        with self.assertRaises(TypeError):
+            im.matrix_rank(il.quant(sps.csr_matrix(np.eye(3)), None))
+        # Tensor arguments keep their gradient tracking.
+        Tg = torch.tensor(A, requires_grad=True)
+        im.svd(Tg, full_matrices=False)[1].sum().backward()
+        self.assertIsNotNone(Tg.grad)
+        Tg = torch.tensor(A, requires_grad=True)
+        im.pinv(Tg).sum().backward()
+        self.assertIsNotNone(Tg.grad)
+
+    def test_einsum(self):
+        import immlib as il
+        import immlib.math as im
+        import numpy as np
+        import torch
+        a = np.arange(6.0).reshape(2, 3)
+        b = np.arange(6.0).reshape(3, 2)
+        self.assertTrue(np.allclose(im.einsum('ij,jk->ik', a, b), a @ b))
+        # The backend follows the arguments, as elsewhere in immlib.math.
+        r = im.einsum('ij,jk->ik', a, torch.tensor(b))
+        self.assertIsInstance(r, torch.Tensor)
+        self.assertTrue(torch.allclose(r, torch.tensor(a @ b)))
+        # All-array operands give an array, even as quantities.
+        r = im.einsum('ij,jk->ik', il.quant(a), il.quant(b))
+        self.assertIsInstance(r, np.ndarray)
+        # Every operand must be unit-less.
+        with self.assertRaises(TypeError):
+            im.einsum('i->', il.quant(a, 'm'))
+        # A tensor argument keeps its gradient tracking.
+        Tg = torch.tensor(a, requires_grad=True)
+        im.einsum('ij->j', Tg).sum().backward()
+        self.assertIsNotNone(Tg.grad)
+
+
+    def test_lstsq(self):
+        import immlib as il
+        import immlib.math as im
+        import numpy as np
+        import torch
+        A = np.array([[1.0, 1.0], [1.0, 2.0], [1.0, 3.0]])
+        B = np.array([[1.0], [2.0], [2.0]])
+        nx = np.linalg.lstsq(A, B, rcond=None)[0]
+        # By torch's conventions, the default returns the solution and the
+        # rank but empty residuals and singular values.
+        (x, res, rank, sv) = im.lstsq(A, B)
+        self.assertTrue(np.allclose(x, nx))
+        self.assertEqual(res.shape, (0,))
+        self.assertEqual(sv.shape, (0,))
+        self.assertEqual(np.ndim(rank), 0)
+        self.assertEqual(int(rank), 2)
+        # A residual-computing driver fills in residuals and singular values.
+        (x, res, rank, sv) = im.lstsq(A, B, driver='gelsd')
+        self.assertTrue(np.allclose(x, nx))
+        self.assertEqual(res.shape, (1,))
+        self.assertEqual(sv.shape, (2,))
+        self.assertEqual(int(rank), 2)
+        # 'gels' computes residuals but neither rank nor singular values.
+        (x, res, rank, sv) = im.lstsq(A, B, driver='gels')
+        self.assertEqual(res.shape, (1,))
+        self.assertEqual(rank.shape, (0,))
+        self.assertEqual(sv.shape, (0,))
+        # Tensors agree with arrays, part for part.
+        (xt, rest, rankt, svt) = im.lstsq(torch.tensor(A), torch.tensor(B),
+                                          driver='gelsd')
+        self.assertTrue(torch.allclose(xt, torch.tensor(x)))
+        self.assertEqual(tuple(rest.shape), (1,))
+        self.assertEqual(tuple(svt.shape), (2,))
+        # Batched systems work for both backends.
+        Ab = np.stack([A, 2.0 * A])
+        Bb = np.stack([B, B])
+        (xb, resb, rankb, svb) = im.lstsq(Ab, Bb, driver='gelsd')
+        self.assertEqual((xb.shape, resb.shape, rankb.shape, svb.shape),
+                         ((2, 2, 1), (2, 1), (2,), (2, 2)))
+        # Both arguments must be unit-less, and the driver is validated.
+        with self.assertRaises(TypeError):
+            im.lstsq(il.quant(A, 'm'), B)
+        with self.assertRaises(TypeError):
+            im.lstsq(A, il.quant(B, 'm'))
+        with self.assertRaises(ValueError):
+            im.lstsq(A, B, driver='bogus')
+        # A gradient computed through lstsq reaches the right-hand side.
+        Bt = torch.tensor(B, requires_grad=True)
+        (xt, _, _, _) = im.lstsq(torch.tensor(A), Bt)
+        xt.sum().backward()
+        self.assertIsNotNone(Bt.grad)
