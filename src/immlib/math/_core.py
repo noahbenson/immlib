@@ -2614,9 +2614,10 @@ def rand_like(a, dtype=None):
     if torch.is_tensor(m):
         rmag = torch.rand_like(m, dtype=dtype)
     else:
-        rmag = np.random.random(m.shape)
-        if dtype is not None:
-            rmag = rmag.astype(dtype)
+        if dtype is None:
+            dtype = (m.dtype if np.issubdtype(m.dtype, np.floating)
+                     else np.float64)
+        rmag = np.random.random(m.shape).astype(dtype)
     return quant(rmag, a.units)
 
 
@@ -2643,9 +2644,10 @@ def randn_like(a, dtype=None):
     if torch.is_tensor(m):
         rmag = torch.randn_like(m, dtype=dtype)
     else:
-        rmag = np.random.randn(*m.shape)
-        if dtype is not None:
-            rmag = rmag.astype(dtype)
+        if dtype is None:
+            dtype = (m.dtype if np.issubdtype(m.dtype, np.floating)
+                     else np.float64)
+        rmag = np.random.randn(*m.shape).astype(dtype)
     return quant(rmag, a.units)
 
 
@@ -2663,8 +2665,9 @@ def randint_like(a, low, high, dtype=None):
     high : int
         The highest value to draw (exclusive).
     dtype : dtype-like or None, optional
-        The dtype of the result. The default, ``None``, follows `a` for a
-        tensor and is the platform's default integer for an array.
+        The dtype of the result. The default, ``None``, follows `a` when its
+        dtype is an integer and is ``int64`` otherwise (as
+        ``torch.randint_like`` does).
 
     Returns
     -------
@@ -2675,8 +2678,10 @@ def randint_like(a, low, high, dtype=None):
     if torch.is_tensor(m):
         rmag = torch.randint_like(m, low, high, dtype=dtype)
     else:
-        kw = {} if dtype is None else {'dtype': dtype}
-        rmag = np.random.randint(low, high, size=m.shape, **kw)
+        if dtype is None:
+            dtype = (m.dtype if np.issubdtype(m.dtype, np.integer)
+                     else np.int64)
+        rmag = np.random.randint(low, high, size=m.shape, dtype=dtype)
     return quant(rmag, a.units)
 
 

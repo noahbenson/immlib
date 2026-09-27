@@ -908,8 +908,16 @@ class TestMath(TestCase):
         self.assertTrue(np.array_equal(r1.m, r2.m))
         self.assertTrue(np.all(r1.m >= 0.0) and np.all(r1.m < 1.0))
         np.random.seed(7)
+        # A floating example gets int64 (as torch.randint_like gives), not the
+        # platform's default integer, which is int32 on Windows.
         self.assertEqual(im.randint_like(a, 0, 10).m.dtype, np.dtype('int64'))
         self.assertTrue(np.all(im.randint_like(a, 0, 3).m < 3))
+        # An integer example keeps its own dtype, and rand_like follows a
+        # floating example's dtype (both as the torch functions do).
+        i32 = il.quant(np.zeros(3, dtype=np.int32), 'm')
+        self.assertEqual(im.randint_like(i32, 0, 5).m.dtype, np.dtype('int32'))
+        f32 = il.quant(np.zeros(3, dtype=np.float32), 'm')
+        self.assertEqual(im.rand_like(f32).m.dtype, np.dtype('float32'))
         # The tensor path uses torch's allocators and is seedable with
         # torch.manual_seed.
         t = il.quant(torch.zeros(2, 3), 'm')
