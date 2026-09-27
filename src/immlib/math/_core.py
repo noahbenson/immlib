@@ -13,16 +13,26 @@ principles are, in short:
   * the backend (NumPy or PyTorch) is selected per call: any tensor magnitude
     among the arguments selects PyTorch, otherwise NumPy is used;
   * every function returns an ``immlib.Quantity``, *except* a function whose
-    natural result is a boolean or index array/tensor (the comparisons,
-    ``any``, and ``all``), which instead returns a plain NumPy array or
+    natural result is a boolean or an index/count (the comparisons,
+    ``any``/``all``, the boolean predicates, ``allclose``/``isclose``, and the
+    index and count functions), which instead returns a plain NumPy array or
     PyTorch tensor, matching ordinary NumPy/PyTorch ergonomics for masks and
-    indexing;
+    indexing -- and except the linear-algebra factorizations (``svd``,
+    ``pinv``, ``matrix_rank``, ``lstsq``) and ``einsum``, whose parts have
+    different units and which therefore require a unit-less input and return
+    plain arrays or tensors;
   * units are computed directly from each function's mathematical meaning
     (unit-preserving, unitless-required, exponentiated, etc.)--not by
     delegating a whole ``Quantity`` to ``np.foo``/``torch.foo`` dispatch,
     since Pint's own NumPy dispatch machinery does not understand immlib's
     ``None`` ("no units", as opposed to Pint's real ``dimensionless``) unit
     convention and fails outright for it;
+  * the allocation functions that take an argument as their example
+    (``zeros_like``, ``ones_like``, ``full_like``, ``empty_like`` and the
+    random allocators) derive the backend, and a tensor's device, from that
+    example and keep its units; ``empty_like``'s contents are undefined, and
+    the random allocators exist only in PyTorch, so an array example is filled
+    with ``numpy.random`` (the two backends are seeded separately);
 
 and, governing every function here and every method of ``immlib.Quantity``,
 two rules:

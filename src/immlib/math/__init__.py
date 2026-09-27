@@ -6,9 +6,10 @@
 
 ``immlib.math`` provides a small, intentionally common subset of
 NumPy/PyTorch functionality (elementwise arithmetic, comparisons, elementary
-functions, reductions, shape/combination operations, and matrix
-multiplication) that operates uniformly on ``immlib.Quantity`` objects, plain
-NumPy arrays, plain PyTorch tensors, and plain Python numbers.
+functions, reductions, shape/combination operations, allocation, linear
+algebra, counting and tolerance predicates, and matrix multiplication) that
+operates uniformly on ``immlib.Quantity`` objects, plain NumPy arrays, plain
+PyTorch tensors, and plain Python numbers.
 
 For convenience, ``immlib.math`` also provides ``quant``, ``ilquant``,
 ``quantwrap``,
@@ -18,10 +19,15 @@ only ``import immlib.math as im``; see also ``immlib.Quantity.as_input_type``.
 
 For any call, the backend is selected automatically: if any argument's
 magnitude is a PyTorch tensor, PyTorch is used; otherwise NumPy is used. Every
-function returns an ``immlib.Quantity``, except for the comparisons and the
-``any``/``all`` reductions, which return a plain boolean NumPy array or
-PyTorch tensor (matching ordinary NumPy/PyTorch ergonomics for masks and
-indexing) rather than a unit-less ``Quantity``.
+function returns an ``immlib.Quantity``, except where a plain array or tensor
+is more useful: the comparisons (and ``allclose``/``isclose``), ``any``/
+``all``, and the other boolean predicates (``isnan``/``isinf``/``isfinite``)
+return a plain bool; the index and count functions (``nonzero``, ``argmin``,
+``argmax``, ``argsort``, ``searchsorted``, ``count_nonzero``) return plain
+integers; and the linear-algebra factorizations (``svd``, ``pinv``,
+``matrix_rank``, ``lstsq``) and ``einsum`` return plain arrays or tensors,
+since their parts have different units -- those functions require a unit-less
+(``units=None``) argument, as ``exp`` and ``log`` do.
 
 See the ``immlib.math._core`` module docstring for the full set of governing
 design principles.

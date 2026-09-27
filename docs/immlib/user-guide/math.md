@@ -77,19 +77,28 @@ A few rules apply consistently across every function in this module:
   magnitude is a PyTorch tensor, the PyTorch backend is used; otherwise the
   NumPy backend is used. A plain (non-quantity) tensor or array argument
   works the same way as a quantity whose magnitude is a tensor or array.
-* **Every function returns an `immlib.Quantity`**, with one exception: a
-  function whose natural result is a boolean array (the comparisons `equal`,
-  `not_equal`, `less`, `less_equal`, `greater`, `greater_equal`, and the
-  reductions `any`/`all`) returns a plain NumPy array or PyTorch tensor of
-  `bool` instead--matching ordinary NumPy/PyTorch ergonomics for masks and
-  indexing, rather than forcing every mask to be unwrapped before use.
+* **Every function returns an `immlib.Quantity`**, except where a plain array
+  or tensor is more useful. A function whose natural result is a boolean array
+  (the comparisons `equal`, `not_equal`, `less`, `less_equal`, `greater`,
+  `greater_equal`, `allclose`/`isclose`, and the reductions `any`/`all` and
+  predicates `isnan`/`isinf`/`isfinite`) returns a plain NumPy array or
+  PyTorch tensor of `bool`--matching ordinary NumPy/PyTorch ergonomics for
+  masks and indexing, rather than forcing every mask to be unwrapped before
+  use. A function whose result is an index or a count (`nonzero`, `argmin`,
+  `argmax`, `argsort`, `searchsorted`, `count_nonzero`) returns plain
+  integers, and the linear-algebra factorizations (`svd`, `pinv`,
+  `matrix_rank`, `lstsq`) and `einsum` return plain arrays or tensors, since
+  their parts carry different units (those functions require a unit-less
+  input, as `exp` and `log` do).
 * **Units are computed from each function's mathematical meaning**, not by
   delegating a whole `Quantity` to `np.foo`/`torch.foo`'s own dispatch.
   Functions like `add` and `multiply` preserve or combine units the way `+`
   and `*` already do; `sqrt` raises the unit to the 1/2 power; `var` squares
   it; functions like `exp`, `log`, and `sin` require a unit-less
   (`units=None`) input and raise a `TypeError` otherwise, since "the sine of
-  3 meters" isn't a meaningful physical quantity.
+  3 meters" isn't a meaningful physical quantity. The linear-algebra
+  factorizations and `einsum` require a unit-less input for the same reason,
+  and the allocation functions keep the units of the example they are given.
 * **The two backends must agree (Rule 1).** A function gives equal results
   for an array and a tensor that are equal; only the type of the result
   differs, following the type of the input. Where the two libraries
@@ -118,12 +127,12 @@ A few rules apply consistently across every function in this module:
   would be dense (`exp`, `log`, `log10`, `cos`, `arccos`, `where`) raises a
   `TypeError` rather than silently allocating a dense array; convert the
   input with `il.to_dense` first if that is what you want.
-* **A function whose NumPy and PyTorch semantics differ too materially to
-  unify is simply not provided.** `numpy.dot`, for example, behaves like
-  broadcasting matrix multiplication for 2-D-and-higher input, while
-  `torch.dot` is restricted to a 1-D inner product; rather than picking one
-  behavior and surprising callers expecting the other, `immlib.math` has no
-  `dot` function at all--use `immlib.math.matmul` (or `@`) instead.
+* **A function with nothing to take its backend from is simply not
+  provided.** `numpy.zeros(shape)` and `torch.zeros(shape)` would have to name
+  a backend, so `immlib.math` has no `zeros`, `ones`, `eye`, `arange` or
+  `linspace`; the `*_like` functions cover the case where an example is at
+  hand (see [Allocation](#allocation)), and otherwise the backend is chosen by
+  calling it directly.
 
 
 ## Elementwise Arithmetic
@@ -208,11 +217,12 @@ im.round(il.quant([1.234, 5.678], 'm'), decimals=1)
 (reductions)=
 ## Reductions
 
-`sum`, `mean`, `min`, `max`, `amin`, `amax`, `std`, `var`, `prod`, and
-`cumsum` all take PyTorch's `dim`/`keepdim` arguments, and accept NumPy's
-`axis`/`keepdims` as aliases for them. `sum`, `mean`, `min`, and `max`
-preserve the input's units; `var` squares them; `prod` raises them to the
-power of however many elements were multiplied together.
+`sum`, `mean`, `min`, `max`, `amin`, `amax`, `std`, `var`, `prod`, `cumsum`
+and `cumprod` all take PyTorch's `dim`/`keepdim` arguments, and accept NumPy's
+`axis`/`keepdims` as aliases for them. `cumsum` and `cumprod` require `dim`,
+as `torch.cumsum`/`torch.cumprod` do. `sum`, `mean`, `min`, `max`, `cumsum`
+and `cumprod` preserve the input's units; `var` squares them; `prod` raises
+them to the power of however many elements were multiplied together.
 
 ```{code-cell}
 im.sum(il.quant([[1.0, 2.0], [3.0, 4.0]], 's'), axis=0)
@@ -255,6 +265,14 @@ does, and the full permutation that `numpy.transpose` performs is
 `squeeze(a, dim)` leaves a dimension alone when it is not of size 1, as
 `torch.squeeze` does, rather than raising as `numpy.squeeze` would.
 
+`movedim(a, source, destination)` moves dimensions, as `torch.movedim` does
+(`moveaxis`, NumPy's spelling, is an alias). `atleast_1d`, `atleast_2d` and
+`atleast_3d` add dimensions until the argument has at least that many;
+`broadcast_to(a, shape)` broadcasts to a shape, which may add leading
+dimensions; and `expand(a, *sizes)` is `torch.Tensor.expand`, in which a `-1`
+keeps a dimension's size. All of these preserve units, and all of the
+rearrangements return views rather than copies where the backend does.
+
 `stack` and `concatenate` combine a sequence of quantities along a new or
 existing axis respectively. If any element has real units, the result has
 the units of the first such element, and every element is converted into
@@ -263,6 +281,36 @@ them (unit-less elements are treated as dimensionless values, as in
 
 ```{code-cell}
 im.stack([il.quant([1.0, 2.0], 'm'), il.quant([300.0, 400.0], 'cm')])
+```
+
+
+## Allocation
+
+The functions that allocate a new array or tensor take an existing argument
+as their *example*, so the backend (and a tensor's device) come from it rather
+than from a name: there is no `immlib.math.zeros(shape)` to name a backend,
+but `zeros_like`, `ones_like` and `full_like` fill a new array or tensor with
+the example's shape, backend, and units.
+
+```{code-cell}
+im.zeros_like(il.quant([[1.0, 2.0], [3.0, 4.0]], 'm'))
+```
+
+`full_like`'s fill value is taken in the example's units if it is a bare
+number, and is converted into them if it is a quantity. `empty_like` returns
+an array whose contents are *undefined* (whatever the allocator leaves
+behind), so it should be used only where every element will be overwritten
+before it is read. The random allocators `rand_like`, `randn_like` and
+`randint_like` exist only in PyTorch, so an array example is filled with
+`numpy.random`; the two backends are seeded separately (`torch.manual_seed`
+and `numpy.random.seed`), and the results are necessarily non-deterministic.
+
+`Quantity` also has the `Tensor.new_*` methods for the same thing, taking a
+shape rather than an example: `q.new_zeros(shape)`, `q.new_ones(shape)` and
+`q.new_full(shape, fill_value)`, in `q`'s units.
+
+```{code-cell}
+il.quant([1.0, 2.0], 'm').new_zeros(3)
 ```
 
 
@@ -276,6 +324,13 @@ no dimension is given).
 ```{code-cell}
 im.sort(il.quant([[3.0, 1.0, 2.0]], 'm'), dim=1)
 ```
+
+`searchsorted(a, v)` returns the indices at which `v` would be inserted into
+the sorted `a`, as `numpy.searchsorted`/`torch.searchsorted` do; the values
+are converted into the sequence's units, and the result is plain integer
+indices. `a` must be 1-dimensional, so that the two backends agree (`side`
+selects the first or the last suitable position, and `right` is PyTorch's
+spelling of `side='right'`).
 
 `median` follows `torch.median`: for an even number of elements it is the
 *lower* of the two middle values, an element of the input rather than the
@@ -319,7 +374,9 @@ result comes back as a tensor on the same device.
 `repeat_interleave` and `tile` all take PyTorch's arguments and preserve
 units. `repeat_interleave` is the one whose name is worth care:
 `numpy.repeat` is this function, while `numpy.ndarray.repeat`'s meaning,
-tiling the whole array, is `tile`.
+tiling the whole array, is `tile`. `flipud` and `fliplr` reverse the order
+along axis 0 and axis 1 respectively, and `diff` takes the `n`-th discrete
+difference along a dimension; all three preserve units.
 
 ```{code-cell}
 im.gather(il.quant([[3.0, 1.0, 2.0], [6.0, 5.0, 4.0]], 'm'),
@@ -334,6 +391,14 @@ magnitude, whatever the units, and return plain boolean arrays or tensors.
 `nonzero` returns the indices of the non-zero elements as a single
 `(n, ndim)` array of index rows, which is `torch.nonzero`'s form;
 `as_tuple=True` gives one index per dimension, which is `numpy.nonzero`'s.
+`count_nonzero` returns the number of non-zero elements (along a dimension, if
+one is given) as a plain integer or integer array; the units are irrelevant to
+a count, so a quantity of any units is accepted.
+
+`isclose(a, b)` and `allclose(a, b)` compare within a tolerance, as
+`numpy.isclose`/`torch.isclose` do, with `b` converted into `a`'s units. A
+unit-less (or bare) value compared with a dimensional one raises
+`pint.DimensionalityError`, exactly as Pint does, in either argument order.
 
 `clamp` limits the elements to a range, with each bound unit-aligned as in
 `maximum`, and at least one bound required, as `torch.clamp` requires.
@@ -386,4 +451,25 @@ meaning, matrix multiplication with broadcasting, is `matmul`.
 
 ```{code-cell}
 im.dot(il.quant([1.0, 2.0, 3.0], 'm'), il.quant([1.0, 1.0, 1.0], 's'))
+```
+
+The factorizations `svd`, `pinv`, `matrix_rank` and `lstsq` (and `einsum`)
+require a unit-less input and return plain arrays or tensors, since their
+parts carry different units. `svd(a, full_matrices=True)` returns `(U, S,
+Vh)`; `pinv` and `matrix_rank` follow `torch.linalg`'s tolerance rule
+(`atol = 0`, `rtol = eps * max(m, n)`), applied to both backends so that an
+array and a tensor agree; and `lstsq(a, b)` returns `torch.linalg.lstsq`'s
+`(solution, residuals, rank, singular_values)`, with which of those parts are
+computed following PyTorch's conventions for its `driver`.
+
+```{code-cell}
+im.pinv(il.quant([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]]))
+```
+
+The rest keep or combine units: `norm` keeps the units of its argument, as do
+`diag`, `diagonal`, `tril`, `triu` and `trace`, while `outer`, `inner`,
+`cross` and `tensordot` have the *product* of their arguments' units.
+
+```{code-cell}
+im.outer(il.quant([1.0, 2.0], 'm'), il.quant([3.0, 4.0], 's'))
 ```
