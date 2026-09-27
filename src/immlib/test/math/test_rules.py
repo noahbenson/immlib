@@ -145,6 +145,31 @@ UNARY_CALLS = [
     ('movedim', (0, 1), {}, 'mm'),
     ('pinv', (), {}, None),
     ('matrix_rank', (), {}, None),
+    # Allocation follows its example (so the backend is known).
+    ('zeros_like', (), {}, 'mm'),
+    ('ones_like', (), {}, 'mm'),
+    ('full_like', (2.5,), {}, 'mm'),
+    # Shape helpers and further sequence functions.
+    ('atleast_1d', (), {}, 'mm'),
+    ('atleast_2d', (), {}, 'mm'),
+    ('atleast_3d', (), {}, 'mm'),
+    ('broadcast_to', ((4, 2, 3),), {}, 'mm'),
+    ('expand', (4, 2, 3), {}, 'mm'),
+    ('cumprod', (1,), {}, 'mm'),
+    ('diff', (), {}, 'mm'),
+    ('diff', (1, 0), {}, 'mm'),
+    ('flipud', (), {}, 'mm'),
+    ('fliplr', (), {}, 'mm'),
+    ('count_nonzero', (), {}, 'mm'),
+    ('count_nonzero', (), {'dim': 0}, 'mm'),
+    # Linear algebra that keeps (or multiplies) the units.
+    ('norm', (), {}, 'mm'),
+    ('norm', (), {'dim': 0, 'keepdim': True}, 'mm'),
+    ('diag', (), {}, 'mm'),
+    ('diagonal', (), {}, 'mm'),
+    ('tril', (), {}, 'mm'),
+    ('triu', (), {}, 'mm'),
+    ('trace', (), {}, 'mm'),
 ]
 
 # Calls whose second argument is a quantity of the same kind as the first,
@@ -161,6 +186,9 @@ BINARY_CALLS = [
     ('minimum', 'mm'), ('eq', 'mm'), ('equal', 'mm'), ('not_equal', 'mm'),
     ('less', 'mm'), ('less_equal', 'mm'), ('greater', 'mm'),
     ('greater_equal', 'mm'), ('arctan2', 'mm'),
+    ('allclose', 'mm'), ('isclose', 'mm'),
+    ('outer', 'mm'), ('inner', 'mm'), ('cross', 'mm'),
+    ('tensordot', 'mm'), ('searchsorted', 'mm'),
 ]
 
 # (name, args, kwargs, units) for the methods of Quantity.
@@ -181,6 +209,8 @@ METHOD_CALLS = [
     ('unsqueeze', (1,), {}),
     ('ravel', (), {}), ('flatten', (), {}),
     ('astype', ('float32',), {}),
+    ('new_zeros', ((2,),), {}), ('new_ones', ((2,),), {}),
+    ('new_full', ((2,), 1.5), {}),
 ]
 
 # Operators, as (label, function of two operands).
@@ -399,7 +429,13 @@ class TestRules(TestCase):
                 'not_equal', 'less', 'less_equal', 'greater',
                 'greater_equal', 'unique', 'union1d', 'intersect1d',
                 'setdiff1d', 'setxor1d', 'isin', 'argmin', 'argmax',
-                'argsort', 'nonzero', 'isnan', 'isinf', 'isfinite')
+                'argsort', 'nonzero', 'isnan', 'isinf', 'isfinite',
+                # Allocation carries no gradient of its own (and the
+                # contents of empty_like are undefined).
+                'zeros_like', 'ones_like', 'full_like', 'empty_like',
+                'rand_like', 'randn_like', 'randint_like',
+                # A triangular mask has no gradient of its own.
+                'tril', 'triu')
         for (name, args, kwargs, units) in UNARY_CALLS:
             if name in skip:
                 continue
@@ -421,7 +457,9 @@ class TestRules(TestCase):
 
     def test_rule2_methods(self):
         "Quantity's methods keep a tensor's gradient tracking."
-        skip = ('round', 'any', 'all', 'astype')
+        skip = ('round', 'any', 'all', 'astype',
+                # Allocation of constants carries no gradient.
+                'new_zeros', 'new_ones', 'new_full')
         for units in ('mm', None):
             for (name, args, kwargs) in METHOD_CALLS:
                 if name in skip:
@@ -489,7 +527,12 @@ class TestRules(TestCase):
                     # takes several operands and is tested in
                     # test_math.test_einsum, and lstsq takes two operands and
                     # is tested in test_math.test_lstsq.
-                    'svd', 'einsum', 'lstsq'}
+                    'svd', 'einsum', 'lstsq',
+                    # empty_like's contents are undefined and the random
+                    # allocators are nondeterministic, so none can be
+                    # compared across the backends; tested in test_math.
+                    'empty_like', 'rand_like', 'randn_like',
+                    'randint_like'}
         # Aliases of a covered function are covered by it.
         aliases = {'swapaxes': 'transpose', 'swapdims': 'transpose',
                    'acos': 'arccos', 'atan': 'arctan', 'atan2': 'arctan2',

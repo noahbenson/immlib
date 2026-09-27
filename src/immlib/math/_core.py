@@ -2424,3 +2424,815 @@ def lstsq(a, b, rcond=None, *, driver=None):
     if driver not in ('gelsd', 'gelss'):
         sv = np.zeros(0)
     return (sol, residuals, rank, sv)
+
+
+# Array creation ###############################################################
+
+def _like_mag(fname, a):
+    """Returns ``(a, magnitude)`` for a ``*_like`` function.
+
+    These functions take their backend, shape, and device from an argument, so
+    no backend has to be named; a sparse argument is rejected, since the
+    result of allocating ``*_like`` is dense.
+    """
+    a = quant(a)
+    m = a.m
+    if sps.issparse(m):
+        raise _sparse_dense_error(fname)
+    return (a, m)
+
+def _fill_mag(fname, fill_value, units):
+    """Returns the magnitude to use for `fill_value` in `units`.
+
+    A bare number is taken in `units`; a quantity is converted into `units`
+    (and must be unit-less if `units` is ``None``).
+    """
+    if is_quant(fill_value):
+        if fill_value.units is None:
+            return fill_value.m
+        if units is None:
+            raise pint.DimensionalityError(
+                fill_value.units, 'dimensionless',
+                extra_msg=(f" immlib.math.{fname}: the argument has no units,"
+                           f" so a fill value that has units cannot be used"))
+        return fill_value.m_as(units)
+    return fill_value
+
+
+@docwrap(format='numpy', inheritparams=_doc_params)
+def zeros_like(a, dtype=None):
+    """Returns zeros with `a`'s shape and units.
+
+    This is ``numpy.zeros_like`` / ``torch.zeros_like``; because it takes `a`
+    as an example, the backend (and the device, for a tensor) follows `a`, so
+    no backend has to be named. The result is a quantity with `a`'s units:
+    zeros in those units, not a bare array.
+
+    Parameters
+    ----------
+    dtype : dtype-like or None, optional
+        The dtype of the result. The default, ``None``, follows `a`.
+
+    Returns
+    -------
+    immlib.Quantity
+        Zeros with `a`'s shape, backend, and units.
+    """
+    (a, m) = _like_mag('zeros_like', a)
+    if torch.is_tensor(m):
+        rmag = torch.zeros_like(m, dtype=dtype)
+    else:
+        rmag = np.zeros_like(m, dtype=dtype)
+    return quant(rmag, a.units)
+
+
+@docwrap(format='numpy', inheritparams=_doc_params)
+def ones_like(a, dtype=None):
+    """Returns ones with `a`'s shape and units.
+
+    This is ``numpy.ones_like`` / ``torch.ones_like``; as with ``zeros_like``,
+    the backend follows `a`, and the result is a quantity with `a`'s units:
+    ones in those units.
+
+    Parameters
+    ----------
+    dtype : dtype-like or None, optional
+        The dtype of the result. The default, ``None``, follows `a`.
+
+    Returns
+    -------
+    immlib.Quantity
+        Ones with `a`'s shape, backend, and units.
+    """
+    (a, m) = _like_mag('ones_like', a)
+    if torch.is_tensor(m):
+        rmag = torch.ones_like(m, dtype=dtype)
+    else:
+        rmag = np.ones_like(m, dtype=dtype)
+    return quant(rmag, a.units)
+
+
+@docwrap(format='numpy', inheritparams=_doc_params)
+def full_like(a, fill_value, dtype=None):
+    """Returns `fill_value` with `a`'s shape and units.
+
+    This is ``numpy.full_like`` / ``torch.full_like``; the backend follows `a`.
+    A bare number is taken in `a`'s units; a quantity is converted into `a`'s
+    units, and a quantity with units cannot be used when `a` has none.
+
+    Parameters
+    ----------
+    fill_value : number or quantity
+        The value to fill the result with, in `a`'s units (or a quantity that
+        is convertible into them).
+    dtype : dtype-like or None, optional
+        The dtype of the result. The default, ``None``, follows `a`.
+
+    Returns
+    -------
+    immlib.Quantity
+        `fill_value` with `a`'s shape, backend, and units.
+    """
+    (a, m) = _like_mag('full_like', a)
+    fv = _fill_mag('full_like', fill_value, a.units)
+    if torch.is_tensor(m):
+        rmag = torch.full_like(m, fv, dtype=dtype)
+    else:
+        rmag = np.full_like(m, fv, dtype=dtype)
+    return quant(rmag, a.units)
+
+
+def _promote_tensors(mags):
+    """Promotes the magnitudes to tensors on the first tensor's device and
+    dtype (as matmul and einsum do), for a call whose backend is PyTorch."""
+    first = next(x for x in mags if torch.is_tensor(x))
+    return tuple(
+        x if torch.is_tensor(x)
+        else to_tensor(x, dtype=first.dtype, device=first.device)
+        for x in mags)
+
+
+@docwrap(format='numpy', inheritparams=_doc_params)
+def empty_like(a, dtype=None):
+    """Returns an uninitialized array or tensor with `a`'s shape and units.
+
+    ``numpy.empty_like`` / ``torch.empty_like``: the backend follows `a`, and
+    the result is a quantity with `a`'s units. The contents are *not* defined --
+    they are whatever the backend's allocator happens to produce, and so differ
+    between the backends and between calls -- so use ``zeros_like``,
+    ``ones_like`` or ``full_like`` unless every element will be overwritten.
+
+    Parameters
+    ----------
+    dtype : dtype-like or None, optional
+        The dtype of the result. The default, ``None``, follows `a`.
+
+    Returns
+    -------
+    immlib.Quantity
+        An uninitialized array or tensor with `a`'s shape and units.
+    """
+    (a, m) = _like_mag('empty_like', a)
+    if torch.is_tensor(m):
+        rmag = torch.empty_like(m, dtype=dtype)
+    else:
+        rmag = np.empty_like(m, dtype=dtype)
+    return quant(rmag, a.units)
+
+
+@docwrap(format='numpy', inheritparams=_doc_params)
+def rand_like(a, dtype=None):
+    """Returns uniform random values in ``[0, 1)`` with `a`'s shape and units.
+
+    ``torch.rand_like`` has no NumPy counterpart (NumPy has no ``*_like``
+    random function), so an array argument is filled with ``numpy.random``; the
+    two backends are seeded separately (``torch.manual_seed`` and
+    ``numpy.random.seed``). The result is a quantity with `a`'s units.
+
+    Parameters
+    ----------
+    dtype : dtype-like or None, optional
+        The dtype of the result. The default, ``None``, follows `a` for a
+        tensor and is ``float64`` for an array.
+
+    Returns
+    -------
+    immlib.Quantity
+        Uniform random values with `a`'s shape and units.
+    """
+    (a, m) = _like_mag('rand_like', a)
+    if torch.is_tensor(m):
+        rmag = torch.rand_like(m, dtype=dtype)
+    else:
+        rmag = np.random.random(m.shape)
+        if dtype is not None:
+            rmag = rmag.astype(dtype)
+    return quant(rmag, a.units)
+
+
+@docwrap(format='numpy', inheritparams=_doc_params)
+def randn_like(a, dtype=None):
+    """Returns standard-normal random values with `a`'s shape and units.
+
+    ``torch.randn_like``; as with ``rand_like``, an array argument is filled
+    with ``numpy.random``, and the two backends are seeded separately. The
+    result is a quantity with `a`'s units.
+
+    Parameters
+    ----------
+    dtype : dtype-like or None, optional
+        The dtype of the result. The default, ``None``, follows `a` for a
+        tensor and is ``float64`` for an array.
+
+    Returns
+    -------
+    immlib.Quantity
+        Standard-normal random values with `a`'s shape and units.
+    """
+    (a, m) = _like_mag('randn_like', a)
+    if torch.is_tensor(m):
+        rmag = torch.randn_like(m, dtype=dtype)
+    else:
+        rmag = np.random.randn(*m.shape)
+        if dtype is not None:
+            rmag = rmag.astype(dtype)
+    return quant(rmag, a.units)
+
+
+@docwrap(format='numpy', inheritparams=_doc_params)
+def randint_like(a, low, high, dtype=None):
+    """Returns random integers in ``[low, high)`` with `a`'s shape and units.
+
+    ``torch.randint_like``; as with ``rand_like``, an array argument is filled
+    with ``numpy.random``. The result is a quantity with `a`'s units.
+
+    Parameters
+    ----------
+    low : int
+        The lowest value to draw (inclusive).
+    high : int
+        The highest value to draw (exclusive).
+    dtype : dtype-like or None, optional
+        The dtype of the result. The default, ``None``, follows `a` for a
+        tensor and is the platform's default integer for an array.
+
+    Returns
+    -------
+    immlib.Quantity
+        Random integers with `a`'s shape and units.
+    """
+    (a, m) = _like_mag('randint_like', a)
+    if torch.is_tensor(m):
+        rmag = torch.randint_like(m, low, high, dtype=dtype)
+    else:
+        kw = {} if dtype is None else {'dtype': dtype}
+        rmag = np.random.randint(low, high, size=m.shape, **kw)
+    return quant(rmag, a.units)
+
+
+# Shape ########################################################################
+
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
+def atleast_1d(a):
+    """Returns `a` with at least one dimension, keeping its units.
+
+    ``numpy.atleast_1d`` / ``torch.atleast_1d``: a scalar becomes a 1-element
+    array. Only a single argument is accepted (the libraries' multiple-argument
+    forms return sequences, which do not fit this namespace).
+    """
+    a = quant(a)
+    m = a.m
+    if sps.issparse(m):
+        raise _sparse_dense_error('atleast_1d')
+    rmag = torch.atleast_1d(m) if torch.is_tensor(m) else np.atleast_1d(m)
+    return quant(rmag, a.units)
+
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
+def atleast_2d(a):
+    """Returns `a` with at least two dimensions, keeping its units.
+
+    ``numpy.atleast_2d`` / ``torch.atleast_2d``; see ``atleast_1d``."""
+    a = quant(a)
+    m = a.m
+    if sps.issparse(m):
+        raise _sparse_dense_error('atleast_2d')
+    rmag = torch.atleast_2d(m) if torch.is_tensor(m) else np.atleast_2d(m)
+    return quant(rmag, a.units)
+
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
+def atleast_3d(a):
+    """Returns `a` with at least three dimensions, keeping its units.
+
+    ``numpy.atleast_3d`` / ``torch.atleast_3d``; see ``atleast_1d``."""
+    a = quant(a)
+    m = a.m
+    if sps.issparse(m):
+        raise _sparse_dense_error('atleast_3d')
+    rmag = torch.atleast_3d(m) if torch.is_tensor(m) else np.atleast_3d(m)
+    return quant(rmag, a.units)
+
+
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
+def broadcast_to(a, shape):
+    """Returns `a` broadcast to `shape`, keeping its units.
+
+    ``numpy.broadcast_to`` / ``torch.broadcast_to``, which return a read-only
+    view rather than a copy.
+
+    Parameters
+    ----------
+    shape : tuple of int
+        The shape of the result. Leading dimensions may be added, and each
+        existing dimension must be 1 or already equal to the requested size.
+    """
+    a = quant(a)
+    m = a.m
+    if sps.issparse(m):
+        raise _sparse_dense_error('broadcast_to')
+    rmag = (torch.broadcast_to(m, tuple(shape)) if torch.is_tensor(m)
+            else np.broadcast_to(m, tuple(shape)))
+    return quant(rmag, a.units)
+
+
+def _np_expand(m, sizes):
+    """Emulates ``torch.Tensor.expand`` with NumPy: prepend the requested
+    leading dimensions, resolve ``-1`` to the existing size, and broadcast."""
+    sizes = tuple(sizes)
+    if len(sizes) < m.ndim:
+        raise ValueError(
+            f"immlib.math.expand: the number of sizes ({len(sizes)}) cannot be"
+            f" fewer than the number of dimensions ({m.ndim})")
+    pad = (1,) * (len(sizes) - m.ndim)
+    shape = pad + tuple(m.shape)
+    resolved = tuple(s if s != -1 else shape[ii]
+                     for (ii, s) in enumerate(sizes))
+    return np.broadcast_to(m.reshape(shape), resolved)
+
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
+def expand(a, *sizes):
+    """Returns `a` with the dimensions expanded to `sizes`, keeping its units.
+
+    This is ``torch.Tensor.expand`` (NumPy has no function of this name; its
+    ``broadcast_to`` is the closest). The sizes may be given as a single tuple
+    or as separate arguments; a ``-1`` keeps an existing dimension's size, and
+    leading dimensions may be added.
+
+    Parameters
+    ----------
+    sizes : ints
+        The sizes of the result's dimensions, as a tuple or as separate
+        arguments. A ``-1`` keeps the dimension's size.
+    """
+    if len(sizes) == 1 and isinstance(sizes[0], (tuple, list)):
+        sizes = tuple(sizes[0])
+    a = quant(a)
+    m = a.m
+    if sps.issparse(m):
+        raise _sparse_dense_error('expand')
+    rmag = m.expand(*sizes) if torch.is_tensor(m) else _np_expand(m, sizes)
+    return quant(rmag, a.units)
+
+
+# More sequence functions ######################################################
+
+@docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_along),
+          inheritreturns=_doc_returns_quantity)
+def cumprod(a, dim, **kwargs):
+    """Returns the cumulative product of `a`'s elements along `dim`, preserving
+    units. `dim` is required, as it is in ``torch.cumprod``."""
+    (dim, _) = _dimargs('cumprod', kwargs, dim=dim)
+    dim = _one_dim('cumprod', dim)
+    if dim is None:
+        raise TypeError("immlib.math.cumprod: 'dim' is required")
+    a = quant(a)
+    m = a.m
+    if torch.is_tensor(m):
+        rmag = torch.cumprod(m, dim=dim)
+    elif sps.issparse(m):
+        raise _sparse_dense_error('cumprod')
+    else:
+        rmag = np.cumprod(m, axis=dim)
+    return quant(rmag, a.units)
+
+@docwrap(format='numpy', inheritparams=(_doc_params,),
+          inheritreturns=_doc_returns_quantity)
+def diff(a, n=1, dim=-1, **kwargs):
+    """Returns the `n`-th discrete difference along `dim`, keeping `a`'s units.
+
+    ``numpy.diff`` / ``torch.diff``.
+
+    Parameters
+    ----------
+    n : int, optional
+        The number of times the difference is taken. The default is ``1``.
+    dim : int, optional
+        The dimension along which the difference is taken. The default is
+        ``-1``.
+    """
+    (dim, _) = _dimargs('diff', kwargs, dim=dim)
+    a = quant(a)
+    m = a.m
+    if torch.is_tensor(m):
+        rmag = torch.diff(m, n=n, dim=dim)
+    elif sps.issparse(m):
+        raise _sparse_dense_error('diff')
+    else:
+        rmag = np.diff(m, n=n, axis=dim)
+    return quant(rmag, a.units)
+
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
+def flipud(a):
+    """Returns `a` with the order of the elements along axis 0 reversed,
+    keeping its units (``numpy.flipud`` / ``torch.flipud``)."""
+    a = quant(a)
+    m = a.m
+    rmag = torch.flipud(m) if torch.is_tensor(m) else np.flipud(m)
+    return quant(rmag, a.units)
+
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
+def fliplr(a):
+    """Returns `a` with the order of the elements along axis 1 reversed,
+    keeping its units (``numpy.fliplr`` / ``torch.fliplr``); `a` must be at
+    least 2-dimensional."""
+    a = quant(a)
+    m = a.m
+    rmag = torch.fliplr(m) if torch.is_tensor(m) else np.fliplr(m)
+    return quant(rmag, a.units)
+
+
+# Counting and tolerance predicates ###########################################
+
+@docwrap(format='numpy', inheritparams=_doc_params)
+def count_nonzero(a, dim=None, **kwargs):
+    """Returns the number of non-zero elements, as a plain integer or array.
+
+    ``numpy.count_nonzero`` / ``torch.count_nonzero``. The units are irrelevant
+    to a count, so a quantity of any units is accepted and the result is a
+    plain integer array or tensor.
+
+    Parameters
+    ----------
+    dim : int, optional
+        The dimension along which to count. The default, ``None``, counts every
+        element. ``axis`` is accepted as an alias.
+
+    Returns
+    -------
+    int or array or tensor of int
+        The number of non-zero elements, or, when `dim` is given, the
+        counts along `dim`.
+    """
+    (dim, _) = _dimargs('count_nonzero', kwargs, dim=dim)
+    a = quant(a)
+    m = a.m
+    if sps.issparse(m):
+        raise _sparse_dense_error('count_nonzero')
+    if torch.is_tensor(m):
+        return torch.count_nonzero(m, dim=dim)
+    return np.count_nonzero(m, axis=dim)
+
+@docwrap(format='numpy')
+def allclose(a, b, rtol=1e-05, atol=1e-08, equal_nan=False):
+    """Returns whether `a` and `b` are equal to within a tolerance.
+
+    ``numpy.allclose`` / ``torch.allclose``, with units handled as ``isclose``
+    does. The result is a plain ``bool``.
+
+    Parameters
+    ----------
+    a : quantity or array or tensor or number
+        The first value, in whose units the comparison is performed.
+    b : quantity or array or tensor or number
+        The value to compare `a` with; a unit-less (or bare) operand is treated
+        as dimensionless, so comparing it with a dimensional one raises
+        ``pint.DimensionalityError``, as it does in Pint.
+    rtol : float, optional
+        The relative tolerance. The default is ``1e-05``.
+    atol : float, optional
+        The absolute tolerance. The default is ``1e-08``.
+    equal_nan : bool, optional
+        Whether two NaNs are considered equal. The default is ``False``.
+
+    Returns
+    -------
+    bool
+        ``True`` if the two values agree within the tolerance.
+    """
+    (ma, mb, _u) = _align_units(a, b, 'allclose')
+    if _is_tensor_backed(ma, mb):
+        (ma, mb) = _promote_tensors((ma, mb))
+        return torch.allclose(ma, mb, rtol=rtol, atol=atol,
+                              equal_nan=equal_nan)
+    return np.allclose(ma, mb, rtol=rtol, atol=atol, equal_nan=equal_nan)
+
+@docwrap(format='numpy')
+def isclose(a, b, rtol=1e-05, atol=1e-08, equal_nan=False):
+    """Returns, elementwise, whether `a` and `b` are equal within a tolerance.
+
+    ``numpy.isclose`` / ``torch.isclose``. `b` is converted into `a`'s units; a
+    unit-less (or bare) operand is treated as dimensionless, so comparing it
+    with a dimensional one raises ``pint.DimensionalityError``, exactly as Pint
+    does. The result is a plain boolean array or tensor.
+
+    Parameters
+    ----------
+    a : quantity or array or tensor or number
+        The first value, in whose units the comparison is performed.
+    b : quantity or array or tensor or number
+        The value to compare `a` with.
+    rtol : float, optional
+        The relative tolerance. The default is ``1e-05``.
+    atol : float, optional
+        The absolute tolerance. The default is ``1e-08``.
+    equal_nan : bool, optional
+        Whether two NaNs are considered equal. The default is ``False``.
+
+    Returns
+    -------
+    array or tensor of bool
+        ``True`` where the two values agree within the tolerance.
+    """
+    (ma, mb, _u) = _align_units(a, b, 'isclose')
+    if _is_tensor_backed(ma, mb):
+        (ma, mb) = _promote_tensors((ma, mb))
+        return torch.isclose(ma, mb, rtol=rtol, atol=atol,
+                             equal_nan=equal_nan)
+    return np.isclose(ma, mb, rtol=rtol, atol=atol, equal_nan=equal_nan)
+
+
+# More linear algebra ##########################################################
+
+def _unit_product(a, b):
+    """The units of a product of two quantities (a ``None`` operand
+    contributes no units)."""
+    if a.units is None:
+        return b.units
+    if b.units is None:
+        return a.units
+    return a.units * b.units
+
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
+def norm(a, ord=None, dim=None, keepdim=False, **kwargs):
+    """Returns the norm of `a`, keeping its units.
+
+    ``numpy.linalg.norm`` / ``torch.linalg.norm``. The units of a norm are the
+    units of its argument, so a quantity of any units is accepted.
+
+    Parameters
+    ----------
+    ord : number or str or None, optional
+        The order of the norm, as the two libraries accept it. The default,
+        ``None``, is the 2-norm of a vector and the Frobenius norm of a matrix.
+    dim : int or tuple of int, optional
+        The dimension or dimensions along which to compute the norm. ``axis``
+        is accepted as an alias.
+    keepdim : bool, optional
+        Whether the reduced dimensions are kept (with length 1). The default is
+        ``False``.
+    """
+    (dim, keepdim) = _dimargs('norm', kwargs, dim=dim, keepdim=keepdim)
+    a = quant(a)
+    m = a.m
+    if sps.issparse(m):
+        raise _sparse_dense_error('norm')
+    if torch.is_tensor(m):
+        rmag = torch.linalg.norm(m, ord=ord, dim=dim, keepdim=keepdim)
+    else:
+        rmag = np.linalg.norm(m, ord=ord, axis=dim)
+        if keepdim:
+            if dim is None:
+                rmag = np.reshape(rmag, (1,) * m.ndim)
+            else:
+                axes = dim if isinstance(dim, (tuple, list)) else (dim,)
+                rmag = np.expand_dims(
+                    rmag, tuple(ax % m.ndim for ax in axes))
+    return quant(rmag, a.units)
+
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
+def diag(a, offset=0):
+    """Returns the diagonal of a 2-dimensional `a`, or a matrix with `a` on its
+    diagonal if `a` is 1-dimensional, keeping the units.
+
+    ``numpy.diag`` / ``torch.diag``.
+
+    Parameters
+    ----------
+    offset : int, optional
+        Which diagonal: ``0`` (the default) is the main one, positive is above
+        it, and negative is below it.
+    """
+    a = quant(a)
+    m = a.m
+    if sps.issparse(m):
+        raise _sparse_dense_error('diag')
+    rmag = (torch.diag(m, diagonal=offset) if torch.is_tensor(m)
+            else np.diag(m, k=offset))
+    return quant(rmag, a.units)
+
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
+def diagonal(a, offset=0, dim1=0, dim2=1):
+    """Returns the diagonals of `a` along the dimensions `dim1` and `dim2`,
+    keeping the units (``numpy.diagonal`` / ``torch.diagonal``).
+
+    Parameters
+    ----------
+    offset : int, optional
+        Which diagonal to take; the default is ``0``, the main one.
+    dim1 : int, optional
+        The first dimension to take the diagonal of. The default is ``0``.
+    dim2 : int, optional
+        The second dimension to take the diagonal of. The default is ``1``.
+    """
+    a = quant(a)
+    m = a.m
+    if sps.issparse(m):
+        raise _sparse_dense_error('diagonal')
+    rmag = (torch.diagonal(m, offset=offset, dim1=dim1, dim2=dim2)
+            if torch.is_tensor(m)
+            else np.diagonal(m, offset=offset, axis1=dim1, axis2=dim2))
+    return quant(rmag, a.units)
+
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
+def tril(a, diagonal=0):
+    """Returns the lower triangle of `a`, keeping the units
+    (``numpy.tril`` / ``torch.tril``).
+
+    Parameters
+    ----------
+    diagonal : int, optional
+        The diagonal above which to zero out the elements; the default is
+        ``0``, the main diagonal.
+    """
+    a = quant(a)
+    m = a.m
+    rmag = (torch.tril(m, diagonal=diagonal) if torch.is_tensor(m)
+            else np.tril(m, k=diagonal))
+    return quant(rmag, a.units)
+
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
+def triu(a, diagonal=0):
+    """Returns the upper triangle of `a`, keeping the units
+    (``numpy.triu`` / ``torch.triu``).
+
+    Parameters
+    ----------
+    diagonal : int, optional
+        The diagonal below which to zero out the elements; the default is
+        ``0``, the main diagonal.
+    """
+    a = quant(a)
+    m = a.m
+    rmag = (torch.triu(m, diagonal=diagonal) if torch.is_tensor(m)
+            else np.triu(m, k=diagonal))
+    return quant(rmag, a.units)
+
+@docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
+def trace(a):
+    """Returns the sum of the diagonal of the 2-dimensional `a`, keeping the
+    units (``numpy.trace`` / ``torch.trace``)."""
+    a = quant(a)
+    m = a.m
+    if sps.issparse(m):
+        raise _sparse_dense_error('trace')
+    rmag = torch.trace(m) if torch.is_tensor(m) else np.trace(m)
+    return quant(rmag, a.units)
+
+@docwrap(format='numpy', inheritparams=_doc_params)
+def outer(a, b):
+    """Returns the outer product of two 1-dimensional arguments, with the
+    product of their units.
+
+    ``numpy.outer`` / ``torch.outer``. Both arguments must be 1-dimensional
+    (unlike ``numpy.outer``, which flattens its arguments, this raises for a
+    higher-dimensional argument so that the two backends agree).
+
+    Parameters
+    ----------
+
+    Returns
+    -------
+    immlib.Quantity
+        The outer product, in the product of `a`'s and `b`'s units.
+    """
+    a = quant(a)
+    b = quant(b)
+    (ma, mb) = (a.m, b.m)
+    if np.ndim(ma) != 1 or np.ndim(mb) != 1:
+        raise ValueError(
+            f"immlib.math.outer: both arguments must be 1-dimensional (got"
+            f" {np.ndim(ma)} and {np.ndim(mb)} dimensions)")
+    if torch.is_tensor(ma) or torch.is_tensor(mb):
+        (ma, mb) = _promote_tensors((ma, mb))
+        rmag = torch.outer(ma, mb)
+    else:
+        rmag = np.outer(ma, mb)
+    return quant(rmag, _unit_product(a, b))
+
+@docwrap(format='numpy', inheritparams=_doc_params)
+def inner(a, b):
+    """Returns the inner product of `a` and `b`, with the product of their
+    units (``numpy.inner`` / ``torch.inner``).
+
+    Parameters
+    ----------
+
+    Returns
+    -------
+    immlib.Quantity
+        The inner product, in the product of `a`'s and `b`'s units.
+    """
+    a = quant(a)
+    b = quant(b)
+    (ma, mb) = (a.m, b.m)
+    if torch.is_tensor(ma) or torch.is_tensor(mb):
+        (ma, mb) = _promote_tensors((ma, mb))
+        rmag = torch.inner(ma, mb)
+    else:
+        rmag = np.inner(ma, mb)
+    return quant(rmag, _unit_product(a, b))
+
+@docwrap(format='numpy', inheritparams=_doc_params)
+def cross(a, b, dim=-1):
+    """Returns the cross product of `a` and `b`, with the product of their
+    units.
+
+    ``numpy.cross`` / ``torch.linalg.cross``.
+
+    Parameters
+    ----------
+    dim : int, optional
+        The dimension along which the vectors lie; it must have length 3. The
+        default is ``-1``.
+
+    Returns
+    -------
+    immlib.Quantity
+        The cross product, in the product of `a`'s and `b'`s units.
+    """
+    a = quant(a)
+    b = quant(b)
+    (ma, mb) = (a.m, b.m)
+    if torch.is_tensor(ma) or torch.is_tensor(mb):
+        (ma, mb) = _promote_tensors((ma, mb))
+        rmag = torch.linalg.cross(ma, mb, dim=dim)
+    else:
+        rmag = np.cross(ma, mb, axisa=dim, axisb=dim, axisc=dim)
+    return quant(rmag, _unit_product(a, b))
+
+@docwrap(format='numpy', inheritparams=_doc_params)
+def tensordot(a, b, dims=2):
+    """Returns the tensor contraction of `a` and `b` over `dims` axes, with the
+    product of their units (``numpy.tensordot`` / ``torch.tensordot``).
+
+    Parameters
+    ----------
+    dims : int or sequence, optional
+        The number of axes (or the specific axes) to contract. The default is
+        ``2``.
+
+    Returns
+    -------
+    immlib.Quantity
+        The contraction, in the product of `a`'s and `b`'s units.
+    """
+    a = quant(a)
+    b = quant(b)
+    (ma, mb) = (a.m, b.m)
+    if torch.is_tensor(ma) or torch.is_tensor(mb):
+        (ma, mb) = _promote_tensors((ma, mb))
+        rmag = torch.tensordot(ma, mb, dims=dims)
+    else:
+        rmag = np.tensordot(ma, mb, axes=dims)
+    return quant(rmag, _unit_product(a, b))
+
+
+@docwrap(format='numpy')
+def searchsorted(a, v, side='left', *, sorter=None, right=None):
+    """Returns the indices at which `v` would be inserted into the sorted `a`.
+
+    ``numpy.searchsorted`` / ``torch.searchsorted``. `v` is converted into `a`'s
+    units, and the result is plain integer indices (not a quantity). `a` must be
+    1-dimensional, so that the two backends agree (``torch.searchsorted`` alone
+    also accepts a batch of sorted sequences).
+
+    Parameters
+    ----------
+    a : quantity or array or tensor of numbers
+        The sorted sequence to search; it must be 1-dimensional.
+    v : quantity or array or tensor or number
+        The value or values to insert. A unit-less (or bare) value compared
+        with a dimensional one raises ``pint.DimensionalityError``.
+    side : {'left', 'right'}, optional
+        Whether to use the first suitable location (``'left'``, the default) or
+        the last (``'right'``).
+    sorter : array or tensor of int or None, optional
+        The indices that would sort `a`, when `a` is not already sorted.
+    right : bool or None, optional
+        An alias for `side`: ``right=True`` is ``side='right'`` and
+        ``right=False`` is ``side='left'`` (``torch.searchsorted``'s spelling).
+
+    Returns
+    -------
+    array or tensor of int
+        The insertion indices.
+    """
+    if right is not None:
+        if side != 'left':
+            raise TypeError(
+                "immlib.math.searchsorted: give either 'side' or 'right', not"
+                " both")
+        side = 'right' if right else 'left'
+    if side not in ('left', 'right'):
+        raise ValueError(
+            f"immlib.math.searchsorted: side must be 'left' or 'right', not"
+            f" {side!r}")
+    (ma, mv, _u) = _align_units(a, v, 'searchsorted')
+    if np.ndim(ma) != 1:
+        raise ValueError(
+            f"immlib.math.searchsorted: the sorted sequence must be"
+            f" 1-dimensional (got {np.ndim(ma)} dimensions)")
+    if _is_tensor_backed(ma, mv):
+        (ma, mv) = _promote_tensors((ma, mv))
+        return torch.searchsorted(ma, mv, right=(side == 'right'),
+                                  sorter=sorter)
+    return np.searchsorted(ma, mv, side=side, sorter=sorter)

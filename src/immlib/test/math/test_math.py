@@ -848,3 +848,234 @@ class TestMath(TestCase):
         (xt, _, _, _) = im.lstsq(torch.tensor(A), Bt)
         xt.sum().backward()
         self.assertIsNotNone(Bt.grad)
+
+
+    def test_like_functions(self):
+        import immlib as il
+        import immlib.math as im
+        import numpy as np
+        import torch
+        import pint
+        import scipy.sparse as sps
+        a = il.quant(np.arange(6.0).reshape(2, 3), 'm')
+        # The result has the example's shape, backend, and units.
+        z = im.zeros_like(a)
+        self.assertIsInstance(z.m, np.ndarray)
+        self.assertEqual(z.units, a.units)
+        self.assertTrue(np.array_equal(z.m, np.zeros((2, 3))))
+        o = im.ones_like(a)
+        self.assertEqual(o.units, a.units)
+        self.assertTrue(np.allclose(o.m, 1.0))
+        # A bare fill value is taken in the example's units; a quantity is
+        # converted into them.
+        self.assertTrue(np.allclose(im.full_like(a, 3).m, 3.0))
+        self.assertTrue(np.allclose(im.full_like(a, il.quant(1.0, 'cm')).m,
+                                    0.01))
+        # dtype is honored.
+        self.assertEqual(im.ones_like(a, dtype=np.float32).m.dtype,
+                         np.dtype('float32'))
+        # A tensor example gives a tensor result of the same shape.
+        t = il.quant(torch.arange(6.0).reshape(2, 3), 'm')
+        self.assertIsInstance(im.zeros_like(t).m, torch.Tensor)
+        self.assertTrue(torch.allclose(im.full_like(t, 2.0).m,
+                                       torch.full((2, 3), 2.0)))
+        # A unit-less example gives a unit-less result, and a unit-bearing
+        # fill value cannot be used with it.
+        self.assertIsNone(im.ones_like(np.arange(3.0)).units)
+        with self.assertRaises(pint.DimensionalityError):
+            im.full_like(np.arange(3.0), il.quant(1.0, 'm'))
+        # Sparse examples are rejected (the result would be dense).
+        with self.assertRaises(TypeError):
+            im.zeros_like(il.quant(sps.csr_matrix(np.eye(3)), None))
+
+
+    def test_random_and_empty_like(self):
+        import immlib as il
+        import immlib.math as im
+        import numpy as np
+        import torch
+        a = il.quant(np.arange(6.0).reshape(2, 3), 'm')
+        # empty_like defines only shape, dtype, and units.
+        e = im.empty_like(a)
+        self.assertEqual(e.shape, a.shape)
+        self.assertEqual(e.units, a.units)
+        # Random allocators keep shape and units, and are seedable per backend.
+        np.random.seed(12345)
+        r1 = im.rand_like(a)
+        np.random.seed(12345)
+        r2 = im.rand_like(a)
+        self.assertEqual(r1.units, a.units)
+        self.assertTrue(np.array_equal(r1.m, r2.m))
+        self.assertTrue(np.all(r1.m >= 0.0) and np.all(r1.m < 1.0))
+        np.random.seed(7)
+        self.assertEqual(im.randint_like(a, 0, 10).m.dtype, np.dtype('int64'))
+        self.assertTrue(np.all(im.randint_like(a, 0, 3).m < 3))
+        # The tensor path uses torch's allocators and is seedable with
+        # torch.manual_seed.
+        t = il.quant(torch.zeros(2, 3), 'm')
+        torch.manual_seed(99)
+        t1 = im.randn_like(t)
+        torch.manual_seed(99)
+        t2 = im.randn_like(t)
+        self.assertIsInstance(t1.m, torch.Tensor)
+        self.assertTrue(torch.equal(t1.m, t2.m))
+        self.assertEqual(t1.units, t.units)
+
+    def test_shape_helpers(self):
+        import immlib as il
+        import immlib.math as im
+        import numpy as np
+        import scipy.sparse as sps
+        self.assertEqual(im.atleast_1d(il.quant(5.0, 'm')).shape, (1,))
+        self.assertEqual(im.atleast_2d(il.quant(5.0, 'm')).shape, (1, 1))
+        self.assertEqual(im.atleast_3d(il.quant(5.0, 'm')).shape, (1, 1, 1))
+        self.assertEqual(im.atleast_2d(il.quant(5.0, 'm')).units, il.unit('m'))
+        a = il.quant(np.arange(6.0).reshape(2, 3), 'm')
+        b = im.broadcast_to(a, (4, 2, 3))
+        self.assertEqual(b.shape, (4, 2, 3))
+        self.assertEqual(b.units, a.units)
+        self.assertFalse(b.m.flags['WRITEABLE'])      # a view, as in numpy
+        # expand expands size-1 dimensions (and may add leading ones);
+        # a -1 keeps a dimension's size.
+        x = il.quant(np.array([[1.0], [2.0]]), 'm')     # shape (2, 1)
+        self.assertEqual(im.expand(x, 2, 3).shape, (2, 3))
+        self.assertEqual(im.expand(x, -1, 3).shape, (2, 3))
+        self.assertEqual(im.expand(x, 4, 2, 3).shape, (4, 2, 3))
+        # sparse is rejected
+        with self.assertRaises(TypeError):
+            im.broadcast_to(il.quant(sps.csr_matrix(np.eye(3)), None), (5, 3))
+
+    def test_sequence_helpers(self):
+        import immlib as il
+        import immlib.math as im
+        import numpy as np
+        a = il.quant(np.array([[2.0, 3.0], [4.0, 5.0]]), 'm')
+        p = im.cumprod(a, 1)
+        self.assertTrue(np.array_equal(p.m, [[2, 6], [4, 20]]))
+        self.assertEqual(p.units, a.units)
+        with self.assertRaises(TypeError):
+            im.cumprod(a, None)
+        d = im.diff(a, 1, 1)
+        self.assertTrue(np.array_equal(d.m, [[1.0], [1.0]]))
+        self.assertEqual(d.units, a.units)
+        self.assertTrue(np.array_equal(im.flipud(a).m, np.flipud(a.m)))
+        self.assertTrue(np.array_equal(im.fliplr(a).m, np.fliplr(a.m)))
+
+    def test_tolerance_predicates(self):
+        import immlib as il
+        import immlib.math as im
+        import numpy as np
+        import pint
+        import torch
+        a = il.quant(np.array([1.0, 2.0]), 'm')
+        # The second argument is converted into the first's units.
+        self.assertTrue(im.isclose(a, il.quant(np.array([100.0, 200.0]), 'cm')).all())
+        self.assertTrue(im.allclose(a, il.quant(np.array([100.0, 200.0]), 'cm')))
+        self.assertFalse(im.allclose(a, il.quant(np.array([1.0, 2.1]), 'm')))
+        # A unit-less (or bare) operand is dimensionless, so comparing it with
+        # a dimensional one raises, exactly as Pint does.
+        with self.assertRaises(pint.DimensionalityError):
+            im.isclose(a, a.m)
+        with self.assertRaises(pint.DimensionalityError):
+            im.isclose(a.m, a)
+        with self.assertRaises(pint.DimensionalityError):
+            im.allclose(a, il.quant(np.array([1.0, 2.0]), 's'))
+        # Both unit-less: an ordinary comparison of the magnitudes.
+        self.assertTrue(im.allclose(il.quant(np.array([1.0])), np.array([1.0])))
+        # The tensor path follows the same rules.
+        self.assertTrue(im.allclose(il.quant(torch.tensor([1.0, 2.0]), 'm'),
+                                    il.quant(torch.tensor([100.0, 200.0]), 'cm')))
+        # count_nonzero ignores units and returns a plain count.
+        self.assertEqual(im.count_nonzero(a), 2)
+        self.assertTrue(np.array_equal(
+            im.count_nonzero(il.quant(np.zeros((2, 3)), 'm'), dim=0),
+            np.zeros(3)))
+
+
+    def test_unit_aware_linalg(self):
+        import immlib as il
+        import immlib.math as im
+        import numpy as np
+        import torch
+        import scipy.sparse as sps
+        # norm keeps the units of its argument.
+        v = il.quant(np.array([3.0, 4.0]), 'm')
+        self.assertAlmostEqual(im.norm(v).m, 5.0)
+        self.assertEqual(im.norm(v).units, v.units)
+        M = il.quant(np.array([[1.0, 2.0], [3.0, 4.0]]), 'm')
+        n = im.norm(M, dim=0, keepdim=True)
+        self.assertEqual(n.m.shape, (1, 2))
+        self.assertEqual(n.units, M.units)
+        self.assertTrue(torch.allclose(im.norm(il.quant(torch.tensor([3.0, 4.0]), 'm')).m,
+                                       torch.tensor(5.0)))
+        # diag/diagonal/tril/triu/trace keep the units.
+        self.assertTrue(np.array_equal(im.diag(M).m, [1.0, 4.0]))
+        self.assertEqual(im.diag(M).units, M.units)
+        d = il.quant(np.array([1.0, 2.0, 3.0]), 'm')
+        self.assertTrue(np.array_equal(im.diag(d).m, np.diag([1.0, 2.0, 3.0])))
+        self.assertTrue(np.array_equal(im.diagonal(M).m, [1.0, 4.0]))
+        self.assertTrue(np.array_equal(im.tril(M).m, [[1, 0], [3, 4]]))
+        self.assertTrue(np.array_equal(im.triu(M).m, [[1, 2], [0, 4]]))
+        self.assertAlmostEqual(im.trace(M).m, 5.0)
+        self.assertEqual(im.trace(M).units, M.units)
+        # Products multiply the units.
+        x = il.quant(np.array([1.0, 2.0]), 'm')
+        y = il.quant(np.array([3.0, 4.0]), 's')
+        o = im.outer(x, y)
+        self.assertTrue(np.array_equal(o.m, [[3, 4], [6, 8]]))
+        self.assertEqual(o.units, il.unit('m*s'))
+        self.assertAlmostEqual(im.inner(x, y).m, 11.0)
+        self.assertEqual(im.inner(x, y).units, il.unit('m*s'))
+        u = il.quant(np.array([1.0, 0.0, 0.0]), 'm')
+        w = il.quant(np.array([0.0, 1.0, 0.0]), 's')
+        c = im.cross(u, w)
+        self.assertTrue(np.allclose(c.m, [0.0, 0.0, 1.0]))
+        self.assertEqual(c.units, il.unit('m*s'))
+        t = im.tensordot(il.quant(np.eye(2), 'm'), il.quant(np.ones((2, 2)), 's'),
+                         dims=2)
+        self.assertAlmostEqual(t.m, 2.0)
+        self.assertEqual(t.units, il.unit('m*s'))
+        # outer is 1-dimensional only, in both backends.
+        with self.assertRaises(ValueError):
+            im.outer(M, M)
+        # The tensor path agrees.
+        self.assertTrue(torch.allclose(
+            im.outer(il.quant(torch.tensor([1.0, 2.0]), 'm'),
+                     il.quant(torch.tensor([3.0, 4.0]), 's')).m,
+            torch.tensor([[3.0, 4.0], [6.0, 8.0]])))
+        # Sparse arguments are rejected.
+        with self.assertRaises(TypeError):
+            im.norm(il.quant(sps.csr_matrix(np.eye(3)), None))
+
+
+    def test_searchsorted(self):
+        import immlib as il
+        import immlib.math as im
+        import numpy as np
+        import torch
+        import pint
+        a = il.quant(np.array([1.0, 2.0, 2.0, 3.0]), 'm')
+        v = il.quant(np.array([0.0, 200.0, 250.0]), 'cm')   # 0, 2, 2.5 m
+        # The values are converted into the sequence's units.
+        self.assertTrue(np.array_equal(im.searchsorted(a, v), [0, 1, 3]))
+        self.assertTrue(np.array_equal(im.searchsorted(a, v, side='right'),
+                                       [0, 3, 3]))
+        # 'right' is the torch spelling of side='right'.
+        self.assertTrue(np.array_equal(im.searchsorted(a, v, right=True),
+                                       [0, 3, 3]))
+        with self.assertRaises(TypeError):
+            im.searchsorted(a, v, side='right', right=True)
+        with self.assertRaises(ValueError):
+            im.searchsorted(a, v, side='middle')
+        # A unit-less value compared with a dimensional one raises.
+        with self.assertRaises(pint.DimensionalityError):
+            im.searchsorted(a, a.m)
+        # The sequence must be 1-dimensional, in both backends.
+        with self.assertRaises(ValueError):
+            im.searchsorted(il.quant(np.ones((2, 3)), 'm'),
+                            il.quant(np.ones(3), 'm'))
+        # The tensor path agrees and returns plain integer indices.
+        r = im.searchsorted(il.quant(torch.tensor([1.0, 2.0, 2.0, 3.0]), 'm'),
+                            il.quant(torch.tensor([0.0, 2.0, 2.5]), 'm'))
+        self.assertIsInstance(r, torch.Tensor)
+        self.assertTrue(torch.equal(r, torch.tensor([0, 1, 3])))

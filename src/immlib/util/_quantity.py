@@ -1262,6 +1262,111 @@ class Quantity(pint.Quantity):
                                   self.units)
         return self.__class__(m.astype(to_numpydtype(dtype), **kwargs),
                               self.units)
+    def _new_mag(self, rmag):
+        "Wraps an allocated magnitude as a quantity with this quantity's units."
+        return self.__class__(rmag, self.units)
+    def new_zeros(self, shape, dtype=None) -> Quantity:
+        """Returns zeros with the given shape, in this quantity's units.
+
+        This is the ``Tensor.new_zeros`` (and ``numpy.zeros``) form of
+        allocation: it takes a shape rather than an example, and follows this
+        quantity's backend, device, and units.
+
+        Parameters
+        ----------
+        shape : int or tuple of int
+            The shape of the result.
+        dtype : dtype-like or None, optional
+            The dtype of the result. The default, ``None``, follows this
+            quantity.
+
+        Returns
+        -------
+        immlib.Quantity
+            Zeros with the given shape, in this quantity's units.
+        """
+        m = self._magnitude
+        if sps.issparse(m):
+            raise TypeError(
+                "cannot allocate a sparse quantity with new_zeros; use"
+                " immlib.quant(..., unit=None) with a sparse array instead")
+        if torch.is_tensor(m):
+            rmag = m.new_zeros(shape, dtype=dtype)
+        else:
+            rmag = np.zeros(shape, dtype=dtype)
+        return self._new_mag(rmag)
+    def new_ones(self, shape, dtype=None) -> Quantity:
+        """Returns ones with the given shape, in this quantity's units.
+
+        The ``Tensor.new_ones`` (and ``numpy.ones``) form of ``new_zeros``;
+        see it for the details.
+
+        Parameters
+        ----------
+        shape : int or tuple of int
+            The shape of the result.
+        dtype : dtype-like or None, optional
+            The dtype of the result. The default, ``None``, follows this
+            quantity.
+
+        Returns
+        -------
+        immlib.Quantity
+            Ones with the given shape, in this quantity's units.
+        """
+        m = self._magnitude
+        if sps.issparse(m):
+            raise TypeError(
+                "cannot allocate a sparse quantity with new_ones; use"
+                " immlib.quant(..., unit=None) with a sparse array instead")
+        if torch.is_tensor(m):
+            rmag = m.new_ones(shape, dtype=dtype)
+        else:
+            rmag = np.ones(shape, dtype=dtype)
+        return self._new_mag(rmag)
+    def new_full(self, shape, fill_value, dtype=None) -> Quantity:
+        """Returns `fill_value` with the given shape, in this quantity's units.
+
+        The ``Tensor.new_full`` (and ``numpy.full``) form of ``new_zeros``. A
+        bare `fill_value` is taken in this quantity's units; a quantity is
+        converted into them, and a quantity with units cannot be used when this
+        quantity has none.
+
+        Parameters
+        ----------
+        shape : int or tuple of int
+            The shape of the result.
+        fill_value : number or quantity
+            The value to fill the result with, in this quantity's units.
+        dtype : dtype-like or None, optional
+            The dtype of the result. The default, ``None``, follows this
+            quantity.
+
+        Returns
+        -------
+        immlib.Quantity
+            `fill_value` with the given shape, in this quantity's units.
+        """
+        m = self._magnitude
+        if sps.issparse(m):
+            raise TypeError(
+                "cannot allocate a sparse quantity with new_full; use"
+                " immlib.quant(..., unit=None) with a sparse array instead")
+        if is_quant(fill_value):
+            if fill_value.units is None:
+                fill_value = fill_value.m
+            elif self.units is None:
+                raise pint.DimensionalityError(
+                    fill_value.units, 'dimensionless',
+                    extra_msg=(" Quantity.new_full: this quantity has no units,"
+                               " so a fill value that has units cannot be used"))
+            else:
+                fill_value = fill_value.m_as(self.units)
+        if torch.is_tensor(m):
+            rmag = m.new_full(shape, fill_value, dtype=dtype)
+        else:
+            rmag = np.full(shape, fill_value, dtype=dtype)
+        return self._new_mag(rmag)
     def __round__(self, ndigits=None):
         mag = self._magnitude
         if self._is_0d():

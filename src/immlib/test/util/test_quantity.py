@@ -2647,3 +2647,29 @@ class TestUtilQuantity(TestCase):
         spec = quant(torch.tensor([1.0, 2.0]), 'mm').tospec()
         self.assertEqual(spec, ((1.0, 2.0), 'millimeter'))
         self.assertIsInstance(quant(spec).m, np.ndarray)
+
+
+    def test_new_allocation(self):
+        """Tests the new_zeros/new_ones/new_full methods of Quantity."""
+        import numpy as np
+        import torch
+        import pint
+        from immlib import quant
+        q = quant(np.arange(3.0), 'm')
+        z = q.new_zeros(2)
+        self.assertEqual(z.units, q.units)
+        self.assertTrue(np.array_equal(z.m, [0.0, 0.0]))
+        self.assertEqual(q.new_ones((2, 2)).m.shape, (2, 2))
+        # A fill value with units is converted into q's units; a bare one is
+        # taken in them.
+        self.assertTrue(np.allclose(q.new_full(2, quant(100.0, 'cm')).m, 1.0))
+        self.assertTrue(np.allclose(q.new_full(2, 3.0).m, 3.0))
+        with self.assertRaises(pint.DimensionalityError):
+            q.new_full(2, quant(1.0, 's'))
+        # dtype is honored, and a tensor quantity allocates a tensor.
+        self.assertEqual(q.new_zeros(1, dtype=np.float32).m.dtype,
+                         np.dtype('float32'))
+        t = quant(torch.zeros(3), 'm')
+        self.assertIsInstance(t.new_ones(2).m, torch.Tensor)
+        self.assertEqual(t.new_ones(2).units, t.units)
+
