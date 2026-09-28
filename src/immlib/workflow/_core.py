@@ -1099,21 +1099,55 @@ class plan(pdict):
         return (srcs, args)
     @staticmethod
     def _transitive_closure(edges):
-        clos = set(edges)
-        while True:
-            s = set(
-                (u1,v2)
-                for (u1,v1) in clos
-                for (u2,v2) in clos
-                if u2 == v1
-                if u1 != v2)
-            if clos.issuperset(s):
-                break
-            clos |= s
-        res = defaultdict(lambda:set())
-        for (u,v) in clos:
-            res[u].add(v)
-        return res
+        """Returns, for each node, the set of nodes reachable from it along the
+        directed `edges`.
+
+        This is called after the calculations have been put in a topological
+        order, so the graph is a DAG and each node's reachable set can be
+        computed once and reused by every node that reaches it. A depth-first
+        search that memoizes those sets costs time linear in the size of the
+        answer, whereas joining the edge set against itself repeatedly (which
+        this used to do) cost O(edges^2) per step and made building a plan of
+        N chained calculations quartic in N.
+        """
+        adj = defaultdict(list)
+        for (u,v) in edges:
+            adj[u].append(v)
+        reach = {}
+        for start in adj:
+            if start in reach:
+                continue
+            # An explicit-stack depth-first search with one iterator per node
+            # on the stack, so that every node is finished only after all of its
+            # children are, and each edge is examined once. A node reached
+            # again while it is still on the stack would be a cycle; the calcs
+            # are topologically ordered before this is called, so that cannot
+            # happen, but it is checked rather than trusted.
+            stack = [(start, iter(adj.get(start, ())))]
+            onstack = {start}
+            while stack:
+                (node, it) = stack[-1]
+                advanced = False
+                for w in it:
+                    if w in reach:
+                        continue
+                    if w in onstack:
+                        raise ValueError(
+                            "cycle detected in the dependency graph")
+                    stack.append((w, iter(adj.get(w, ()))))
+                    onstack.add(w)
+                    advanced = True
+                    break
+                if advanced:
+                    continue
+                stack.pop()
+                onstack.discard(node)
+                children = adj.get(node, ())
+                s = set(children)
+                for w in children:
+                    s |= reach[w]
+                reach[node] = s
+        return defaultdict(set, reach)
     # Construction ------------------------------------------------------------
     # __dict__ is included here (in addition to the named slots below) only
     # because __init__ needs to set a per-instance __doc__: __doc__ can't
