@@ -966,6 +966,107 @@ class plan(pdict):
             k = f'{k0}{ii}'
         return k
     @staticmethod
+    def _realize(calctup, calcargs, cidx):
+        """Computes the calculation at `cidx` and every calculation it needs.
+
+        Requesting a value of a ``plandict`` normally forces the calculation
+        that produces it, which forces the calculations it needs in turn; for
+        a long chain of calculations that recursion is as deep as the chain is
+        long, and it exhausts the interpreter's stack (at around 330
+        calculations, with the default recursion limit). This walk computes
+        the same calculations iteratively, and in a safe order: each
+        calculation is forced only once every calculation that feeds it is
+        ready, so the step from a calculation to its inputs is never
+        recursive. It is an explicit-stack depth-first search, which is also
+        the shape a C implementation of this step would take.
+
+        At most one value of each calculation is computed, whichever thread
+        gets there first: the ``lazy`` values that hold the results are
+        themselves thread-safe (their readers block until the computing
+        thread finishes, and the value is published before the state that
+        marks it ready), and this walk takes no locks of its own -- it only
+        ever asks a calculation for its value. Two threads may walk the same
+        calculations at the same time, but neither can deadlock the other,
+        because a calculation is only ever asked for its value after the
+        calculations it depends on have been asked for theirs.
+
+        A calculation that has already been computed -- here, by another
+        thread, or restored from a pickle -- is left alone, so a failed
+        calculation is never run a second time. A failure during the walk is
+        not raised here: the calculation that depends on the failed one
+        reports it (see ``_call_calc``), which is what names the input that
+        could not be computed.
+        """
+        cell = calctup[cidx]
+        if cell.is_ready():
+            return
+        for src in calcargs[cidx]:
+            if isinstance(src, tuple) and not calctup[src[0]].is_ready():
+                break
+        else:
+            # Nothing this calculation needs is uncomputed, which is the
+            # common case once a plan has been read through in order; there is
+            # nothing to walk, so compute the one calculation and be done.
+            try:
+                cell()
+            except LazyError:
+                pass
+            return
+        # A depth-first search with an explicit stack that computes each
+        # calculation on the way back out of it -- that is, only once
+        # everything it needs is ready. It does not recurse, so the length of
+        # a chain of calculations cannot exhaust the interpreter's stack. A
+        # calculation that is ready (computed here, by another thread, or
+        # restored from a pickle) is marked done and never computed again.
+        state = bytearray(len(calcargs))    # 1: uncomputed and on the stack
+        state[cidx] = 1                     # 2: computed
+        stack = [cidx]
+        while stack:
+            node = stack[-1]
+            descended = False
+            for src in calcargs[node]:
+                if not isinstance(src, tuple):
+                    # A plan parameter, not a calculation.
+                    continue
+                dep = src[0]
+                if state[dep] == 2:
+                    continue
+                if calctup[dep].is_ready():
+                    state[dep] = 2
+                    continue
+                if state[dep] == 0:
+                    state[dep] = 1
+                    stack.append(dep)
+                    descended = True
+                    break
+            if descended:
+                continue
+            stack.pop()
+            state[node] = 2
+            try:
+                calctup[node]()
+            except LazyError:
+                # The failure is reported by the calculation that depends on
+                # this one, so that the error names the input it was passed;
+                # forcing it again there raises this same error without
+                # running the calculation again.
+                pass
+    @staticmethod
+    def _realize_lookup(calctup, calcargs, src):
+        """Returns the value that source `src` refers to, computing it (and
+        everything it needs) first if it has not been computed yet.
+
+        This is the same value that ``_source_lookup`` returns; it is used
+        where a value is requested from outside of a calculation (see
+        ``_realize``).
+        """
+        (cidx, oidx) = src
+        cell = calctup[cidx]
+        if not cell.is_ready():
+            plan._realize(calctup, calcargs, cidx)
+            cell = calctup[cidx]
+        return cell()[oidx]
+    @staticmethod
     def _source_lookup(inputtup, calctup, src):
         if isinstance(src, tuple):
             (cidx, oidx) = src
@@ -1040,7 +1141,7 @@ class plan(pdict):
         new_inputtup = list(inputtup)
         new_calctup = list(calctup)
         items = tldict.empty()
-        srcget = plan._source_lookup
+        calcargs = calcdata.args
         updates = holdlazy(updates)
         for (k,v) in updates.items():
             iidx = sources[k]
@@ -1054,7 +1155,8 @@ class plan(pdict):
                 # lambda that makes a closure over the new_calctup symbol,
                 # which will get updated as we go.
                 lv = lazy(
-                    lambda src: srcget(new_inputtup, new_calctup, src),
+                    lambda src: plan._realize_lookup(new_calctup, calcargs,
+                                                     src),
                     src)
             items[k] = lv
         new_inputtup = tuple(new_inputtup)
@@ -1072,7 +1174,7 @@ class plan(pdict):
             if k not in outputs:  # Skip the internal/translated outputs.
                 continue
             src = self.valsources[k]
-            items[k] = lazy(srcget, new_inputtup, new_calctup, src)
+            items[k] = lazy(plan._realize_lookup, new_calctup, calcargs, src)
         return (new_inputtup, new_calctup, items.persistent())
     @staticmethod
     def _make_srcs_args(names, calcs, params):
@@ -1729,6 +1831,7 @@ def _plan_run_requirements(plan, calctup):
     for r in plan.requirements:
         cidx = calcdata.index[r]
         try:
+            plan._realize(calctup, calcdata.args, cidx)
             calctup[cidx]()
         except LazyError as e:
             pe = _plan_error(e)
@@ -1846,12 +1949,16 @@ class plandict(ldict):
         # Go ahead and do the initialization.
         items = ldict.empty.transient()
         ready = {} if ready is None else ready
+        calcargs = plan.calcdata.args
         def lookup(src):
             if src[0] in ready:
                 # This value's calc was already computed (see plandict
                 # pickling), so the value is ready too.
                 return lazy._from_value(ready[src[0]][src[1]])
-            return lazy(plan._source_lookup, inputtup, calctup, src)
+            # _realize_lookup computes the calc and everything it needs
+            # before asking it for the value, which keeps a long chain of
+            # calcs from recursing (see _realize).
+            return lazy(plan._realize_lookup, calctup, calcargs, src)
         for k in plan.inputs:
             src = plan.valsources[k]
             # If this input gets filtered, we need a lazy lookup:

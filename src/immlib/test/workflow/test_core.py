@@ -10,6 +10,32 @@
 
 from unittest import TestCase
 
+def chain_calcs(n, runs=None):
+    """Returns a dict of calcs that form a chain ``v0 <- v1 <- ... <- v(n-1)``.
+
+    Each calc adds 1 to the value before it, so a plan made of these calcs
+    computes ``pd['v{i}'] == x + i + 1``. The calcs are built programmatically
+    rather than written out one by one, so that a chain can be as long as a
+    test needs; `runs`, if given, has the name of each calc appended to it
+    each time the calc's function is called.
+    """
+    from inspect import (Signature, Parameter)
+    from immlib.workflow import calc
+    def step(name, argname, outname):
+        def fn(**kwargs):
+            if runs is not None:
+                runs.append(name)
+            return kwargs[argname] + 1
+        fn.__name__ = name
+        fn.__signature__ = Signature(
+            [Parameter(argname, Parameter.POSITIONAL_OR_KEYWORD)])
+        return calc(outname)(fn)
+    calcs = {}
+    for i in range(n):
+        argname = 'x' if i == 0 else f'v{i-1}'
+        calcs[f'f{i}'] = step(f'f{i}', argname, f'v{i}')
+    return calcs
+
 class TestWorkflowCore(TestCase):
     """Tests the immlib.workflow._core module."""
     def test_calc(self):
@@ -904,6 +930,130 @@ class TestWorkflowCore(TestCase):
             pd3 = pd2.set('cache_path', dir2)
             self.assertEqual(pd3['y'], 4)
             self.assertEqual(_PICKLE_RUNS, ['cached_square'] * 2)
+    def test_long_chain(self):
+        """A long chain of calcs is evaluated without recursing.
+
+        Requesting the last value of a chain of n calcs computes all n of
+        them. Computing each calc by requesting the calcs it needs recursed
+        once per calc, so a chain of more than a few hundred calcs raised
+        RecursionError; the values are now computed by an iterative walk
+        (see plan._realize), so the length of the chain no longer matters.
+        """
+        from immlib.workflow import plan
+        n = 2000
+        pd = plan(chain_calcs(n))(x=0)
+        self.assertEqual(pd[f'v{n-1}'], n)
+        # Any value along the chain can be read, and reading it does not
+        # compute more of the chain than it needs.
+        self.assertEqual(pd[f'v{n//2}'], n//2 + 1)
+    def test_long_chain_required_calc(self):
+        """A required calc at the end of a long chain is also iterative.
+
+        A calc with lazy=False is computed when the plandict is made, so it
+        reaches the same walk by a different route (plan._plan_run_requirements).
+        """
+        from inspect import (Signature, Parameter)
+        from immlib.workflow import (calc, plan)
+        n = 1000
+        calcs = chain_calcs(n)
+        seen = []
+        def required(**kwargs):
+            seen.append(kwargs[f'v{n-1}'])
+        required.__name__ = 'required'
+        required.__signature__ = Signature(
+            [Parameter(f'v{n-1}', Parameter.POSITIONAL_OR_KEYWORD)])
+        calcs['required'] = calc(None, lazy=False)(required)
+        pd = plan(calcs)(x=0)
+        self.assertEqual(seen, [n])
+        self.assertEqual(pd[f'v{n-1}'], n)
+    def test_long_chain_update(self):
+        """Changing a parameter of a long chain is also iterative.
+
+        Setting a parameter of a tplandict resets every calc downstream of it
+        (plan._update_dictdata), and the new values are computed by the same
+        walk as the values of a fresh plandict.
+        """
+        from immlib.workflow import plan
+        n = 1000
+        pd = plan(chain_calcs(n))(x=0).transient()
+        pd['x'] = 10
+        self.assertEqual(pd[f'v{n-1}'], n + 10)
+    def test_concurrent_reads(self):
+        """Threads requesting the same values compute each calc only once.
+
+        A calc's value is held in a lazy value, which computes at most once
+        however many threads request it; this checks that the plan's
+        iterative value lookup preserves that (a walk by many threads at once
+        must not compute a calc twice, and must not deadlock).
+        """
+        import threading
+        from immlib.workflow import plan
+        n = 12
+        runs = []
+        pd = plan(chain_calcs(n, runs=runs))(x=0)
+        nthreads = 32
+        barrier = threading.Barrier(nthreads)
+        errors = []
+        def read():
+            try:
+                barrier.wait()
+                for i in range(n):
+                    if pd[f'v{i}'] != i + 1:
+                        errors.append(f'v{i} is wrong')
+            except BaseException as e:
+                errors.append(e)
+        threads = [threading.Thread(target=read) for _ in range(nthreads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(errors, [])
+        # Each calc ran exactly once, so the runs are the calcs' names.
+        self.assertEqual(sorted(runs), sorted(f'f{i}' for i in range(n)))
+    def test_concurrent_failure(self):
+        """A failing calc runs once however many threads request it.
+
+        Every thread that asks for a value downstream of the failure gets the
+        same PlanError, and the failing calc is not run again (the lazy value
+        that holds it remembers the failure).
+        """
+        import threading
+        from inspect import (Signature, Parameter)
+        from immlib.workflow import (calc, plan, PlanError)
+        runs = []
+        def fail(**kwargs):
+            runs.append('fail')
+            raise ValueError("no value")
+        fail.__name__ = 'fail'
+        fail.__signature__ = Signature(
+            [Parameter('x', Parameter.POSITIONAL_OR_KEYWORD)])
+        def after(**kwargs):
+            return kwargs['a'] + 1
+        after.__name__ = 'after'
+        after.__signature__ = Signature(
+            [Parameter('a', Parameter.POSITIONAL_OR_KEYWORD)])
+        p = plan(fail=calc('a')(fail), after=calc('b')(after))
+        pd = p(x=1)
+        nthreads = 16
+        barrier = threading.Barrier(nthreads)
+        errors = []
+        def read():
+            try:
+                barrier.wait()
+                pd['b']
+            except PlanError as e:
+                errors.append(str(e))
+            except BaseException as e:
+                errors.append(e)
+        threads = [threading.Thread(target=read) for _ in range(nthreads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        self.assertEqual(runs, ['fail'])
+        self.assertEqual(len(errors), nthreads)
+        self.assertEqual(len(set(errors)), 1)
+        self.assertIn('ValueError', errors[0])
 
 
 # Module-level calcs and plans for the pickling tests (calcs are pickled by
