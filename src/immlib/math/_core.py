@@ -95,10 +95,11 @@ import pint
 import scipy.sparse as sps
 from docshare import docwrap
 
-from ..util._numeric import torch, to_tensor
-from ..util._core import unitregistry
+from ..util._numeric import torch, to_tensor, is_numeric
+from ..util._core import unitregistry, _default_ureg
 from ..util._quantity import (Quantity, quant, mag, alike_units,
-                               promote, is_quant)
+                               promote, is_quant, _quant_magnitude,
+                               _promote_mags)
 
 if TYPE_CHECKING:
     import torch as _torch
@@ -183,6 +184,11 @@ def _align_units(a, b, fname):
     is treated as a dimensionless value. Raises ``pint.DimensionalityError``
     when the units cannot be combined.
     """
+    if _is_bare(a) and _is_bare(b):
+        # Neither operand has units (see the note above _bare_operands), so
+        # there is nothing to align, and nothing to be gained by building the
+        # two quantities that would then be asked for their magnitudes.
+        return (_quant_magnitude(a), _quant_magnitude(b), None)
     a = quant(a)
     b = quant(b)
     au = a.units
@@ -548,32 +554,120 @@ def _doc_returns_indices(a):
     raise NotImplementedError("_doc_returns_indices is documentation")
 
 
+# Unit-less arithmetic #########################################################
+# A value that is not a quantity--an array, a tensor, a sparse array, a
+# number, a list of them--is a quantity with no units as far as immlib is
+# concerned (see the module docstring), and a quantity with no units does not
+# use any of Pint's unit machinery: immlib operates on its bare magnitude (see
+# Quantity._binop_none). So `quant(a) + quant(b)` would build two quantities
+# only to take them apart again as soon as the operator saw them, at the cost
+# of two quantity constructions--more than the entire rest of the operation
+# for an array or tensor. The three helpers below do the same work for values
+# that are not quantities: they make the magnitudes exactly as quant makes
+# them, promote them together exactly as Quantity._none_operands promotes
+# them, and wrap the result the way Quantity._binop_none wraps it (a unit-less
+# quantity of the default registry, which is the registry quant would have
+# used). Anything else--a quantity operand, an operation a bare magnitude
+# cannot perform--is left to the quantities.
+
+def _is_bare(x):
+    """Returns whether `x` can be handed to an operation as a bare magnitude.
+
+    A quantity is not bare, and neither is a tuple, which may be a quantity
+    written as a spec (``(2, 'm')``) and so has to be resolved by ``quant``
+    first (see ``immlib.quant_spec``).
+    """
+    return not isinstance(x, (pint.Quantity, tuple))
+
+def _bare_operands(a, b):
+    """Returns the magnitudes of `a` and `b`, promoted together, or `None`
+    if either is a quantity (and so needs quant's own handling)."""
+    if isinstance(a, (pint.Quantity, tuple)) or isinstance(
+            b, (pint.Quantity, tuple)):
+        return None
+    x = _quant_magnitude(a)
+    y = _quant_magnitude(b)
+    if torch.is_tensor(x) != torch.is_tensor(y) and (
+            is_numeric(y) or isinstance(y, (list, tuple))):
+        (x, y) = _promote_mags(x, y)
+    return (x, y)
+
+def _binop_bare(a, b, op):
+    """Returns the quantity that `op` gives for two values that are not
+    quantities (see the note above)."""
+    pair = _bare_operands(a, b)
+    if pair is None:
+        return op(quant(a), quant(b))
+    (x, y) = pair
+    result = op(x, y)
+    if result is NotImplemented or isinstance(result, pint.Quantity):
+        return op(quant(a), quant(b))
+    return _default_ureg().Quantity(result, None)
+
+def _boolop_bare(a, b, op):
+    """Returns the plain array or tensor of bool that `op` gives for two
+    values that are not quantities; this is the comparison counterpart of
+    ``_binop_bare``."""
+    pair = _bare_operands(a, b)
+    if pair is None:
+        return op(quant(a), quant(b))
+    (x, y) = pair
+    return op(x, y)
+
+def _pow_bare(a, b):
+    """Returns ``a ** b`` for two values that are not quantities (see the
+    note above).
+
+    `pow` promotes only its first argument, and the second is passed to the
+    magnitude as it is: an exponent may be any number, and a quantity only if
+    the first argument has no units (see ``Quantity.__pow__``).
+    """
+    if not (_is_bare(a) and _is_bare(b)):
+        return quant(a) ** b
+    x = _quant_magnitude(a)
+    y = b
+    if torch.is_tensor(x) != torch.is_tensor(y) and (
+            is_numeric(y) or isinstance(y, (list, tuple))):
+        (x, y) = _promote_mags(x, y)
+    result = x ** y
+    if result is NotImplemented or isinstance(result, pint.Quantity):
+        return quant(a) ** b
+    return _default_ureg().Quantity(result, None)
+
+def _unop_bare(a, op):
+    """Returns the quantity that `op` gives for a value that is not a
+    quantity (see the note above)."""
+    if not _is_bare(a):
+        return op(quant(a))
+    return _default_ureg().Quantity(op(_quant_magnitude(a)), None)
+
+
 # Elementwise arithmetic #######################################################
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def abs(a: QuantityLike) -> Quantity:
     """Returns the elementwise absolute value of `a`, preserving units."""
-    return builtins.abs(quant(a))  # type: ignore[return-value]
+    return _unop_bare(a, operator.abs)  # type: ignore[return-value]
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def add(a: QuantityLike, b: QuantityLike) -> Quantity:
     """Returns ``a + b``; see ``immlib.Quantity``'s unit-aware addition."""
-    return quant(a) + quant(b)  # type: ignore[return-value]
+    return _binop_bare(a, b, operator.add)  # type: ignore[return-value]
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def subtract(a: QuantityLike, b: QuantityLike) -> Quantity:
     """Returns ``a - b``; see ``immlib.Quantity``'s unit-aware subtraction."""
-    return quant(a) - quant(b)  # type: ignore[return-value]
+    return _binop_bare(a, b, operator.sub)  # type: ignore[return-value]
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def multiply(a: QuantityLike, b: QuantityLike) -> Quantity:
     """Returns ``a * b``; see ``immlib.Quantity``'s unit-aware multiplication."""
-    return quant(a) * quant(b)  # type: ignore[return-value]
+    return _binop_bare(a, b, operator.mul)  # type: ignore[return-value]
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def divide(a: QuantityLike, b: QuantityLike) -> Quantity:
     """Returns ``a / b``; see ``immlib.Quantity``'s unit-aware division."""
-    return quant(a) / quant(b)  # type: ignore[return-value]
+    return _binop_bare(a, b, operator.truediv)  # type: ignore[return-value]
 
 true_divide = divide
 
@@ -585,17 +679,17 @@ def pow(a: QuantityLike, b: QuantityLike) -> Quantity:
     This is PyTorch's name for the operation; NumPy calls it ``power``,
     which PyTorch does not define and which is therefore not defined here.
     """
-    return quant(a) ** b
+    return _pow_bare(a, b)
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def negative(a: QuantityLike) -> Quantity:
     """Returns ``-a``, preserving units."""
-    return -quant(a)  # type: ignore[return-value]
+    return _unop_bare(a, operator.neg)  # type: ignore[return-value]
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def positive(a: QuantityLike) -> Quantity:
     """Returns ``+a``, preserving units."""
-    return +quant(a)  # type: ignore[return-value]
+    return _unop_bare(a, operator.pos)  # type: ignore[return-value]
 
 
 # Comparisons ###################################################################
@@ -617,7 +711,7 @@ def eq(a: QuantityLike, b: QuantityLike) -> BoolArray:
     ``eq`` is PyTorch's name for the elementwise comparison; note that
     ``equal``, in PyTorch and here, is the whole-array test instead.
     """
-    return quant(a) == quant(b)
+    return _boolop_bare(a, b, operator.eq)
 
 @docwrap(format='numpy', inheritparams=_doc_params)
 def equal(a: QuantityLike, b: QuantityLike) -> bool:
@@ -650,28 +744,28 @@ def equal(a: QuantityLike, b: QuantityLike) -> bool:
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_bool)
 def not_equal(a: QuantityLike, b: QuantityLike) -> BoolArray:
     """Returns the elementwise result of ``a != b``; see ``eq``."""
-    return quant(a) != quant(b)
+    return _boolop_bare(a, b, operator.ne)
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_bool)
 def less(a: QuantityLike, b: QuantityLike) -> BoolArray:
     """Returns the elementwise result of ``a < b`` (unit-aware; raises for
     dimensionally incompatible real units, per ``immlib.Quantity``)."""
-    return quant(a) < quant(b)
+    return _boolop_bare(a, b, operator.lt)
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_bool)
 def less_equal(a: QuantityLike, b: QuantityLike) -> BoolArray:
     """Returns the elementwise result of ``a <= b``; see ``less``."""
-    return quant(a) <= quant(b)
+    return _boolop_bare(a, b, operator.le)
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_bool)
 def greater(a: QuantityLike, b: QuantityLike) -> BoolArray:
     """Returns the elementwise result of ``a > b``; see ``less``."""
-    return quant(a) > quant(b)
+    return _boolop_bare(a, b, operator.gt)
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_bool)
 def greater_equal(a: QuantityLike, b: QuantityLike) -> BoolArray:
     """Returns the elementwise result of ``a >= b``; see ``less``."""
-    return quant(a) >= quant(b)
+    return _boolop_bare(a, b, operator.ge)
 
 #: An alias of ``immlib.math.not_equal``, as in PyTorch.
 ne = not_equal
