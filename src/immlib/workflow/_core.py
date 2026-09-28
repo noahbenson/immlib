@@ -533,27 +533,29 @@ class calc:
         """
         # Now we just pass these arguments along (the function itself has been
         # given the caching code via decorators already).
+        return ldict(dict(zip(self.outputs, self.eager_outputs(*args, **kwargs))))
+    def eager_outputs(self, *args, **kwargs):
+        """Eagerly calls the calculation and returns its outputs as a tuple.
+
+        This is the same call that ``eager_call`` makes, except that the
+        outputs are returned as a tuple in the order of ``calc.outputs``
+        rather than being wrapped in a lazydict. ``plan`` uses this directly
+        when it runs a calculation, since it wants the values themselves.
+        """
         res = self.function(*args, **kwargs)
-        # Now interpret the result.
         outs = self.outputs
-        if not outs:
-            # We ignore the output and just return an empty lazydict in this
-            # case.
-            return ldict({})
         n = len(outs)
+        if n == 0:
+            # We ignore the output and just return an empty tuple in this case.
+            return ()
         if is_amap(res) and len(res) == n and all(k in res for k in outs):
-            pass
-        elif is_tuple(res) and len(res) == n:
-            res = {k:v for (k,v) in zip(outs, res)}
-        elif len(self.outputs) == 1:
-            res = {outs[0]: res}
-        elif not self.outputs and not res:
-            res = {}
-        else:
-            raise ValueError(f'return value from function call ({self.name}):'
-                             ' did not match efferents')
-        # We always convert lazys into values by returning a lazydict.
-        return ldict(res)
+            return tuple(res[k] for k in outs)
+        if is_tuple(res) and len(res) == n:
+            return tuple(res)
+        if n == 1:
+            return (res,)
+        raise ValueError(f'return value from function call ({self.name}):'
+                         ' did not match efferents')
     def lazy_call(self, *args, **kwargs):
         """Returns a lazy-dict of the results of calling the calculation.
 
@@ -995,25 +997,24 @@ class plan(pdict):
                 args.append(arg)
             else:
                 kwargs[p.name] = arg
-        r = c.eager_call(*args, **kwargs)
-        if is_amap(r):
-            return tuple(map(r.__getitem__, c.outputs))
-        else:
-            return tuple(r)
+        return c.eager_outputs(*args, **kwargs)
     @staticmethod
     def _make_calctup(calcdata, inputtup, ready=None):
         # If given, ready maps calc indices to the (already computed) results
         # of those calcs; see plandict pickling.
-        f = plan._call_calc
+        call = plan._call_calc
         ready = {} if ready is None else ready
-        # We take advantage of Python's weak closures here:
-        calctup = ()
-        calctup = tuple(
-            (lazy._from_value(ready[cidx]) if cidx in ready else
-             lazy(lambda c,args: f(inputtup, calctup, c, args), c, args))
-            for (cidx,(c,args)) in enumerate(
-                zip(calcdata.calcs, calcdata.args)))
-        return calctup
+        # We take advantage of Python's weak closures here: each lazy is given
+        # the calctup list itself rather than a copy of it, so that a
+        # calculation's value is looked up only when it is needed and so that
+        # a replacement made later in the list is seen by the values that
+        # depend on it (see _update_dictdata).
+        calctup = []
+        for (c,args) in zip(calcdata.calcs, calcdata.args):
+            calctup.append(lazy(call, inputtup, calctup, c, args))
+        for cidx in ready:
+            calctup[cidx] = lazy._from_value(ready[cidx])
+        return tuple(calctup)
     @staticmethod
     def _update_calctup(calcdata, inputtup, calctup, cidx):
         calctup[cidx] = lazy(
