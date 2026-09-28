@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-import copy, textwrap, pickle
+import copy, textwrap, pickle, heapq
 from typing import Any
 from contextvars import ContextVar
 from collections.abc import (Callable, Mapping)
@@ -1232,11 +1232,15 @@ class plan(pdict):
         calcorder = []
         input_docs = defaultdict(lambda:[])
         output_docs = defaultdict(lambda:[])
+        # The order in which the calcs appear in the plan, used below to break
+        # ties so that the calculation order (and thus the values' order and
+        # the generated documentation) does not depend on set-iteration order.
+        order_key = {k: i for (i,k) in enumerate(self.keys())}
         # We're going to be selecting filters and we want to do so
         # preferentially based on the number of inputs they require.
         filts = tset(sorted(
             filters, key=lambda
-            f:-len(to_calc(self[f]).inputs)))
+            f:(-len(to_calc(self[f]).inputs), order_key[f])))
         filters = pset(filts)
         # The calcs that produce each value, whether as an ordinary output or
         # as a filter (a calc whose output is also one of its inputs). A calc
@@ -1248,40 +1252,89 @@ class plan(pdict):
         for (v,(outs,fcalcs,ins)) in val2calc.items():
             producers[v].update(outs)
             producers[v].update(fcalcs)
-        def is_ready(f):
-            c = to_calc(self[f])
-            if not (c.inputs <= inputs):
-                return False
+        # Because a calc that is ready to run stays ready, we can order the
+        # calcs with a single topological pass instead of rescanning every
+        # pending calc for readiness at each step. A calc is held back by
+        # (a) the other calcs that produce its inputs -- which a filter, since
+        # it both consumes and produces the same value, is not made to wait on,
+        # though it is still held back by (b) its inputs that do not yet exist
+        # (that is, that are not a plan parameter or the output of a calc that
+        # has already been ordered). We count (a) in nblock and (b) in nvalue;
+        # a calc becomes ready when both reach zero, at which point it is
+        # pushed onto the ready heap for its kind. Filters are preferred over
+        # other calcs, and within each kind the calcs are taken in a fixed
+        # order (a filter's declared order and a calc's plan order), so the
+        # resulting order is deterministic.
+        calcdata = {f: to_calc(self[f]) for f in calcs}
+        nblock = {}
+        nvalue = {}
+        dependents = defaultdict(list)
+        valuewaiters = defaultdict(list)
+        available = set(params)
+        for f in calcs:
+            c = calcdata[f]
+            blk = set()
+            nval = 0
             for v in c.inputs:
-                # A filter transforms its own output value in place, so it is
-                # not made to wait for the other calcs that produce that value.
+                if v not in available:
+                    # The value must exist before this calc can run, whether it
+                    # is a parameter or the output of some other calc.
+                    nval += 1
+                    valuewaiters[v].append(f)
                 if v in c.outputs:
+                    # A filter transforms its own output value in place, so it
+                    # is not made to wait for the other calcs that produce
+                    # that value.
                     continue
                 for g in producers.get(v, ()):
                     if g != f and g in calcs:
-                        return False
-            return True
+                        blk.add(g)
+            nblock[f] = len(blk)
+            nvalue[f] = nval
+            for g in blk:
+                dependents[g].append(f)
+        # Filters are preferred, and earlier filters (by the order established
+        # above) are preferred to later ones; otherwise we keep the plan order.
+        order_filter = {f: i for (i,f) in enumerate(filts)}
+        ready = []
+        pushed = set()
+        def push(f):
+            if f in pushed:
+                return
+            pushed.add(f)
+            if f in filters:
+                heapq.heappush(ready, (0, order_filter[f], f))
+            else:
+                heapq.heappush(ready, (1, order_key[f], f))
+        for f in calcs:
+            if nblock[f] == 0 and nvalue[f] == 0:
+                push(f)
         while len(calcs) > 0:
-            # We start by greedily selecting filters.
-            if len(filts) > 0:
-                nextcalc = next(filter(is_ready, filts), None)
-            else:
-                nextcalc = None
-            if nextcalc is None:
-                # If we get here, we didn't find a filter, so we look for any
-                # other calc we can run!
-                nextcalc = next(filter(is_ready, calcs), None)
-                if nextcalc is None:
-                    raise ValueError(
-                        f"unreachable calcs: {tuple(calcs)}; this is likely"
-                        f" due to a circular dependency")
-            else:
-                filts.discard(nextcalc)
+            if len(ready) == 0:
+                raise ValueError(
+                    f"unreachable calcs: {tuple(calcs)}; this is likely"
+                    f" due to a circular dependency")
+            # We start by greedily selecting filters, then any other calc.
+            nextcalc = heapq.heappop(ready)[2]
             # We have a next calculation in the order, so we add it.
             calcorder.append(nextcalc)
-            c = to_calc(self[nextcalc])
+            c = calcdata[nextcalc]
             inputs.addall(c.outputs)
             calcs.discard(nextcalc)
+            # Every value this calc produces may satisfy calcs that were held
+            # back by (b), and every calc that was held back by (a) waiting on
+            # this one may now be ready.
+            for v in c.outputs:
+                if v not in available:
+                    available.add(v)
+                    for f in valuewaiters.get(v, ()):
+                        nvalue[f] -= 1
+                        if nvalue[f] == 0 and nblock[f] == 0:
+                            push(f)
+            for f in dependents.get(nextcalc, ()):
+                nblock[f] -= 1
+                if nblock[f] == 0 and nvalue[f] == 0:
+                    push(f)
             # While we're going through the calcs in order, we process docs:
             for (inp,doc) in c.input_docs.items():
                 if not doc:
