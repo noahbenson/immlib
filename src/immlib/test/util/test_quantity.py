@@ -2381,6 +2381,39 @@ class TestUtilQuantity(TestCase):
         def strip(a):
             return a
         self.assertNotIsInstance(strip(quant(1.0, 'mm')), Quantity)
+    def test_persistence_policy(self):
+        """Tests which functions hand back a persistent quantity.
+
+        immlib's rule: a function that has a `persist` option is where a
+        persistent quantity is asked for; every other function that makes a
+        quantity and returns it returns a transient one, since immlib made
+        it and immlib is handing it over; and a quantity that is only passed
+        through keeps whatever persistence it had, since it is not immlib's
+        to change.
+        """
+        import numpy as np
+        from immlib import quant, to_array, to_tensor, to_numeric
+        a = np.arange(3.0)
+        q = quant(a, 'm')
+        tq = quant(a, 'm', persist=False)
+        # A function with a `persist` option, whose default is to persist.
+        self.assertTrue(quant(a, 'm').is_persistent)
+        self.assertFalse(quant(a, 'm', persist=False).is_persistent)
+        # ... including when it is handed a quantity to convert.
+        self.assertFalse(quant(q, 'cm', persist=False).is_persistent)
+        self.assertTrue(quant(tq, 'cm', persist=True).is_persistent)
+        # Functions without one return a transient when they make a quantity.
+        for r in (to_array(a, quant=True, unit='m'),
+                  to_tensor(a, quant=True, unit='m'),
+                  to_array(tq, quant=True)):
+            self.assertFalse(r.is_persistent)
+        # They hand back quantities they were given, unchanged.
+        self.assertIs(to_array(q), q)
+        self.assertTrue(to_array(q).is_persistent)
+        self.assertIs(to_numeric(q), q)
+        self.assertIs(to_array(tq), tq)
+        self.assertFalse(to_array(tq).is_persistent)
+
     def test_quantity_hash(self):
         """Tests that no quantity is hashable, and why.
 

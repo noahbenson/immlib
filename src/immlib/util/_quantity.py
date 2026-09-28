@@ -872,6 +872,21 @@ class Quantity(pint.Quantity):
         bare magnitudes and keeps the persistence of quantities it is
         given.
 
+        **Which functions persist what they return.** immlib follows one
+        rule. A function that has a ``persist`` option--``immlib.quant``
+        and its relatives, whose default is to persist; ``quantwrap``,
+        whose ``persist`` applies to the value the wrapped function returns
+        and whose default leaves that value as it was made--is where a
+        persistent quantity is asked for. Every other function that makes a
+        quantity and returns it returns a *transient* one: ``immlib.math``,
+        the ``to_*`` converters, and the rest of the library, since immlib
+        made the quantity and immlib is handing it over, so nothing else
+        can be holding it yet. A caller who wants a persistent quantity
+        asks for it then, with ``result.persist()``, which costs nothing.
+        A quantity that a function only passes through--``to_array(q)`` is
+        ``q`` itself, and so is ``quant(q)``--keeps whatever persistence it
+        had, since it is not immlib's to change.
+
         **Thread safety.** A persistent quantity can be read from any
         number of threads at once, including in a free-threaded
         interpreter, without a lock. This is what persisting one is for:

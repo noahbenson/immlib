@@ -1087,3 +1087,56 @@ class TestMath(TestCase):
                             il.quant(torch.tensor([0.0, 2.0, 2.5]), 'm'))
         self.assertIsInstance(r, torch.Tensor)
         self.assertTrue(torch.equal(r, torch.tensor([0, 1, 3])))
+
+    # Persistence ##############################################################
+    def test_results_are_transient(self):
+        """The quantities immlib.math makes and returns are transient.
+
+        immlib.math has no `persist` option, so by immlib's rule every
+        quantity it makes and hands back is transient: immlib made it and
+        immlib is handing it over, so nothing else can be holding it. A
+        caller that wants a persistent one calls `persist()`, which costs
+        nothing. (A quantity that is only passed through--`to_array(q)` is
+        `q`--keeps whatever persistence it had.)
+        """
+        import immlib as il
+        import immlib.math as im
+        import numpy as np
+        import torch
+        a = np.arange(6.0).reshape(2, 3)
+        t = torch.arange(6.0).reshape(2, 3)
+        q = il.quant(a, 'm')
+        qq = il.quant(a)
+        results = {
+            'add(a, a)': im.add(a, a),
+            'multiply(q, q)': im.multiply(q, q),
+            'sqrt(q)': im.sqrt(q),
+            'sum(q)': im.sum(q),
+            'mean(q)': im.mean(q),
+            'maximum(a, a)': im.maximum(a, a),
+            'minimum(q, q)': im.minimum(q, q),
+            'where(cond, a, a)': im.where(a > 2, a, a),
+            'abs(a)': im.abs(a),
+            'negative(q)': im.negative(q),
+            'stack([q, q])': im.stack([q, q]),
+            'cat([q, q])': im.cat([q, q]),
+            'reshape(q, ...)': im.reshape(q, (3, 2)),
+            'zeros_like(q)': im.zeros_like(q),
+            'ones_like(a)': im.ones_like(a),
+            'matmul(a, a.T)': im.matmul(a, a.T),
+            'transpose(q)': im.transpose(q, 0, 1),
+            'sum(t)': im.sum(t),
+            'add(t, t)': im.add(t, t),
+            'sum(qq)': im.sum(qq),
+        }
+        for (label, r) in results.items():
+            with self.subTest(label):
+                self.assertFalse(r.is_persistent, label)
+        # A caller can make one persistent, in place and for free; and a
+        # persistent input does not make a persistent result.
+        r = im.sqrt(q)
+        self.assertIs(r.persist(), r)
+        self.assertTrue(r.is_persistent)
+        self.assertFalse(im.multiply(q, q).is_persistent)
+        # Comparisons answer with a bool array, not a quantity.
+        self.assertNotIsInstance(im.less(q, q), il.Quantity)

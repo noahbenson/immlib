@@ -449,6 +449,22 @@ created mutable, which `pint`'s own internal operations rely on; persisting
 one is a decision made after it is fully built, usually just before it is
 returned or stored somewhere that other code can see it.
 
+immlib follows one rule about which of the quantities it hands back are
+persistent:
+
+* a function that has a `persist` option is where a persistent quantity is
+  asked for. `il.quant` and its relatives have one, and their default is to
+  persist; `quantwrap`'s `persist` applies to the value the wrapped function
+  returns, and its default leaves that value as it was made;
+* every other function that makes a quantity and returns it returns a
+  *transient* one — `immlib.math`, the `to_*` converters, and the rest of
+  the library. immlib made the quantity and immlib is handing it over, so
+  nothing else can be holding it yet, and persisting is the new holder's
+  decision, taken with `result.persist()`, which costs nothing;
+* a quantity that a function only passes through — `il.to_array(q)` is `q`
+  itself, and so is `il.quant(q)` — keeps whatever persistence it had, since
+  it is not immlib's to change.
+
 ```{code-cell}
 import numpy as np
 
