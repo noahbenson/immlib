@@ -1160,7 +1160,7 @@ class plan(pdict):
     __slots__ = (
         'inputs', 'outputs', 'defaults', 'requirements',
         'input_docs', 'output_docs', 'docstr',
-        'calcdata', 'valsources', 'dependants', '__dict__')
+        'calcdata', 'valsources', '_itr', '_dependants', '__dict__')
     def __new__(cls, *args, **kwargs):
         # We overload new just to parse the input arguments and convert any
         # values into calc objects. We then pass these down to pdict.
@@ -1503,28 +1503,11 @@ class plan(pdict):
         requirements = pset(reqs)
         # One final thing we need to do is to make the dependants graph; this
         # is basically the graph of calculations and outputs that need to be
-        # updated / reset any time a parameter is changed.
-        depset = set()
-        for (cidx,c) in enumerate(calcdata.calcs):
-            c = to_calc(c)
-            for k in c.inputs:
-                depset.add((k, cidx))
-            for k in c.outputs:
-                depset.add((cidx, k))
-        depgraph = plan._transitive_closure(depset)
-        deps = tdict()
-        for k in inputs:
-            odeps = []
-            cdeps = []
-            for d in depgraph[k]:
-                if isinstance(d, str):
-                    odeps.append(d)
-                else:
-                    cdeps.append(d)
-            # Translate to original key name (not dep key)
-            k = itr.get(k, k)
-            deps[k] = plan.DepData(tuple(odeps), tuple(cdeps))
-        dependants = deps.persistent()
+        # updated / reset any time a parameter is changed. It is quadratic in
+        # the number of calcs for a long chain of them, so it is made on
+        # demand instead of here (see the dependants property).
+        object.__setattr__(self, '_itr', itr)
+        object.__setattr__(self, '_dependants', None)
         # Now set all the variables, and we're done!
         object.__setattr__(self, 'inputs', inputs)
         object.__setattr__(self, 'outputs', outputs)
@@ -1534,7 +1517,46 @@ class plan(pdict):
         object.__setattr__(self, 'output_docs', output_docs)
         object.__setattr__(self, 'calcdata', calcdata)
         object.__setattr__(self, 'valsources', valsources)
-        object.__setattr__(self, 'dependants', dependants)
+    def _make_dependants(self):
+        # The graph of the calcs and outputs that are downstream of each of
+        # the plan's parameters.
+        calcdata = self.calcdata
+        itr = self._itr
+        depset = set()
+        for (cidx,c) in enumerate(calcdata.calcs):
+            c = to_calc(c)
+            for k in c.inputs:
+                depset.add((k, cidx))
+            for k in c.outputs:
+                depset.add((cidx, k))
+        depgraph = plan._transitive_closure(depset)
+        deps = tdict()
+        for k in self.inputs:
+            odeps = []
+            cdeps = []
+            for d in depgraph[k]:
+                if isinstance(d, str):
+                    odeps.append(d)
+                else:
+                    cdeps.append(d)
+            # Translate to original key name (not dep key)
+            deps[itr.get(k, k)] = plan.DepData(tuple(odeps), tuple(cdeps))
+        return deps.persistent()
+    @property
+    def dependants(self):
+        """Maps each plan parameter to the calcs and outputs downstream of it.
+
+        This is the graph that a plandict consults when one of its parameters
+        is changed: the values of these calcs and outputs must be recomputed
+        when the parameter changes. It is made the first time it is needed, as
+        it is quadratic in the number of calcs for a long chain of them, which
+        is too expensive to pay when a plan is only constructed and read.
+        """
+        d = self._dependants
+        if d is None:
+            d = self._make_dependants()
+            object.__setattr__(self, '_dependants', d)
+        return d
     # Methods -----------------------------------------------------------------
     def filtercall(self, *args, **kwargs):
         """Calls the plan object, but filters out args that aren't in the plan.
