@@ -2290,15 +2290,17 @@ def _quant_magnitude(mag):
     ``numpy.asarray``, so scalars become 0-dimensional arrays. Arrays must
     have a numeric (or boolean) dtype.
     """
-    if torch.is_tensor(mag):
-        return mag
-    if isinstance(mag, (str, bytes)):
+    if isinstance(mag, np.ndarray) or scipy__is_sparse(mag):
+        # The common cases, checked before asking about torch: a NumPy
+        # array or a SciPy sparse array is neither a tensor nor a string.
+        arr = mag
+    elif isinstance(mag, (str, bytes)):
         raise TypeError(
             f"quant: magnitude must be numerical, not {type(mag).__name__}"
             " (to parse a quantity from a string, use the unit registry,"
             " e.g. immlib.units.Quantity('5 mm'))")
-    if isinstance(mag, np.ndarray) or scipy__is_sparse(mag):
-        arr = mag
+    elif torch.is_tensor(mag):
+        return mag
     else:
         try:
             arr = np.asarray(mag)
@@ -2659,17 +2661,28 @@ def quant(mag: Any, /, unit: Any = Ellipsis, *, ureg: Any = None, persist: Any =
         not ``immlib.Quantity`` objects.
 
     """
-    spec = quant_spec(mag)
-    if spec is not None:
-        # `mag` is written as a quantity spec; resolve it into a quantity
-        # first, in the registry the spec names, so that its unit name means
-        # what it means there. This function's own `unit`, `ureg` and
-        # `persist` options then apply to the result, which is why
-        # quant((10, 'cm'), 'm') is 0.1 m rather than 10 m.
-        mag = _quant_of_spec(spec)
+    if isinstance(mag, tuple):
+        # Only a tuple is a quantity spec, so this is the only case in which
+        # the unit and registry arguments may have to come from `mag`.
+        spec = quant_spec(mag)
+        if spec is not None:
+            # `mag` is written as a quantity spec; resolve it into a quantity
+            # first, in the registry the spec names, so that its unit name
+            # means what it means there. This function's own `unit`, `ureg`
+            # and `persist` options then apply to the result, which is why
+            # quant((10, 'cm'), 'm') is 0.1 m rather than 10 m.
+            mag = _quant_of_spec(spec)
+    if (unit is Ellipsis and ureg is None and persist is None
+            and isinstance(mag, pint.Quantity)):
+        # The caller asked for a quantity in its own units, in its own
+        # registry, with its own persistence: that is exactly `mag`, so
+        # there is nothing to build. This is the common case -- immlib.math
+        # normalizes its arguments with `quant(a)`, and most of the time `a`
+        # is already an immlib quantity.
+        return mag  # type: ignore[return-value]
     if ureg is Ellipsis:
         ureg = _default_ureg()
-    if is_quant(mag):
+    if isinstance(mag, pint.Quantity):
         if ureg is None:
             ureg = unitregistry(mag)
         qcls = ureg.Quantity
@@ -2693,11 +2706,13 @@ def quant(mag: Any, /, unit: Any = Ellipsis, *, ureg: Any = None, persist: Any =
             # if the caller named none, ureg is mag's own registry, above,
             # and mag is returned exactly as given.
             q = mag
+            q_ureg = unitregistry(q)
         else:
             # mag.to() stays within mag's own unit registry; if the caller
             # also passed an explicit, different `ureg`, that is handled
             # below.
             q = mag.to(unit)
+            q_ureg = unitregistry(q)
     else:
         if ureg is None:
             ureg = _default_ureg()
@@ -2712,7 +2727,9 @@ def quant(mag: Any, /, unit: Any = Ellipsis, *, ureg: Any = None, persist: Any =
                 " (or default) unit registry is a plain pint.UnitRegistry,"
                 " which cannot represent a unit-less quantity")
         q = qcls(_quant_magnitude(mag), unit)
-    q_ureg = unitregistry(q)
+        # q was built by `ureg`'s own quantity class, so its registry is
+        # `ureg`; there is nothing to look up.
+        q_ureg = ureg
     if q_ureg is not ureg:
         # The caller explicitly requested a different registry than the one
         # q ended up in (e.g., mag belonged to a different registry than an
@@ -2825,28 +2842,33 @@ def mag(obj: Any, /, unit: Any = Ellipsis, *, strict: bool = False) -> Any:
         If `unit` is None but `obj` is a quantity or if a unit is requested of
         a non-quantity with the `strict` option enabled.
     """
-    spec = quant_spec(obj)
-    if spec is not None:
-        # A quantity written as a spec; see quant_spec. Resolving it here is
-        # what keeps mag the inverse of quant for every form quant accepts.
-        obj = _quant_of_spec(spec)
-    if is_quant(obj):
-        if unit is None:
-            if obj.units is None:
-                return obj.m
-            raise ValueError(
-                "unit=None requested of a quantity with real units; to"
-                " strip a quantity's units regardless of what they are, use"
-                " quant(obj, None) instead")
-        elif unit is Ellipsis:
+    if not isinstance(obj, pint.Quantity):
+        # Only a tuple can be a quantity written as a spec, and only a
+        # quantity is measured; the usual argument is a quantity already, so
+        # neither check is made unless it has to be.
+        if isinstance(obj, tuple):
+            spec = quant_spec(obj)
+            if spec is not None:
+                # A quantity written as a spec; see quant_spec. Resolving it
+                # here is what keeps mag the inverse of quant for every form
+                # quant accepts.
+                obj = _quant_of_spec(spec)
+        if not isinstance(obj, pint.Quantity):
+            if strict is True and unit is not None:
+                raise ValueError(
+                    f"unit '{unit}' does not strictly match non-quantity")
+            return obj
+    if unit is None:
+        if obj.units is None:
             return obj.m
-        else:
-            return obj.m_as(unit)
-    elif strict is True:
-        if unit is not None:
-            raise ValueError(
-                f"unit '{unit}' does not strictly match non-quantity")
-    return obj
+        raise ValueError(
+            "unit=None requested of a quantity with real units; to"
+            " strip a quantity's units regardless of what they are, use"
+            " quant(obj, None) instead")
+    elif unit is Ellipsis:
+        return obj.m
+    else:
+        return obj.m_as(unit)
 
 
 # Promotion ###################################################################

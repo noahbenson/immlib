@@ -5,6 +5,7 @@
 
 # Dependencies ################################################################
 
+import sys
 import inspect
 from functools import (partial, wraps, update_wrapper)
 from collections import namedtuple
@@ -119,7 +120,6 @@ class _TorchProxy:
         """Returns ``True`` if `obj` is a PyTorch tensor, without importing
         torch (a value can be a ``torch.Tensor`` only if torch is already
         imported)."""
-        import sys
         module = sys.modules.get('torch')
         if module is None:
             return False
@@ -128,7 +128,6 @@ torch = _TorchProxy()
 def _torch_module_or_none():
     """Returns the ``torch`` module if it has already been imported and
     ``None`` otherwise, without importing it."""
-    import sys
     return sys.modules.get('torch')
 def _is_torch_module(obj):
     """Returns ``True`` if `obj` is the ``torch`` module, whether the real one
@@ -1194,6 +1193,12 @@ def _spec_to_quant(obj, ureg):
     import is made here rather than at the top of the module because
     _quantity imports this module.)
     """
+    if not isinstance(obj, tuple):
+        # Only a tuple can be a spec; everything else -- arrays, tensors,
+        # sparse arrays, strings, quantities, and lists of numbers -- is a
+        # magnitude in its own right. Almost nothing that reaches here is a
+        # spec, so this is checked before the helpers are looked up.
+        return obj
     from ._quantity import quant_spec, _quant_of_spec
     spec = quant_spec(obj)
     if spec is None:
@@ -1305,7 +1310,11 @@ def to_array(obj: Any, /, dtype: Any=None, *,
     # requested in sparse format. If so, we handle the conversion differently.
     obj_is_spsparse = scipy__is_sparse(obj)
     obj_is_tensor = not obj_is_spsparse and torch.is_tensor(obj)
-    obj_is_sparse = obj_is_spsparse or torch__is_sparse(obj)
+    # Only a tensor can be a sparse tensor, and only a scipy sparse array can
+    # be a scipy sparse array, so the tensor check is not made for values
+    # that are already known not to be tensors.
+    obj_is_sparse = obj_is_spsparse or (obj_is_tensor
+                                        and torch__is_sparse(obj))
     # If this is a tensor and it requires grad, we can check whether we can
     # duplicate it now or not.
     if obj_is_tensor and obj.requires_grad:
