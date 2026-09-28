@@ -2396,12 +2396,20 @@ class TestUtilQuantity(TestCase):
         a = np.arange(3.0)
         q = quant(a, 'm')
         tq = quant(a, 'm', persist=False)
-        # A function with a `persist` option, whose default is to persist.
-        self.assertTrue(quant(a, 'm').is_persistent)
-        self.assertFalse(quant(a, 'm', persist=False).is_persistent)
-        # ... including when it is handed a quantity to convert.
-        self.assertFalse(quant(q, 'cm', persist=False).is_persistent)
+        # A `persist` option's default is None: respect a quantity it is
+        # given, persist a quantity it makes.
+        self.assertTrue(quant(a, 'm').is_persistent)        # made: persistent
+        self.assertTrue(quant(q, 'cm').is_persistent)       # given persistent
+        self.assertFalse(quant(tq, 'cm').is_persistent)     # given transient
+        self.assertIsNot(quant(q, 'cm'), q)                 # a new quantity
+        # True and False settle it whatever it was given, without persisting
+        # (or unpersisting) the caller's own object.
         self.assertTrue(quant(tq, 'cm', persist=True).is_persistent)
+        self.assertFalse(tq.is_persistent)
+        self.assertFalse(quant(q, 'cm', persist=False).is_persistent)
+        self.assertTrue(q.is_persistent)
+        self.assertFalse(quant(a, 'm', persist=False).is_persistent)
+        self.assertTrue(quant(a, 'm', persist=True).is_persistent)
         # Functions without one return a transient when they make a quantity.
         for r in (to_array(a, quant=True, unit='m'),
                   to_tensor(a, quant=True, unit='m'),

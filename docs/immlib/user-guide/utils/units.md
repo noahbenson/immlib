@@ -452,10 +452,14 @@ returned or stored somewhere that other code can see it.
 immlib follows one rule about which of the quantities it hands back are
 persistent:
 
-* a function that has a `persist` option is where a persistent quantity is
-  asked for. `il.quant` and its relatives have one, and their default is to
-  persist; `quantwrap`'s `persist` applies to the value the wrapped function
-  returns, and its default leaves that value as it was made;
+* a function that has a `persist` option settles the persistence of what it
+  returns. Its default is `None`: a quantity it was *given* is respected and
+  comes back with whatever persistence it had, while a quantity it *makes*
+  is persistent. `persist=True` makes what it returns always persistent,
+  and `persist=False` always transient. `il.quant` and `il.ilquant` have
+  the option; `quantwrap`'s applies to the value the wrapped function
+  returns, which its default likewise leaves as the wrapped function made
+  it;
 * every other function that makes a quantity and returns it returns a
   *transient* one — `immlib.math`, the `to_*` converters, and the rest of
   the library. immlib made the quantity and immlib is handing it over, so

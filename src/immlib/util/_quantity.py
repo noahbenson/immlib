@@ -873,19 +873,24 @@ class Quantity(pint.Quantity):
         given.
 
         **Which functions persist what they return.** immlib follows one
-        rule. A function that has a ``persist`` option--``immlib.quant``
-        and its relatives, whose default is to persist; ``quantwrap``,
-        whose ``persist`` applies to the value the wrapped function returns
-        and whose default leaves that value as it was made--is where a
-        persistent quantity is asked for. Every other function that makes a
-        quantity and returns it returns a *transient* one: ``immlib.math``,
-        the ``to_*`` converters, and the rest of the library, since immlib
-        made the quantity and immlib is handing it over, so nothing else
-        can be holding it yet. A caller who wants a persistent quantity
-        asks for it then, with ``result.persist()``, which costs nothing.
-        A quantity that a function only passes through--``to_array(q)`` is
-        ``q`` itself, and so is ``quant(q)``--keeps whatever persistence it
-        had, since it is not immlib's to change.
+        rule. A function that has a ``persist`` option settles the
+        persistence of what it returns, and its default is ``None``: a
+        quantity it was *given* is respected, and comes back with whatever
+        persistence it had, while a quantity it *makes* is persistent.
+        ``persist=True`` makes what it returns always persistent whatever it
+        was given, and ``persist=False`` always transient.
+        ``immlib.quant`` and ``immlib.ilquant`` have that option (and
+        ``quantwrap``'s applies to the value the wrapped function returns,
+        which its default likewise leaves as the wrapped function made it).
+        Every other function that makes a quantity and returns it returns a
+        *transient* one: ``immlib.math``, the ``to_*`` converters, and the
+        rest of the library, since immlib made the quantity and immlib is
+        handing it over, so nothing else can be holding it yet. A caller who
+        wants a persistent quantity asks for it then, with
+        ``result.persist()``, which costs nothing. A quantity that a
+        function only passes through--``to_array(q)`` is ``q`` itself, and
+        so is ``quant(q)``--keeps whatever persistence it had, since it is
+        not immlib's to change.
 
         **Thread safety.** A persistent quantity can be read from any
         number of threads at once, including in a free-threaded
