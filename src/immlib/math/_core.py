@@ -78,7 +78,17 @@ two rules:
     meaning, per Rule 1: ``equal`` is ``torch.equal``'s whole-array test,
     not NumPy's elementwise comparison, which is spelled ``eq`` (and
     ``not_equal``, ``less``, and the rest keep their elementwise meaning,
-    which both libraries agree on).
+    which both libraries agree on);
+  * the quantity that a function here makes and returns is *transient* (see
+    ``immlib.Quantity.persist``): immlib made it and immlib is handing it
+    over, so nothing else can be holding it, and a persistent quantity is a
+    promise about a value that nobody else can be changing. A caller that
+    wants one can ask for it with ``persist()``, which costs nothing. A
+    quantity that is merely passed through (``to_array(q)``, which is
+    ``q`` itself) keeps whatever persistence it has, and ``immlib.quant``
+    and its relatives--the ways to ask for a quantity rather than the
+    results of computing with one--are where a persistent quantity is
+    requested, with their own ``persist`` option.
 """
 
 from __future__ import annotations
@@ -170,7 +180,7 @@ def _as_real_units(q, units):
     ``None`` is treated as a bare, dimensionless value (as Pint treats a bare
     value). Raises ``pint.DimensionalityError`` for incompatible units."""
     if q.units is None:
-        q = quant(q.m, 'dimensionless', ureg=unitregistry(q))
+        q = _new_quantity(q.m, 'dimensionless', ureg=unitregistry(q))
     elif q.units == units:
         return q.m
     return q.m_as(units)
@@ -189,8 +199,8 @@ def _align_units(a, b, fname):
         # there is nothing to align, and nothing to be gained by building the
         # two quantities that would then be asked for their magnitudes.
         return (_quant_magnitude(a), _quant_magnitude(b), None)
-    a = quant(a)
-    b = quant(b)
+    a = _as_quantity(a)
+    b = _as_quantity(b)
     au = a.units
     bu = b.units
     if au is None and bu is None:
@@ -206,7 +216,7 @@ def _reconcile_seq(seq, fname):
     units (unit-less elements are treated as dimensionless, as in
     ``_align_units``).
     """
-    quants = [quant(x) for x in seq]
+    quants = [_as_quantity(x) for x in seq]
     if not quants:
         raise ValueError(
             f"immlib.math.{fname}: cannot combine an empty sequence")
@@ -353,7 +363,7 @@ def _sparse_elementwise(fname, m, method):
 def _unitless_elementwise(fname, np_fn, torch_name, a):
     # See _reduce_mag's docstring regarding why `torch_name` is a string,
     # looked up lazily, rather than an already-resolved `torch.foo`.
-    a = quant(a)
+    a = _as_quantity(a)
     _require_unitless(a, fname)
     m = a.m
     if torch.is_tensor(m):
@@ -362,7 +372,7 @@ def _unitless_elementwise(fname, np_fn, torch_name, a):
         rmag = _sparse_elementwise(fname, m, np_fn.__name__)
     else:
         rmag = np_fn(m)
-    return quant(rmag, None)
+    return _new_quantity(rmag, None)
 
 
 # Shared documentation #########################################################
@@ -570,6 +580,30 @@ def _doc_returns_indices(a):
 # used). Anything else--a quantity operand, an operation a bare magnitude
 # cannot perform--is left to the quantities.
 
+def _as_quantity(x: Any) -> Quantity:
+    """Returns `x` as a quantity, without making a quantity of what is one.
+
+    A quantity that immlib.math makes for its own use is transient (see the
+    note on persistence in the module docstring), so a value that is not
+    already a quantity becomes a transient one. A quantity is returned as it
+    is, whatever its persistence: it is not immlib's to change.
+    """
+    if isinstance(x, pint.Quantity):
+        return x  # type: ignore[return-value]
+    return quant(x, persist=False)
+
+def _new_quantity(mag: Any, unit: Any, ureg: Any=None) -> Quantity:
+    """Returns a new quantity of the given magnitude and units, as the value
+    that an ``immlib.math`` function returns.
+
+    The new quantity is transient: immlib is the one that made it and immlib
+    is handing it over, so nothing else can be holding it, and a persistent
+    quantity is a promise about a value that nobody else can change. A caller
+    that wants a persistent quantity can call ``persist()`` on it, which
+    costs nothing (see ``immlib.Quantity.persist``).
+    """
+    return quant(mag, unit, ureg=ureg, persist=False)
+
 def _is_bare(x):
     """Returns whether `x` can be handed to an operation as a bare magnitude.
 
@@ -737,7 +771,7 @@ def equal(a: QuantityLike, b: QuantityLike) -> bool:
         elementwise comparison.
     """
     r = eq(a, b)
-    if np.shape(quant(a).m) != np.shape(quant(b).m):
+    if np.shape(_as_quantity(a).m) != np.shape(_as_quantity(b).m):
         return False
     return builtins.bool(r.all())
 
@@ -798,7 +832,7 @@ def maximum(a: QuantityLike, b: QuantityLike) -> Quantity:
         rmag = mb.maximum(ma)
     else:
         rmag = np.maximum(ma, mb)
-    return quant(rmag, u)
+    return _new_quantity(rmag, u)
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def minimum(a: QuantityLike, b: QuantityLike) -> Quantity:
@@ -813,7 +847,7 @@ def minimum(a: QuantityLike, b: QuantityLike) -> Quantity:
         rmag = mb.minimum(ma)
     else:
         rmag = np.minimum(ma, mb)
-    return quant(rmag, u)
+    return _new_quantity(rmag, u)
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def where(cond: Any, a: QuantityLike, b: QuantityLike) -> Quantity:
@@ -831,7 +865,7 @@ def where(cond: Any, a: QuantityLike, b: QuantityLike) -> Quantity:
         rmag = torch.where(condm, ma, mb)
     else:
         rmag = np.where(condm, ma, mb)
-    return quant(rmag, u)
+    return _new_quantity(rmag, u)
 
 
 # Elementary functions ##########################################################
@@ -840,7 +874,7 @@ def where(cond: Any, a: QuantityLike, b: QuantityLike) -> Quantity:
 def sqrt(a: QuantityLike) -> Quantity:
     """Returns the elementwise square root of `a`; the result's units are
     `a`'s units raised to the 1/2 power (e.g. ``sqrt(4 m**2) == 2 m``)."""
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if torch.is_tensor(m):
         rmag = torch.sqrt(m)
@@ -849,7 +883,7 @@ def sqrt(a: QuantityLike) -> Quantity:
     else:
         rmag = np.sqrt(m)
     u = None if a.units is None else (a.units ** 0.5)
-    return quant(rmag, u)
+    return _new_quantity(rmag, u)
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def exp(a: QuantityLike) -> Quantity:
@@ -914,7 +948,7 @@ def arctan2(y: QuantityLike, x: QuantityLike) -> Quantity:
         rmag = torch.atan2(my, mx)
     else:
         rmag = np.arctan2(my, mx)
-    return quant(rmag, None)
+    return _new_quantity(rmag, None)
 
 #: An alias of ``immlib.math.arctan2``, as in PyTorch.
 atan2 = arctan2
@@ -922,7 +956,7 @@ atan2 = arctan2
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def floor(a: QuantityLike) -> Quantity:
     """Returns the elementwise floor of `a`, preserving units."""
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if torch.is_tensor(m):
         rmag = torch.floor(m)
@@ -930,12 +964,12 @@ def floor(a: QuantityLike) -> Quantity:
         rmag = _sparse_elementwise('floor', m, 'floor')
     else:
         rmag = np.floor(m)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def ceil(a: QuantityLike) -> Quantity:
     """Returns the elementwise ceiling of `a`, preserving units."""
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if torch.is_tensor(m):
         rmag = torch.ceil(m)
@@ -943,14 +977,14 @@ def ceil(a: QuantityLike) -> Quantity:
         rmag = _sparse_elementwise('ceil', m, 'ceil')
     else:
         rmag = np.ceil(m)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def round(a: QuantityLike, decimals: int=0) -> Quantity:
     """Returns `a` elementwise-rounded to `decimals` decimal places (default
     0), preserving units. The argument is named as ``torch.round`` names it,
     though it may be given positionally here, as in NumPy."""
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if torch.is_tensor(m):
         rmag = torch.round(m, decimals=decimals)
@@ -960,7 +994,7 @@ def round(a: QuantityLike, decimals: int=0) -> Quantity:
         rmag.eliminate_zeros()
     else:
         rmag = np.round(m, decimals=decimals)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 
 # Reductions #####################################################################
@@ -970,9 +1004,9 @@ def sum(a: QuantityLike, dim: Any=None, keepdim: bool=False, **kwargs: Any) -> Q
     """Returns the sum of `a`'s elements (optionally along `dim`),
     preserving units."""
     (dim, keepdim) = _dimargs('sum', kwargs, dim=dim, keepdim=keepdim)
-    a = quant(a)
+    a = _as_quantity(a)
     rmag = _reduce_mag(np.sum, 'sum', a.m, dim, keepdim)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 @docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_reduce), inheritreturns=_doc_returns_quantity)
 def prod(a: QuantityLike, dim: Any=None, keepdim: bool=False, **kwargs: Any) -> Quantity:
@@ -986,7 +1020,7 @@ def prod(a: QuantityLike, dim: Any=None, keepdim: bool=False, **kwargs: Any) -> 
     (dim, keepdim) = _dimargs('prod', kwargs, dim=dim, keepdim=keepdim)
     axis = _one_dim('prod', dim)
     keepdims = keepdim
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if sps.issparse(m):
         rmag = _sparse_reduce('prod', m, axis, keepdims)
@@ -1020,16 +1054,16 @@ def prod(a: QuantityLike, dim: Any=None, keepdim: bool=False, **kwargs: Any) -> 
         else:
             count = shape[axis]
         u = a.units ** int(count)
-    return quant(rmag, u)
+    return _new_quantity(rmag, u)
 
 @docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_reduce), inheritreturns=_doc_returns_quantity)
 def mean(a: QuantityLike, dim: Any=None, keepdim: bool=False, **kwargs: Any) -> Quantity:
     """Returns the mean of `a`'s elements (optionally along `dim`),
     preserving units."""
     (dim, keepdim) = _dimargs('mean', kwargs, dim=dim, keepdim=keepdim)
-    a = quant(a)
+    a = _as_quantity(a)
     rmag = _reduce_mag(np.mean, 'mean', a.m, dim, keepdim)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 #: The result of ``immlib.math.min`` when a dimension is given: the minimum
 #: values, as an ``immlib.Quantity``, and the index of the first minimum
@@ -1043,11 +1077,11 @@ def _minmax(fname, a, dim, keepdim, kwargs):
     (dim, keepdim) = _dimargs(fname, kwargs, dim=dim, keepdim=keepdim)
     amin_amax = 'amin' if fname == 'min' else 'amax'
     argfn = np.argmin if fname == 'min' else np.argmax
-    a = quant(a)
+    a = _as_quantity(a)
     if dim is None:
         rmag = _reduce_mag(getattr(np, amin_amax), amin_amax, a.m, None,
                            keepdim)
-        return quant(rmag, a.units)
+        return _new_quantity(rmag, a.units)
     dim = _one_dim(fname, dim)
     m = a.m
     if torch.is_tensor(m):
@@ -1063,7 +1097,7 @@ def _minmax(fname, a, dim, keepdim, kwargs):
         else:
             vals = np.squeeze(vals, axis=dim)
     cls = min_result if fname == 'min' else max_result
-    return cls(quant(vals, a.units), idcs)
+    return cls(_new_quantity(vals, a.units), idcs)
 
 @docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_reduce))
 def min(a: QuantityLike, dim: Any=None, keepdim: bool=False, **kwargs: Any) -> Any:
@@ -1116,23 +1150,23 @@ def amin(a: QuantityLike, dim: Any=None, keepdim: bool=False, **kwargs: Any) -> 
     indices)`` tuple that ``min`` returns for a given `dim`. Unlike ``min``,
     several dimensions may be reduced at once."""
     (dim, keepdim) = _dimargs('amin', kwargs, dim=dim, keepdim=keepdim)
-    a = quant(a)
-    return quant(_reduce_mag(np.amin, 'amin', a.m, dim, keepdim), a.units)
+    a = _as_quantity(a)
+    return _new_quantity(_reduce_mag(np.amin, 'amin', a.m, dim, keepdim), a.units)
 
 @docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_reduce), inheritreturns=_doc_returns_quantity)
 def amax(a: QuantityLike, dim: Any=None, keepdim: bool=False, **kwargs: Any) -> Quantity:
     """Returns the maximum of `a`'s elements (optionally along `dim`),
     preserving units; see ``amin``."""
     (dim, keepdim) = _dimargs('amax', kwargs, dim=dim, keepdim=keepdim)
-    a = quant(a)
-    return quant(_reduce_mag(np.amax, 'amax', a.m, dim, keepdim), a.units)
+    a = _as_quantity(a)
+    return _new_quantity(_reduce_mag(np.amax, 'amax', a.m, dim, keepdim), a.units)
 
 @docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_reduce), inheritreturns=_doc_returns_bool)
 def any(a: QuantityLike, dim: Any=None, keepdim: bool=False, **kwargs: Any) -> BoolArray:
     """Returns whether any of `a`'s elements are truthy (optionally along
     `dim`), as a plain bool array or tensor (not an ``immlib.Quantity``)."""
     (dim, keepdim) = _dimargs('any', kwargs, dim=dim, keepdim=keepdim)
-    a = quant(a)
+    a = _as_quantity(a)
     return _reduce_mag(np.any, 'any', a.m, dim, keepdim)
 
 @docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_reduce), inheritreturns=_doc_returns_bool)
@@ -1140,7 +1174,7 @@ def all(a: QuantityLike, dim: Any=None, keepdim: bool=False, **kwargs: Any) -> B
     """Returns whether all of `a`'s elements are truthy (optionally along
     `dim`), as a plain bool array or tensor (not an ``immlib.Quantity``)."""
     (dim, keepdim) = _dimargs('all', kwargs, dim=dim, keepdim=keepdim)
-    a = quant(a)
+    a = _as_quantity(a)
     return _reduce_mag(np.all, 'all', a.m, dim, keepdim)
 
 @docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_reduce), inheritreturns=_doc_returns_quantity)
@@ -1156,11 +1190,11 @@ def std(a: QuantityLike, dim: Any=None, keepdim: bool=False, correction: int=1, 
     is given the same correction, so both backends agree.
     """
     (dim, keepdim) = _dimargs('std', kwargs, dim=dim, keepdim=keepdim)
-    a = quant(a)
+    a = _as_quantity(a)
     rmag = _reduce_mag(np.std, 'std', a.m, dim, keepdim,
                         np_kwargs={'ddof': correction},
                         torch_kwargs={'correction': correction})
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 @docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_reduce), inheritreturns=_doc_returns_quantity)
 def var(a: QuantityLike, dim: Any=None, keepdim: bool=False, correction: int=1, **kwargs: Any) -> Quantity:
@@ -1169,12 +1203,12 @@ def var(a: QuantityLike, dim: Any=None, keepdim: bool=False, correction: int=1, 
     `correction`, which defaults to ``1`` here as it does in PyTorch.
     """
     (dim, keepdim) = _dimargs('var', kwargs, dim=dim, keepdim=keepdim)
-    a = quant(a)
+    a = _as_quantity(a)
     rmag = _reduce_mag(np.var, 'var', a.m, dim, keepdim,
                         np_kwargs={'ddof': correction},
                         torch_kwargs={'correction': correction})
     u = None if a.units is None else (a.units ** 2)
-    return quant(rmag, u)
+    return _new_quantity(rmag, u)
 
 @docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_along), inheritreturns=_doc_returns_quantity)
 def cumsum(a: QuantityLike, dim: Any, **kwargs: Any) -> Quantity:
@@ -1184,7 +1218,7 @@ def cumsum(a: QuantityLike, dim: Any, **kwargs: Any) -> Quantity:
     dim = _one_dim('cumsum', dim)
     if dim is None:
         raise TypeError("immlib.math.cumsum: 'dim' is required")
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if torch.is_tensor(m):
         rmag = torch.cumsum(m, dim=dim)
@@ -1192,7 +1226,7 @@ def cumsum(a: QuantityLike, dim: Any, **kwargs: Any) -> Quantity:
         raise _sparse_dense_error('cumsum')
     else:
         rmag = np.cumsum(m, axis=dim)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 
 # Shape / combination ############################################################
@@ -1203,13 +1237,13 @@ def reshape(a: QuantityLike, *shape: Any) -> Quantity:
     given as a single tuple or as separate arguments."""
     if len(shape) == 1 and isinstance(shape[0], (tuple, list)):
         shape = tuple(shape[0])
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if torch.is_tensor(m) or sps.issparse(m):
         rmag = m.reshape(shape)
     else:
         rmag = np.reshape(m, shape)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def transpose(a: QuantityLike, dim0: Any, dim1: Any) -> Quantity:
@@ -1222,7 +1256,7 @@ def transpose(a: QuantityLike, dim0: Any, dim1: Any) -> Quantity:
     ``permute``. ``swapaxes`` and ``swapdims`` are aliases of this function,
     as they are in PyTorch.
     """
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if torch.is_tensor(m):
         rmag = torch.transpose(m, dim0, dim1)
@@ -1230,7 +1264,7 @@ def transpose(a: QuantityLike, dim0: Any, dim1: Any) -> Quantity:
         rmag = m.transpose()
     else:
         rmag = np.swapaxes(m, dim0, dim1)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 #: An alias of ``immlib.math.transpose``, as in PyTorch.
 swapaxes = transpose
@@ -1246,7 +1280,7 @@ def permute(a: QuantityLike, *dims: Any) -> Quantity:
     """
     if len(dims) == 1 and isinstance(dims[0], (tuple, list)):
         dims = tuple(dims[0])
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if not dims:
         dims = tuple(reversed(range(np.ndim(m))))
@@ -1256,7 +1290,7 @@ def permute(a: QuantityLike, *dims: Any) -> Quantity:
         rmag = m.transpose(dims)
     else:
         rmag = np.transpose(m, dims)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 @docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_along), inheritreturns=_doc_returns_quantity)
 def squeeze(a: QuantityLike, dim: Any=None, **kwargs: Any) -> Quantity:
@@ -1269,14 +1303,14 @@ def squeeze(a: QuantityLike, dim: Any=None, **kwargs: Any) -> Quantity:
     would make the same call succeed for a tensor and fail for an array.
     """
     (dim, _) = _dimargs('squeeze', kwargs, dim=dim)
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if sps.issparse(m):
         raise TypeError(
             "immlib.math.squeeze: SciPy sparse arrays are not supported")
     if dim is None:
         rmag = m.squeeze() if torch.is_tensor(m) else np.squeeze(m)
-        return quant(rmag, a.units)
+        return _new_quantity(rmag, a.units)
     dims = dim if isinstance(dim, (tuple, list)) else (dim,)
     ndim = np.ndim(m)
     # Only the size-1 dimensions are dropped; the rest are left alone.
@@ -1288,7 +1322,7 @@ def squeeze(a: QuantityLike, dim: Any=None, **kwargs: Any) -> Quantity:
             rmag = rmag.squeeze(d)
     else:
         rmag = np.squeeze(m, axis=dims) if dims else m
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 @docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_along), inheritreturns=_doc_returns_quantity)
 def unsqueeze(a: QuantityLike, dim: Any, **kwargs: Any) -> Quantity:
@@ -1296,7 +1330,7 @@ def unsqueeze(a: QuantityLike, dim: Any, **kwargs: Any) -> Quantity:
     units. This is ``torch.unsqueeze``; ``numpy.expand_dims`` is the same
     operation under another name."""
     (dim, _) = _dimargs('unsqueeze', kwargs, dim=dim)
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if torch.is_tensor(m):
         rmag = torch.unsqueeze(m, dim)
@@ -1304,12 +1338,12 @@ def unsqueeze(a: QuantityLike, dim: Any, **kwargs: Any) -> Quantity:
         raise _sparse_dense_error('unsqueeze')
     else:
         rmag = np.expand_dims(m, dim)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def ravel(a: QuantityLike) -> Quantity:
     """Returns `a` flattened into one dimension, preserving units."""
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if torch.is_tensor(m):
         rmag = torch.ravel(m)
@@ -1317,7 +1351,7 @@ def ravel(a: QuantityLike) -> Quantity:
         raise _sparse_dense_error('ravel')
     else:
         rmag = np.ravel(m)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def flatten(a: QuantityLike, start_dim: int=0, end_dim: int=-1) -> Quantity:
@@ -1325,7 +1359,7 @@ def flatten(a: QuantityLike, start_dim: int=0, end_dim: int=-1) -> Quantity:
     (inclusive) flattened into one, preserving units. This is
     ``torch.flatten``, which flattens every dimension by default; see
     ``ravel`` for the simpler always-everything form."""
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if torch.is_tensor(m):
         rmag = torch.flatten(m, start_dim, end_dim)
@@ -1343,12 +1377,12 @@ def flatten(a: QuantityLike, start_dim: int=0, end_dim: int=-1) -> Quantity:
         for k in shape[s:e+1]:
             n *= k
         rmag = np.reshape(m, shape[:s] + (n,) + shape[e+1:])
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def conj(a: QuantityLike) -> Quantity:
     """Returns the elementwise complex conjugate of `a`, preserving units."""
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if torch.is_tensor(m):
         rmag = torch.conj(m)
@@ -1356,7 +1390,7 @@ def conj(a: QuantityLike) -> Quantity:
         rmag = m.conj()
     else:
         rmag = np.conj(m)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 @docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_along), inheritreturns=_doc_returns_quantity)
 def stack(seq: QuantityLike, dim: Any=_UNSET, **kwargs: Any) -> Quantity:
@@ -1377,7 +1411,7 @@ def stack(seq: QuantityLike, dim: Any=_UNSET, **kwargs: Any) -> Quantity:
         rmag = torch.stack(mags, dim=axis)
     else:
         rmag = np.stack(mags, axis=axis)
-    return quant(rmag, u)
+    return _new_quantity(rmag, u)
 
 @docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_along), inheritreturns=_doc_returns_quantity)
 def cat(seq: QuantityLike, dim: Any=_UNSET, **kwargs: Any) -> Quantity:
@@ -1396,13 +1430,13 @@ def cat(seq: QuantityLike, dim: Any=_UNSET, **kwargs: Any) -> Quantity:
                 " dimension 0 or 1")
         combine = sps.vstack if axis in (0, -2) else sps.hstack
         rmag = combine(mags)
-        return quant(rmag, u)
+        return _new_quantity(rmag, u)
     if _is_tensor_backed(*mags):
         mags = promote(*mags)
         rmag = torch.cat(mags, dim=axis)
     else:
         rmag = np.concatenate(mags, axis=axis)
-    return quant(rmag, u)
+    return _new_quantity(rmag, u)
 
 #: An alias of ``immlib.math.cat``, as in PyTorch.
 concatenate = cat
@@ -1457,7 +1491,7 @@ def sort(a: QuantityLike, dim: Any=-1, descending: bool=False, stable: bool=Fals
     """
     (dim, _) = _dimargs('sort', kwargs, dim=dim)
     dim = -1 if dim is None else dim
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if sps.issparse(m):
         raise _sparse_dense_error('sort')
@@ -1467,7 +1501,7 @@ def sort(a: QuantityLike, dim: Any=-1, descending: bool=False, stable: bool=Fals
     else:
         idcs = _sort_indices(m, dim, descending, stable)
         vals = np.take_along_axis(m, idcs, axis=dim)
-    return sort_result(quant(vals, a.units), idcs)
+    return sort_result(_new_quantity(vals, a.units), idcs)
 
 @docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_along), inheritreturns=_doc_returns_indices)
 def argsort(a: QuantityLike, dim: Any=-1, descending: bool=False, stable: bool=False, **kwargs: Any) -> Any:
@@ -1475,7 +1509,7 @@ def argsort(a: QuantityLike, dim: Any=-1, descending: bool=False, stable: bool=F
     tensor of integers; see ``sort``."""
     (dim, _) = _dimargs('argsort', kwargs, dim=dim)
     dim = -1 if dim is None else dim
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if sps.issparse(m):
         raise _sparse_dense_error('argsort')
@@ -1486,7 +1520,7 @@ def argsort(a: QuantityLike, dim: Any=-1, descending: bool=False, stable: bool=F
 
 def _argminmax(fname, a, dim, keepdim, kwargs):
     (dim, keepdim) = _dimargs(fname, kwargs, dim=dim, keepdim=keepdim)
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if sps.issparse(m):
         raise _sparse_dense_error(fname)
@@ -1531,18 +1565,18 @@ def median(a: QuantityLike, dim: Any=None, keepdim: bool=False, **kwargs: Any) -
         ``(values, indices)`` named tuple when it is.
     """
     (dim, keepdim) = _dimargs('median', kwargs, dim=dim, keepdim=keepdim)
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if sps.issparse(m):
         raise _sparse_dense_error('median')
     if torch.is_tensor(m):
         if dim is None:
-            return quant(torch.median(m), a.units)
+            return _new_quantity(torch.median(m), a.units)
         r = torch.median(m, dim=dim, keepdim=keepdim)
-        return median_result(quant(r.values, a.units), r.indices)
+        return median_result(_new_quantity(r.values, a.units), r.indices)
     if dim is None:
         flat = np.sort(m, axis=None)
-        return quant(flat[(flat.size - 1) // 2], a.units)
+        return _new_quantity(flat[(flat.size - 1) // 2], a.units)
     dim = _one_dim('median', dim)
     order = np.argsort(m, axis=dim, kind='stable')
     k = (m.shape[dim] - 1) // 2
@@ -1552,7 +1586,7 @@ def median(a: QuantityLike, dim: Any=None, keepdim: bool=False, **kwargs: Any) -
         idcs = np.expand_dims(idcs, dim)
     else:
         vals = np.squeeze(vals, axis=dim)
-    return median_result(quant(vals, a.units), idcs)
+    return median_result(_new_quantity(vals, a.units), idcs)
 
 @docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_reduce), inheritreturns=_doc_returns_quantity)
 def quantile(a: QuantityLike, q: Any, dim: Any=None, keepdim: bool=False, interpolation: str='linear',
@@ -1566,7 +1600,7 @@ def quantile(a: QuantityLike, q: Any, dim: Any=None, keepdim: bool=False, interp
     same thing on a 0-to-100 scale.
     """
     (dim, keepdim) = _dimargs('quantile', kwargs, dim=dim, keepdim=keepdim)
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if sps.issparse(m):
         raise _sparse_dense_error('quantile')
@@ -1582,7 +1616,7 @@ def quantile(a: QuantityLike, q: Any, dim: Any=None, keepdim: bool=False, interp
     else:
         rmag = np.quantile(m, q, axis=dim, keepdims=keepdim,  # type: ignore[call-overload]
                            method=interpolation)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 @docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_reduce), inheritreturns=_doc_returns_quantity)
 def percentile(a: QuantityLike, q: Any, dim: Any=None, keepdim: bool=False, interpolation: str='linear',
@@ -1620,8 +1654,8 @@ def average(a: QuantityLike, dim: Any=None, weights: Any=None, keepdim: bool=Fal
     (dim, keepdim) = _dimargs('average', kwargs, dim=dim, keepdim=keepdim)
     if weights is None:
         return mean(a, dim, keepdim)
-    a = quant(a)
-    w = quant(weights)
+    a = _as_quantity(a)
+    w = _as_quantity(weights)
     _require_unitless(w, 'average')
     # The weights are summed over the same elements as the values are, so
     # weights of a broadcastable shape are broadcast to `a`'s shape first.
@@ -1632,7 +1666,7 @@ def average(a: QuantityLike, dim: Any=None, weights: Any=None, keepdim: bool=Fal
             wm = torch.broadcast_to(wm, am.shape)
         else:
             wm = np.broadcast_to(wm, np.shape(am))
-        w = quant(wm)
+        w = _as_quantity(wm)
     total = sum(multiply(a, w), dim, keepdim)
     norm = sum(w, dim, keepdim)
     return divide(total, norm)
@@ -1650,7 +1684,7 @@ def _setop_mags(fname, a, b=None):
     NumPy arrays, the units of the result, and the magnitude whose backend
     the result must be returned in."""
     if b is None:
-        a = quant(a)
+        a = _as_quantity(a)
         (mags, u) = ([a.m], a.units)
     else:
         (ma, mb, u) = _align_units(a, b, fname)
@@ -1668,7 +1702,7 @@ def _setop_result(r, u, like):
     """Returns the result `r` of a set operation in `like`'s backend."""
     if like is not None:
         r = torch.as_tensor(r, device=like.device)
-    return r if u is Ellipsis else quant(r, u)
+    return r if u is Ellipsis else _new_quantity(r, u)
 
 @docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_reduce))
 def unique(a: Any, sorted: bool=True, return_inverse: bool=False, return_counts: bool=False,
@@ -1774,7 +1808,7 @@ def gather(a: QuantityLike, dim: Any, index: Any, **kwargs: Any) -> Quantity:
     is ``a[index[i, j], j]`` for ``dim=0``. This is ``torch.gather``;
     ``numpy.take_along_axis`` is the same operation."""
     (dim, _) = _dimargs('gather', kwargs, dim=dim)
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if sps.issparse(m):
         raise _sparse_dense_error('gather')
@@ -1783,7 +1817,7 @@ def gather(a: QuantityLike, dim: Any, index: Any, **kwargs: Any) -> Quantity:
         rmag = torch.gather(m, dim, idx)
     else:
         rmag = np.take_along_axis(m, idx, axis=dim)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 @docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_along), inheritreturns=_doc_returns_quantity)
 def index_select(a: QuantityLike, dim: Any, index: Any, **kwargs: Any) -> Quantity:
@@ -1791,7 +1825,7 @@ def index_select(a: QuantityLike, dim: Any, index: Any, **kwargs: Any) -> Quanti
     `index`, preserving units. This is ``torch.index_select``;
     ``numpy.take`` with an axis is the same operation."""
     (dim, _) = _dimargs('index_select', kwargs, dim=dim)
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if sps.issparse(m):
         raise _sparse_dense_error('index_select')
@@ -1800,27 +1834,27 @@ def index_select(a: QuantityLike, dim: Any, index: Any, **kwargs: Any) -> Quanti
         rmag = torch.index_select(m, dim, idx)
     else:
         rmag = np.take(m, idx, axis=dim)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def take(a: QuantityLike, index: Any) -> Quantity:
     """Returns the elements of `a` at the entries of `index`, which are
     indices into `a` flattened, preserving units. The result has `index`'s
     shape. This is ``torch.take`` and ``numpy.take`` without an axis."""
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if sps.issparse(m):
         raise _sparse_dense_error('take')
     idx = _index_mag(m, index, 'take')
     rmag = torch.take(m, idx) if torch.is_tensor(m) else np.take(m, idx)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def masked_select(a: Any, mask: Any) -> Quantity:
     """Returns the elements of `a` where `mask` is true, as a 1-D quantity
     in `a`'s units. This is ``torch.masked_select``; indexing an array with
     a boolean array of the same shape is the same operation."""
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if sps.issparse(m):
         raise _sparse_dense_error('masked_select')
@@ -1833,14 +1867,14 @@ def masked_select(a: Any, mask: Any) -> Quantity:
         if torch.is_tensor(msk):
             msk = msk.detach().cpu().numpy()
         rmag = m[np.asarray(msk).astype(bool)]
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def flip(a: QuantityLike, dims: Any=None, **kwargs: Any) -> Quantity:
     """Returns `a` with the order of its elements reversed along `dims` (or
     along every dimension, if `dims` is not given), preserving units."""
     (dims, _) = _dimargs('flip', kwargs, dim=dims)
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if sps.issparse(m):
         raise _sparse_dense_error('flip')
@@ -1852,7 +1886,7 @@ def flip(a: QuantityLike, dims: Any=None, **kwargs: Any) -> Quantity:
         rmag = torch.flip(m, tuple(dims))
     else:
         rmag = np.flip(m, axis=tuple(dims))
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def roll(a: QuantityLike, shifts: Any, dims: Any=None, **kwargs: Any) -> Quantity:
@@ -1860,7 +1894,7 @@ def roll(a: QuantityLike, shifts: Any, dims: Any=None, **kwargs: Any) -> Quantit
     wrapping around, and preserving units. With no `dims`, `a` is flattened,
     shifted and restored to its shape, as in both libraries."""
     (dims, _) = _dimargs('roll', kwargs, dim=dims)
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if sps.issparse(m):
         raise _sparse_dense_error('roll')
@@ -1873,7 +1907,7 @@ def roll(a: QuantityLike, shifts: Any, dims: Any=None, **kwargs: Any) -> Quantit
             rmag = torch.roll(m, sh, dd)
     else:
         rmag = np.roll(m, shifts, axis=dims)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 @docwrap(format='numpy', inheritparams=(_doc_params, _doc_dim_along), inheritreturns=_doc_returns_quantity)
 def repeat_interleave(a: QuantityLike, repeats: Any, dim: Any=None, **kwargs: Any) -> Quantity:
@@ -1883,7 +1917,7 @@ def repeat_interleave(a: QuantityLike, repeats: Any, dim: Any=None, **kwargs: An
     (``numpy.ndarray.repeat``'s meaning, tiling the whole array, is
     ``tile``.)"""
     (dim, _) = _dimargs('repeat_interleave', kwargs, dim=dim)
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if sps.issparse(m):
         raise _sparse_dense_error('repeat_interleave')
@@ -1896,19 +1930,19 @@ def repeat_interleave(a: QuantityLike, repeats: Any, dim: Any=None, **kwargs: An
         if torch.is_tensor(repeats):
             repeats = repeats.detach().cpu().numpy()
         rmag = np.repeat(m, repeats, axis=dim)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def tile(a: QuantityLike, dims: Any) -> Quantity:
     """Returns `a` tiled `dims` times along each dimension, preserving
     units. This is ``torch.tile`` and ``numpy.tile``."""
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if sps.issparse(m):
         raise _sparse_dense_error('tile')
     dd = tuple(dims) if isinstance(dims, (tuple, list)) else (dims,)
     rmag = torch.tile(m, dd) if torch.is_tensor(m) else np.tile(m, dd)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 
 def _splits(fname, n, sizes, dim, a):
@@ -1920,7 +1954,7 @@ def _splits(fname, n, sizes, dim, a):
         stop = start + size
         idx = [slice(None)] * np.ndim(m)
         idx[dim] = slice(start, stop)
-        out.append(quant(m[tuple(idx)], a.units))
+        out.append(_new_quantity(m[tuple(idx)], a.units))
         start = stop
     return tuple(out)
 
@@ -1945,7 +1979,7 @@ def split(a: QuantityLike, split_size_or_sections: Any, dim: Any=0, **kwargs: An
     """
     (dim, _) = _dimargs('split', kwargs, dim=dim)
     dim = 0 if dim is None else dim
-    a = quant(a)
+    a = _as_quantity(a)
     if sps.issparse(a.m):
         raise _sparse_dense_error('split')
     n = np.shape(a.m)[dim]
@@ -1984,7 +2018,7 @@ def chunk(a: QuantityLike, chunks: Any, dim: Any=0, **kwargs: Any) -> list:
     """
     (dim, _) = _dimargs('chunk', kwargs, dim=dim)
     dim = 0 if dim is None else dim
-    a = quant(a)
+    a = _as_quantity(a)
     if sps.issparse(a.m):
         raise _sparse_dense_error('chunk')
     chunks = int(chunks)
@@ -2008,7 +2042,7 @@ def nonzero(a: QuantityLike, as_tuple: bool=False) -> Any:
     gives one 1-dimensional index per dimension instead, which is
     ``numpy.nonzero``'s form.
     """
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if sps.issparse(m):
         raise _sparse_dense_error('nonzero')
@@ -2018,7 +2052,7 @@ def nonzero(a: QuantityLike, as_tuple: bool=False) -> Any:
     return idcs if as_tuple else np.stack(idcs, axis=-1)
 
 def _predicate(fname, np_fn, torch_name, a):
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if sps.issparse(m):
         raise _sparse_dense_error(fname)
@@ -2054,7 +2088,7 @@ def clamp(a: QuantityLike, min: QuantityLike | None=None, max: QuantityLike | No
     units is converted and one with no units is dimensionless. ``clip`` is
     an alias, as it is in PyTorch.
     """
-    a = quant(a)
+    a = _as_quantity(a)
     if min is None and max is None:
         raise ValueError(
             "immlib.math.clamp: at least one of 'min' or 'max' must be"
@@ -2072,7 +2106,7 @@ def clamp(a: QuantityLike, min: QuantityLike | None=None, max: QuantityLike | No
         rmag = torch.clamp(m, lo, hi)
     else:
         rmag = np.clip(m, lo, hi)
-    return quant(rmag, u)
+    return _new_quantity(rmag, u)
 
 #: An alias of ``immlib.math.clamp``, as in PyTorch.
 clip = clamp
@@ -2103,7 +2137,7 @@ def pad(a, pad, mode='constant', value=None):
     PyTorch requires; the restriction is enforced for both backends, so
     that the same call behaves the same way.
     """
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if sps.issparse(m):
         raise _sparse_dense_error('pad')
@@ -2147,7 +2181,7 @@ def pad(a, pad, mode='constant', value=None):
             rmag = np.pad(m, width, mode='constant', constant_values=fill)
         else:
             rmag = np.pad(m, width, mode=_PAD_MODES[mode])
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 
 # Linear algebra ##################################################################
@@ -2172,8 +2206,8 @@ def dot(a: QuantityLike, b: QuantityLike) -> Quantity:
     two libraries would otherwise disagree about the same call, so immlib
     takes the narrower meaning and leaves the wider one to ``matmul``.
     """
-    a = quant(a)
-    b = quant(b)
+    a = _as_quantity(a)
+    b = _as_quantity(b)
     (ma, mb) = (a.m, b.m)
     if np.ndim(ma) != 1 or np.ndim(mb) != 1:
         raise ValueError(
@@ -2200,7 +2234,7 @@ def _linalg_mag(fname, a):
     whose units differ and are not tracked here. Sparse arguments and arguments
     with fewer than two dimensions are rejected.
     """
-    a = quant(a)
+    a = _as_quantity(a)
     _require_unitless(a, fname)
     m = a.m
     if sps.issparse(m):
@@ -2254,7 +2288,7 @@ def movedim(a, source, destination):
         `a` with the given dimensions moved to the given positions, with the
         same units as `a`.
     """
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if sps.issparse(m):
         raise _sparse_dense_error('movedim')
@@ -2262,7 +2296,7 @@ def movedim(a, source, destination):
         rmag = torch.movedim(m, source, destination)
     else:
         rmag = np.moveaxis(m, source, destination)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 moveaxis = movedim
 
 
@@ -2418,7 +2452,7 @@ def einsum(equation, *operands):
     """
     mags = []
     for op in operands:
-        q = quant(op)
+        q = _as_quantity(op)
         _require_unitless(q, 'einsum')
         mags.append(q.m)
     if builtins.any(sps.issparse(x) for x in mags):
@@ -2539,7 +2573,7 @@ def _like_mag(fname, a):
     no backend has to be named; a sparse argument is rejected, since the
     result of allocating ``*_like`` is dense.
     """
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if sps.issparse(m):
         raise _sparse_dense_error(fname)
@@ -2587,7 +2621,7 @@ def zeros_like(a, dtype=None):
         rmag = torch.zeros_like(m, dtype=dtype)
     else:
         rmag = np.zeros_like(m, dtype=dtype)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 
 @docwrap(format='numpy', inheritparams=_doc_params)
@@ -2613,7 +2647,7 @@ def ones_like(a, dtype=None):
         rmag = torch.ones_like(m, dtype=dtype)
     else:
         rmag = np.ones_like(m, dtype=dtype)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 
 @docwrap(format='numpy', inheritparams=_doc_params)
@@ -2643,7 +2677,7 @@ def full_like(a, fill_value, dtype=None):
         rmag = torch.full_like(m, fv, dtype=dtype)
     else:
         rmag = np.full_like(m, fv, dtype=dtype)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 
 def _promote_tensors(mags):
@@ -2681,7 +2715,7 @@ def empty_like(a, dtype=None):
         rmag = torch.empty_like(m, dtype=dtype)
     else:
         rmag = np.empty_like(m, dtype=dtype)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 
 @docwrap(format='numpy', inheritparams=_doc_params)
@@ -2712,7 +2746,7 @@ def rand_like(a, dtype=None):
             dtype = (m.dtype if np.issubdtype(m.dtype, np.floating)
                      else np.float64)
         rmag = np.random.random(m.shape).astype(dtype)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 
 @docwrap(format='numpy', inheritparams=_doc_params)
@@ -2742,7 +2776,7 @@ def randn_like(a, dtype=None):
             dtype = (m.dtype if np.issubdtype(m.dtype, np.floating)
                      else np.float64)
         rmag = np.random.randn(*m.shape).astype(dtype)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 
 @docwrap(format='numpy', inheritparams=_doc_params)
@@ -2776,7 +2810,7 @@ def randint_like(a, low, high, dtype=None):
             dtype = (m.dtype if np.issubdtype(m.dtype, np.integer)
                      else np.int64)
         rmag = np.random.randint(low, high, size=m.shape, dtype=dtype)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 
 # Shape ########################################################################
@@ -2789,36 +2823,36 @@ def atleast_1d(a):
     array. Only a single argument is accepted (the libraries' multiple-argument
     forms return sequences, which do not fit this namespace).
     """
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if sps.issparse(m):
         raise _sparse_dense_error('atleast_1d')
     rmag = torch.atleast_1d(m) if torch.is_tensor(m) else np.atleast_1d(m)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def atleast_2d(a):
     """Returns `a` with at least two dimensions, keeping its units.
 
     ``numpy.atleast_2d`` / ``torch.atleast_2d``; see ``atleast_1d``."""
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if sps.issparse(m):
         raise _sparse_dense_error('atleast_2d')
     rmag = torch.atleast_2d(m) if torch.is_tensor(m) else np.atleast_2d(m)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def atleast_3d(a):
     """Returns `a` with at least three dimensions, keeping its units.
 
     ``numpy.atleast_3d`` / ``torch.atleast_3d``; see ``atleast_1d``."""
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if sps.issparse(m):
         raise _sparse_dense_error('atleast_3d')
     rmag = torch.atleast_3d(m) if torch.is_tensor(m) else np.atleast_3d(m)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
@@ -2834,13 +2868,13 @@ def broadcast_to(a, shape):
         The shape of the result. Leading dimensions may be added, and each
         existing dimension must be 1 or already equal to the requested size.
     """
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if sps.issparse(m):
         raise _sparse_dense_error('broadcast_to')
     rmag = (torch.broadcast_to(m, tuple(shape)) if torch.is_tensor(m)
             else np.broadcast_to(m, tuple(shape)))
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 
 def _np_expand(m, sizes):
@@ -2874,12 +2908,12 @@ def expand(a, *sizes):
     """
     if len(sizes) == 1 and isinstance(sizes[0], (tuple, list)):
         sizes = tuple(sizes[0])
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if sps.issparse(m):
         raise _sparse_dense_error('expand')
     rmag = m.expand(*sizes) if torch.is_tensor(m) else _np_expand(m, sizes)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 
 # More sequence functions ######################################################
@@ -2893,7 +2927,7 @@ def cumprod(a, dim, **kwargs):
     dim = _one_dim('cumprod', dim)
     if dim is None:
         raise TypeError("immlib.math.cumprod: 'dim' is required")
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if torch.is_tensor(m):
         rmag = torch.cumprod(m, dim=dim)
@@ -2901,7 +2935,7 @@ def cumprod(a, dim, **kwargs):
         raise _sparse_dense_error('cumprod')
     else:
         rmag = np.cumprod(m, axis=dim)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 @docwrap(format='numpy', inheritparams=(_doc_params,),
           inheritreturns=_doc_returns_quantity)
@@ -2919,7 +2953,7 @@ def diff(a, n=1, dim=-1, **kwargs):
         ``-1``.
     """
     (dim, _) = _dimargs('diff', kwargs, dim=dim)
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if torch.is_tensor(m):
         rmag = torch.diff(m, n=n, dim=dim)
@@ -2927,26 +2961,26 @@ def diff(a, n=1, dim=-1, **kwargs):
         raise _sparse_dense_error('diff')
     else:
         rmag = np.diff(m, n=n, axis=dim)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def flipud(a):
     """Returns `a` with the order of the elements along axis 0 reversed,
     keeping its units (``numpy.flipud`` / ``torch.flipud``)."""
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     rmag = torch.flipud(m) if torch.is_tensor(m) else np.flipud(m)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def fliplr(a):
     """Returns `a` with the order of the elements along axis 1 reversed,
     keeping its units (``numpy.fliplr`` / ``torch.fliplr``); `a` must be at
     least 2-dimensional."""
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     rmag = torch.fliplr(m) if torch.is_tensor(m) else np.fliplr(m)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 
 # Counting and tolerance predicates ###########################################
@@ -2972,7 +3006,7 @@ def count_nonzero(a, dim=None, **kwargs):
         counts along `dim`.
     """
     (dim, _) = _dimargs('count_nonzero', kwargs, dim=dim)
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if sps.issparse(m):
         raise _sparse_dense_error('count_nonzero')
@@ -3080,7 +3114,7 @@ def norm(a, ord=None, dim=None, keepdim=False, **kwargs):
         ``False``.
     """
     (dim, keepdim) = _dimargs('norm', kwargs, dim=dim, keepdim=keepdim)
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if sps.issparse(m):
         raise _sparse_dense_error('norm')
@@ -3095,7 +3129,7 @@ def norm(a, ord=None, dim=None, keepdim=False, **kwargs):
                 axes = dim if isinstance(dim, (tuple, list)) else (dim,)
                 rmag = np.expand_dims(
                     rmag, tuple(ax % m.ndim for ax in axes))
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def diag(a, offset=0):
@@ -3110,13 +3144,13 @@ def diag(a, offset=0):
         Which diagonal: ``0`` (the default) is the main one, positive is above
         it, and negative is below it.
     """
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if sps.issparse(m):
         raise _sparse_dense_error('diag')
     rmag = (torch.diag(m, diagonal=offset) if torch.is_tensor(m)
             else np.diag(m, k=offset))
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def diagonal(a, offset=0, dim1=0, dim2=1):
@@ -3132,14 +3166,14 @@ def diagonal(a, offset=0, dim1=0, dim2=1):
     dim2 : int, optional
         The second dimension to take the diagonal of. The default is ``1``.
     """
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if sps.issparse(m):
         raise _sparse_dense_error('diagonal')
     rmag = (torch.diagonal(m, offset=offset, dim1=dim1, dim2=dim2)
             if torch.is_tensor(m)
             else np.diagonal(m, offset=offset, axis1=dim1, axis2=dim2))
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def tril(a, diagonal=0):
@@ -3152,11 +3186,11 @@ def tril(a, diagonal=0):
         The diagonal above which to zero out the elements; the default is
         ``0``, the main diagonal.
     """
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     rmag = (torch.tril(m, diagonal=diagonal) if torch.is_tensor(m)
             else np.tril(m, k=diagonal))
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def triu(a, diagonal=0):
@@ -3169,22 +3203,22 @@ def triu(a, diagonal=0):
         The diagonal below which to zero out the elements; the default is
         ``0``, the main diagonal.
     """
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     rmag = (torch.triu(m, diagonal=diagonal) if torch.is_tensor(m)
             else np.triu(m, k=diagonal))
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 @docwrap(format='numpy', inheritparams=_doc_params, inheritreturns=_doc_returns_quantity)
 def trace(a):
     """Returns the sum of the diagonal of the 2-dimensional `a`, keeping the
     units (``numpy.trace`` / ``torch.trace``)."""
-    a = quant(a)
+    a = _as_quantity(a)
     m = a.m
     if sps.issparse(m):
         raise _sparse_dense_error('trace')
     rmag = torch.trace(m) if torch.is_tensor(m) else np.trace(m)
-    return quant(rmag, a.units)
+    return _new_quantity(rmag, a.units)
 
 @docwrap(format='numpy', inheritparams=_doc_params)
 def outer(a, b):
@@ -3203,8 +3237,8 @@ def outer(a, b):
     immlib.Quantity
         The outer product, in the product of `a`'s and `b`'s units.
     """
-    a = quant(a)
-    b = quant(b)
+    a = _as_quantity(a)
+    b = _as_quantity(b)
     (ma, mb) = (a.m, b.m)
     if np.ndim(ma) != 1 or np.ndim(mb) != 1:
         raise ValueError(
@@ -3215,7 +3249,7 @@ def outer(a, b):
         rmag = torch.outer(ma, mb)
     else:
         rmag = np.outer(ma, mb)
-    return quant(rmag, _unit_product(a, b))
+    return _new_quantity(rmag, _unit_product(a, b))
 
 @docwrap(format='numpy', inheritparams=_doc_params)
 def inner(a, b):
@@ -3230,15 +3264,15 @@ def inner(a, b):
     immlib.Quantity
         The inner product, in the product of `a`'s and `b`'s units.
     """
-    a = quant(a)
-    b = quant(b)
+    a = _as_quantity(a)
+    b = _as_quantity(b)
     (ma, mb) = (a.m, b.m)
     if torch.is_tensor(ma) or torch.is_tensor(mb):
         (ma, mb) = _promote_tensors((ma, mb))
         rmag = torch.inner(ma, mb)
     else:
         rmag = np.inner(ma, mb)
-    return quant(rmag, _unit_product(a, b))
+    return _new_quantity(rmag, _unit_product(a, b))
 
 @docwrap(format='numpy', inheritparams=_doc_params)
 def cross(a, b, dim=-1):
@@ -3258,15 +3292,15 @@ def cross(a, b, dim=-1):
     immlib.Quantity
         The cross product, in the product of `a`'s and `b'`s units.
     """
-    a = quant(a)
-    b = quant(b)
+    a = _as_quantity(a)
+    b = _as_quantity(b)
     (ma, mb) = (a.m, b.m)
     if torch.is_tensor(ma) or torch.is_tensor(mb):
         (ma, mb) = _promote_tensors((ma, mb))
         rmag = torch.linalg.cross(ma, mb, dim=dim)
     else:
         rmag = np.cross(ma, mb, axisa=dim, axisb=dim, axisc=dim)
-    return quant(rmag, _unit_product(a, b))
+    return _new_quantity(rmag, _unit_product(a, b))
 
 @docwrap(format='numpy', inheritparams=_doc_params)
 def tensordot(a, b, dims=2):
@@ -3284,15 +3318,15 @@ def tensordot(a, b, dims=2):
     immlib.Quantity
         The contraction, in the product of `a`'s and `b`'s units.
     """
-    a = quant(a)
-    b = quant(b)
+    a = _as_quantity(a)
+    b = _as_quantity(b)
     (ma, mb) = (a.m, b.m)
     if torch.is_tensor(ma) or torch.is_tensor(mb):
         (ma, mb) = _promote_tensors((ma, mb))
         rmag = torch.tensordot(ma, mb, dims=dims)
     else:
         rmag = np.tensordot(ma, mb, axes=dims)
-    return quant(rmag, _unit_product(a, b))
+    return _new_quantity(rmag, _unit_product(a, b))
 
 
 @docwrap(format='numpy')
